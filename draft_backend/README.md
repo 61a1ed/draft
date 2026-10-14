@@ -74,9 +74,10 @@ using Google's stable `sub`; subsequent logins update its display name. This
 means open **Google-based** registration, not email/password registration.
 Only `openid profile` is requested. Google tokens are not stored in the session.
 
-The callback returns JSON containing `user`, `csrf_token`, and `expires_at`, and
-sets an HttpOnly, SameSite=Lax signed session cookie. `GET /auth/me` returns the
-same information; `POST /auth/logout` clears the cookie. Sessions have a fixed
+The callback sets an HttpOnly, SameSite=Lax signed session cookie and redirects
+to `PUBLIC_BASE_URL/`. Expected sign-in failures redirect there with an
+`auth_error` code for the frontend to display. `GET /auth/me` returns `user`,
+`csrf_token`, and `expires_at`; `POST /auth/logout` clears the cookie. Sessions have a fixed
 expiry (24 hours by default, configurable with `SESSION_TTL_SECONDS`). They are
 stateless: logout clears this browser's cookie, with no server-side session
 revocation table. Close existing event streams on logout or account switching.

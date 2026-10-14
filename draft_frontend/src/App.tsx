@@ -24,7 +24,6 @@ import {
 } from 'lucide-react'
 import { api, ApiError, errorMessage } from './lib/api'
 import { useDraft } from './lib/useDraft'
-import { inspectGooglePopup } from './lib/oauth'
 import type { Draftable, LeagueSnapshot, Session, Team } from './lib/types'
 import { Catalog, PokemonImage } from './components/Catalog'
 import { Modal } from './components/Modal'
@@ -177,74 +176,26 @@ function SignIn({
   onConnect: (session?: Session) => Promise<void>
   onClose: () => void
 }) {
-  const [error, setError] = useState('')
+  const [error, setError] = useState(() => {
+    const code = new URLSearchParams(window.location.search).get('auth_error')
+    return code ? new ApiError(400, code).message : ''
+  })
   const [busy, setBusy] = useState(false)
-  const [waiting, setWaiting] = useState(false)
   const [username, setUsername] = useState('alice')
-  const popup = useRef<Window | null>(null)
-  const started = useRef(0)
   const mounted = useRef(true)
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('auth_error')) {
+      url.searchParams.delete('auth_error')
+      window.history.replaceState(null, '', url)
+    }
+  }, [])
   useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
     }
   }, [])
-  useEffect(() => {
-    if (!waiting) return
-    let active = true
-    let checking = false
-    const timer = window.setInterval(async () => {
-      if (checking) return
-      if (!popup.current) return
-      if (Date.now() - started.current > 180000) {
-        setWaiting(false)
-        setError('Sign-in was not completed. You can try again.')
-        popup.current.close()
-        return
-      }
-      const result = inspectGooglePopup(popup.current, window.location.origin)
-      // /auth/me clears unauthenticated sessions in this backend. Do not poll it
-      // while Google still needs the OAuth state cookie in the popup.
-      if (result.status === 'pending') return
-      if (result.status === 'error') {
-        setWaiting(false)
-        setError(result.message ?? 'Google sign-in failed. Please try again.')
-        popup.current.close()
-        return
-      }
-      checking = true
-      try {
-        const session = await api.session()
-        if (!active) return
-        await onConnect(session)
-        if (!active) return
-        popup.current?.close()
-        setWaiting(false)
-        onClose()
-      } catch (cause) {
-        if (!active) return
-        setWaiting(false)
-        setError(
-          cause instanceof ApiError && cause.status === 401
-            ? 'Sign-in was not completed. You can try again.'
-            : errorMessage(cause),
-        )
-      } finally {
-        checking = false
-      }
-    }, 1200)
-    return () => {
-      active = false
-      clearInterval(timer)
-    }
-  }, [waiting, onConnect, onClose])
-  useEffect(
-    () => () => {
-      popup.current?.close()
-    },
-    [],
-  )
   const testLogin = async (event: FormEvent) => {
     event.preventDefault()
     setBusy(true)
@@ -269,30 +220,12 @@ function SignIn({
       )}
       <button
         className="button google-button"
-        disabled={waiting || busy}
-        onClick={() => {
-          setError('')
-          popup.current = window.open(
-            '/auth/google',
-            'draft-google-login',
-            'popup,width=500,height=680',
-          )
-          if (!popup.current) {
-            setError('Allow pop-ups for this site, then try again.')
-            return
-          }
-          started.current = Date.now()
-          setWaiting(true)
-        }}
+        disabled={busy}
+        onClick={() => window.location.assign('/auth/google')}
       >
         <span className="google-mark">G</span>
-        {waiting ? 'Waiting for Google sign-in…' : 'Continue with Google'}
+        Continue with Google
       </button>
-      {waiting && (
-        <p className="muted">
-          Complete sign-in in the new window. This room will update automatically.
-        </p>
-      )}
       <button
         className="button text-button full-width"
         disabled={busy}
@@ -322,7 +255,7 @@ function SignIn({
               <option value="carol">Carol</option>
             </select>
           </label>
-          <button className="button secondary full-width" disabled={busy || waiting}>
+          <button className="button secondary full-width" disabled={busy}>
             {busy ? 'Connecting…' : 'Use test account'}
           </button>
         </form>
@@ -338,7 +271,9 @@ export default function App() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' })
   }, [view])
-  const [signIn, setSignIn] = useState(false)
+  const [signIn, setSignIn] = useState(() =>
+    new URLSearchParams(window.location.search).has('auth_error'),
+  )
   const [create, setCreate] = useState(false)
   const [help, setHelp] = useState(false)
   const [selected, setSelected] = useState<SelectedPick | null>(null)

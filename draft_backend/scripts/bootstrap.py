@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -19,23 +18,11 @@ PROJECT = Path(__file__).resolve().parents[1]
 ROLES = ("dl_owner", "dl_api", "dl_auth", "dl_gateway")
 
 
-def schema_body() -> str:
-    """Keep the shipped SQL intact, but let bootstrap own its transaction."""
-    source = (PROJECT / "sql" / "schema.sql").read_text(encoding="utf-8")
-    # Only the two standalone wrapper lines are removed. PL/pgSQL BEGIN/END
-    # statements and the source file itself are left untouched.
-    if len(re.findall(r"(?m)^BEGIN;\s*$", source)) != 1:
-        raise RuntimeError("Expected exactly one outer BEGIN; in sql/schema.sql")
-    if len(re.findall(r"(?m)^COMMIT;\s*$", source)) != 1:
-        raise RuntimeError("Expected exactly one outer COMMIT; in sql/schema.sql")
-    return re.sub(r"(?m)^(?:BEGIN|COMMIT);[ \t]*$", "", source)
-
-
 def bootstrap(conninfo: str, gateway_password: str) -> None:
     """Atomically provision fresh roles, schema, and grants; never print secrets."""
     if not gateway_password or "\x00" in gateway_password:
         raise ValueError("A nonempty gateway password without NUL is required")
-    source = schema_body()
+    source = (PROJECT / "sql" / "schema.sql").read_text(encoding="utf-8")
     grants = (PROJECT / "sql" / "grants.sql").read_text(encoding="utf-8")
     with psycopg.connect(conninfo) as conn:
         if conn.info.server_version < 160000:

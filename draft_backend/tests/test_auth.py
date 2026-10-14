@@ -105,8 +105,13 @@ def test_google_callback_registers_only_verified_identity_and_drops_provider_tok
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(auth, "_login", capture_session)
         with TestClient(app) as client:
-            response = client.get("/auth/google/callback?code=example&state=example")
-            assert response.status_code == 200
+            response = client.get(
+                "/auth/google/callback?code=example&state=example&next=https://other.example",
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+            assert response.headers["location"] == "https://draft.example/"
+            assert response.headers["cache-control"] == "no-store"
             assert client.get("/auth/me").status_code == 200
     app.state.db.register_google.assert_awaited_once_with("google-subject", "Alice")
     assert set(captured) == {"user_id", "expires_at", "csrf_token"}
@@ -119,7 +124,11 @@ def test_failed_oidc_validation_never_registers_or_logs_in():
     )
     app.state.oauth = SimpleNamespace(create_client=lambda _: google)
     with TestClient(app) as client:
-        assert client.get("/auth/google/callback").status_code == 400
+        response = client.get("/auth/google/callback", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == (
+            "https://draft.example/?auth_error=google_login_failed"
+        )
         assert client.get("/auth/me").status_code == 401
     app.state.db.register_google.assert_not_awaited()
 
@@ -134,7 +143,12 @@ def test_invalid_or_fixture_google_subject_is_rejected(subject):
     )
     app.state.oauth = SimpleNamespace(create_client=lambda _: google)
     with TestClient(app) as client:
-        assert client.get("/auth/google/callback").status_code == 400
+        response = client.get("/auth/google/callback", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == (
+            "https://draft.example/?auth_error=google_identity_invalid"
+        )
+        assert client.get("/auth/me").status_code == 401
     app.state.db.register_google.assert_not_awaited()
 
 
@@ -146,3 +160,31 @@ def test_session_validation_rejects_bad_types():
     ):
         request = Request({"type": "http", "session": session})
         assert not auth.session_valid(request)
+
+
+@pytest.mark.parametrize("path", ["/auth/google", "/auth/google/callback"])
+def test_unconfigured_google_returns_to_app_with_error(path):
+    with TestClient(make_app()) as client:
+        response = client.get(path, follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == (
+            "https://draft.example/?auth_error=google_login_not_configured"
+        )
+        assert response.headers["cache-control"] == "no-store"
+
+
+def test_google_login_redirects_to_provider_with_configured_callback():
+    from starlette.responses import RedirectResponse
+
+    app = make_app()
+    google = SimpleNamespace(
+        authorize_redirect=AsyncMock(return_value=RedirectResponse("https://accounts.google.com/"))
+    )
+    app.state.oauth = SimpleNamespace(create_client=lambda _: google)
+    with TestClient(app) as client:
+        response = client.get("/auth/google", follow_redirects=False)
+        assert response.headers["location"] == "https://accounts.google.com/"
+        assert response.headers["cache-control"] == "no-store"
+    assert google.authorize_redirect.await_args.args[1] == (
+        "https://draft.example/auth/google/callback"
+    )

@@ -56,12 +56,14 @@ uv run python scripts/scenarios.py --root .testdb-dev apply --file path/to/my-st
 | `completed` | Finished two-round draft; Alice can undo to reopen it |
 
 The files contain ordinary SQL inserts/updates, with no Python fixture model and
-no HTTP replay. Each built-in file also runs directly in `psql` as the local test
-administrator. The small runner loads credentials from the marked cluster,
-checks the database test marker, selects `dl_owner`, and executes the SQL in a
-transaction. Applying several built-ins is atomic. Custom files are trusted admin
-SQL: the marker identifies a disposable database, not a SQL sandbox. They may
-include one outer BEGIN/COMMIT pair, but may not manage additional transactions.
+no HTTP replay. The runner loads credentials from the marked cluster, checks the
+database test marker, selects `dl_owner`, creates the scenario registry if needed,
+and executes all selected files in one transaction. Fixture files, including
+custom `--file` inputs, must not contain
+transaction commands such as `BEGIN`, `COMMIT`, or `ROLLBACK`. PL/pgSQL blocks
+inside `DO $$ ... $$` are fine. This is a convention for trusted SQL, not something
+the runner parses or enforces. Load files through `scenarios.py`; their shared
+setup belongs to the runner.
 
 Built-in reloads replace only leagues registered under their slug in
 `dl_test.scenario`, even if you renamed those leagues in the UI. Other leagues,
@@ -79,15 +81,13 @@ The built-ins deliberately reuse the existing SQL snake-position function.
 
 For an in-place edit to a live league, increment its revision in the same
 transaction as the data change. Updating the league invokes the existing PostgreSQL
-notification trigger, and the frontend refetches its snapshot. Example:
+notification trigger, and the frontend refetches its snapshot. Example file for
+`scenarios.py apply --file`:
 
 ```sql
-BEGIN;
-SET LOCAL ROLE dl_owner;
 UPDATE dl.league
 SET name = 'My updated draft', revision = revision + 1
 WHERE id = (SELECT league_id FROM dl_test.scenario WHERE slug = 'live');
-COMMIT;
 ```
 
 Catalog edits and new/deleted league lists have no global event: click **Refresh all
@@ -161,9 +161,9 @@ This is a one-time bootstrap, not a migration runner. It refuses pre-existing
 and silently reusing unknown accounts would be unsafe. Use a dedicated cluster
 or explicitly provision equivalent roles/grants yourself when integrating with
 an existing managed PostgreSQL installation. The whole installation is one
-transaction: bootstrap removes the supplied schema's outer BEGIN/COMMIT lines
-in memory and leaves `sql/schema.sql` unchanged. It executes schema DDL as the
-non-superuser `dl_owner`, installs explicit grants, and revokes the temporary
+transaction owned by bootstrap; `sql/schema.sql` contains no transaction commands.
+It executes schema DDL as the non-superuser `dl_owner`, installs explicit grants,
+and revokes the temporary
 database CREATE privilege afterward. It does not install test fixtures or a
 test marker.
 

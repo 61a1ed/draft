@@ -68,10 +68,9 @@ Production builds never display this control.
 
 For Google login, configure the backend OAuth credentials and register the
 frontend-origin callback `http://127.0.0.1:5173/auth/google/callback` with Google.
-Sign-in opens a popup because the existing backend returns JSON at its callback.
-The app watches for the popup to return to its same-origin callback, then checks
-the session and reconnects. It does not poll the session endpoint while Google
-is still using the OAuth state cookie.
+Sign-in navigates the current tab to Google. The backend callback establishes the
+session and redirects to the app, which loads the session normally. Expected
+sign-in failures return to the app with a readable error and a retry option.
 Google OAuth itself requires real credentials and was not exercised during
 frontend development.
 

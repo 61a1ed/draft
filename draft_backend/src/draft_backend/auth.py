@@ -19,7 +19,7 @@ from authlib.integrations.starlette_client import OAuth
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from joserfc.errors import JoseError
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 GOOGLE_METADATA_URL = "https://accounts.google.com/.well-known/openid-configuration"
 
@@ -61,21 +61,20 @@ def _session_response(request: Request, user: Mapping) -> JSONResponse:
     )
 
 
-def _login(request: Request, user: Mapping) -> JSONResponse:
+def _login(request: Request, user: Mapping) -> None:
     request.session.clear()
     request.session.update(
         user_id=user["id"],
         expires_at=int(time.time()) + request.app.state.settings.session_ttl_seconds,
         csrf_token=secrets.token_urlsafe(32),
     )
-    return _session_response(request, user)
 
 
-def _google(request: Request):
-    client = request.app.state.oauth.create_client("google")
-    if client is None:
-        raise HTTPException(503, "google_login_not_configured")
-    return client
+def _google_redirect(settings, error: str | None = None) -> RedirectResponse:
+    destination = settings.public_base_url.rstrip("/") + "/"
+    if error:
+        destination += "?auth_error=" + error
+    return RedirectResponse(destination, status_code=303, headers={"Cache-Control": "no-store"})
 
 
 def install_auth(app: FastAPI) -> None:
@@ -100,7 +99,9 @@ def install_auth(app: FastAPI) -> None:
 
     @router.get("/google")
     async def google_login(request: Request):
-        client = _google(request)
+        client = request.app.state.oauth.create_client("google")
+        if client is None:
+            return _google_redirect(settings, "google_login_not_configured")
         # Bound cookie size if someone abandons and restarts sign-in repeatedly.
         for key in list(request.session):
             if key.startswith("_state_google_"):
@@ -108,26 +109,28 @@ def install_auth(app: FastAPI) -> None:
         callback = settings.public_base_url.rstrip("/") + "/auth/google/callback"
         try:
             response = await client.authorize_redirect(request, callback)
-        except (httpx.RequestError, httpx.HTTPStatusError) as exc:
-            raise HTTPException(502, "google_unavailable") from exc
+        except (httpx.RequestError, httpx.HTTPStatusError):
+            return _google_redirect(settings, "google_unavailable")
         response.headers["Cache-Control"] = "no-store"
         return response
 
     @router.get("/google/callback")
     async def google_callback(request: Request):
-        client = _google(request)
+        client = request.app.state.oauth.create_client("google")
+        if client is None:
+            return _google_redirect(settings, "google_login_not_configured")
         try:
             # Authlib checks state and validates the ID token's signature,
             # issuer, audience, expiry and nonce using Google's discovery/JWKS.
             token = await client.authorize_access_token(request)
-        except (OAuthError, JoseError) as exc:
-            raise HTTPException(400, "google_login_failed") from exc
-        except (httpx.RequestError, httpx.HTTPStatusError) as exc:
-            raise HTTPException(502, "google_unavailable") from exc
+        except (OAuthError, JoseError):
+            return _google_redirect(settings, "google_login_failed")
+        except (httpx.RequestError, httpx.HTTPStatusError):
+            return _google_redirect(settings, "google_unavailable")
 
         claims = token.get("userinfo")
         if not token.get("id_token") or not isinstance(claims, Mapping):
-            raise HTTPException(400, "google_identity_missing")
+            return _google_redirect(settings, "google_identity_missing")
         subject = claims.get("sub")
         if (
             not isinstance(subject, str)
@@ -135,11 +138,12 @@ def install_auth(app: FastAPI) -> None:
             or len(subject) > 255
             or subject.startswith("test:")
         ):
-            raise HTTPException(400, "google_identity_invalid")
+            return _google_redirect(settings, "google_identity_invalid")
         name = claims.get("name")
         display_name = name.strip() if isinstance(name, str) and name.strip() else "Google user"
         user = await request.app.state.db.register_google(subject, display_name)
-        return _login(request, user)
+        _login(request, user)
+        return _google_redirect(settings)
 
     @router.get("/me")
     async def me(request: Request, user_id: int = Depends(require_user)):
@@ -174,6 +178,7 @@ def install_auth(app: FastAPI) -> None:
             user = await request.app.state.db.test_user(body.username)
             if user is None:
                 raise HTTPException(404, "test_user_not_found")
-            return _login(request, user)
+            _login(request, user)
+            return _session_response(request, user)
 
     app.include_router(router)

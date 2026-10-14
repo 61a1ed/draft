@@ -12,7 +12,6 @@ import pytest
 # Administrative scripts intentionally live outside the installed server package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import testdb  # noqa: E402
-from scripts.bootstrap import schema_body  # noqa: E402
 
 
 def mark(root: Path, pg_bin: Path) -> None:
@@ -31,16 +30,6 @@ def mark(root: Path, pg_bin: Path) -> None:
             }
         )
     )
-
-
-def test_schema_wrapper_only_removed_in_memory():
-    path = testdb.PROJECT / "sql" / "schema.sql"
-    original = path.read_bytes()
-    body = schema_body()
-    assert "\nBEGIN;\n" not in body
-    assert "\nCOMMIT;\n" not in body
-    assert "BEGIN\n    PERFORM admit" in body
-    assert path.read_bytes() == original
 
 
 def test_init_refuses_nonempty_root(tmp_path, monkeypatch):

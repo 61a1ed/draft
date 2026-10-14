@@ -1,3 +1,4 @@
+-- Loaded by scripts/bootstrap.py, which owns the installation transaction.
 -- Run as a dedicated non-superuser schema owner; API role must be different.
 -- All API writes MUST run in SERIALIZABLE transactions (checked below).
 -- Retry serialization failures as whole transactions with unchanged arguments.
@@ -5,7 +6,6 @@
 -- Read policy: commissioner and team managers see the entire league. Signed-in
 -- users may read the global catalog and user display names. No invitations yet.
 -- Catalog provisioning is administrative; no API writes to those tables.
-BEGIN;
 CREATE SCHEMA dl;
 REVOKE ALL ON SCHEMA dl FROM PUBLIC;
 
@@ -370,7 +370,6 @@ FOR EACH ROW EXECUTE FUNCTION dl.notify_league();
 
 REVOKE ALL ON ALL TABLES IN SCHEMA dl FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA dl FROM PUBLIC;
-COMMIT;
 
 -- Deployment (dl_api is a separate, already-created NOLOGIN role).
 -- Configure the request transaction as SERIALIZABLE before any query.

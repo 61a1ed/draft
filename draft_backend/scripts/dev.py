@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -39,6 +38,7 @@ def read_environment(path: Path) -> dict[str, str]:
 
 
 def prepare(root: Path, pg_bin: Path | None, port: int) -> None:
+    catalog = None
     fresh = not (root / testdb.MARKER).exists()
     if fresh:
         if pg_bin is None:
@@ -47,7 +47,7 @@ def prepare(root: Path, pg_bin: Path | None, port: int) -> None:
         if pg_bin is None:
             raise RuntimeError("First run requires --pg-bin pointing to PostgreSQL binaries")
         # Validate the catalog before provisioning anything.
-        load_catalog(PROJECT.parent / "pokemon_catalog.csv", PROJECT.parent / "showdown")
+        catalog = load_catalog(PROJECT.parent / "pokemon_catalog.csv", PROJECT.parent / "showdown")
         testdb.init(root, pg_bin, port)
     marker = testdb.load_marker(root)
     binaries = Path(marker["pg_bin"])
@@ -57,7 +57,7 @@ def prepare(root: Path, pg_bin: Path | None, port: int) -> None:
         # Initialize a root once for exploration. A failed import/seed can be
         # retried; each operation is transactional.
         database = scenarios.prepare(root)
-        pokemon, images = load_catalog(
+        pokemon, images = catalog if catalog is not None else load_catalog(
             PROJECT.parent / "pokemon_catalog.csv", PROJECT.parent / "showdown"
         )
         admin_url = read_environment(root / "admin.env")["ADMIN_DATABASE_URL"]
@@ -96,16 +96,6 @@ def child_environments(root: Path, api_port: int, web_port: int) -> tuple[dict, 
     return backend, frontend
 
 
-def available_port(port: int) -> None:
-    with socket.socket() as probe:
-        try:
-            probe.bind(("127.0.0.1", port))
-        except OSError as exc:
-            raise RuntimeError(
-                f"Port {port} is in use; stop that server or choose another port"
-            ) from exc
-
-
 def wait_ready(process: subprocess.Popen, url: str, timeout: float = 30) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -128,8 +118,6 @@ def serve(root: Path, api_port: int, web_port: int) -> None:
         raise RuntimeError("Install Node.js and run npm ci in draft_frontend first")
     if api_port == web_port:
         raise RuntimeError("API and frontend ports must differ")
-    available_port(api_port)
-    available_port(web_port)
     backend_env, frontend_env = child_environments(root, api_port, web_port)
     children = []
     logs = []
@@ -145,7 +133,7 @@ def serve(root: Path, api_port: int, web_port: int) -> None:
             ),
             (
                 "frontend",
-                [node, str(vite), "--host", "127.0.0.1", "--port", str(web_port)],
+                [node, str(vite), "--host", "127.0.0.1", "--port", str(web_port), "--strictPort"],
                 FRONTEND,
                 frontend_env,
                 f"http://127.0.0.1:{web_port}",

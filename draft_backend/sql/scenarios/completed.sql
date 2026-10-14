@@ -1,21 +1,6 @@
 -- Scenario: Completed draft
--- Run as the administrator of a disposable test database. This file is plain SQL.
+-- Load with scripts/scenarios.py; the runner owns the transaction.
 -- Reload replaces only this tracked fixture; users, catalog, and other leagues survive.
-BEGIN;
-DO $$
-BEGIN
-    IF to_regclass('dl_test.marker') IS NULL THEN
-        RAISE EXCEPTION 'Scenario fixtures require a marked test database';
-    END IF;
-    IF NOT EXISTS (SELECT FROM dl_test.marker WHERE singleton) THEN
-        RAISE EXCEPTION 'Scenario fixtures require a marked test database';
-    END IF;
-END $$;
-SET LOCAL ROLE dl_owner;
-CREATE TABLE IF NOT EXISTS dl_test.scenario (
-    slug text PRIMARY KEY,
-    league_id integer NOT NULL UNIQUE REFERENCES dl.league(id)
-);
 DO $$
 BEGIN
     IF (SELECT count(*) FROM dl.app_user
@@ -76,5 +61,3 @@ WHERE f.slug = 'completed';
 -- A supported live SQL edit must touch the league so SSE subscribers refetch it.
 UPDATE dl.league SET revision = revision + 1
 WHERE id = (SELECT league_id FROM dl_test.scenario WHERE slug = 'completed');
-COMMIT;
-

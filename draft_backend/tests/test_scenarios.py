@@ -50,43 +50,6 @@ def test_prepare_rejects_connection_outside_marked_cluster(tmp_path, overrides):
         scenarios.prepare(root)
 
 
-def test_outer_transaction_handling_preserves_procedure_blocks():
-    body = "DO $$\nBEGIN\n    PERFORM 1;\nEND $$;\n"
-    assert body.strip() in scenarios.transaction_body(
-        "-- fixture\nBEGIN;\n" + body + "COMMIT;\n"
-    )
-    assert scenarios.transaction_body(body) == body
-    with pytest.raises(ValueError, match="only one outer"):
-        scenarios.transaction_body("BEGIN;\nCOMMIT;\nBEGIN;\nCOMMIT;\n")
-    with pytest.raises(ValueError, match="only one outer"):
-        scenarios.transaction_body("BEGIN;\nSELECT 1;\nCOMMIT;\nSELECT 2;\n")
-
-
-@pytest.mark.parametrize("source", [
-    "SELECT 1; COMMIT; SELECT 1 / 0;",
-    "SELECT 1; COMMIT -- inline comment\n; SELECT 1 / 0;",
-    "SELECT 1; END; SELECT 1 / 0;",
-    "SELECT 1; ABORT; SELECT 1 / 0;",
-    "SELECT 1; START TRANSACTION; SELECT 1 / 0;",
-    "SELECT 1; COMMIT AND CHAIN; SELECT 1 / 0;",
-    "SELECT 1; PREPARE TRANSACTION 'early'; SELECT 1 / 0;",
-    "BEGIN; SELECT 1; /* nested /* comment */ */ COMMIT; SELECT 2;",
-])
-def test_custom_sql_cannot_commit_partway_through_file(source):
-    with pytest.raises(ValueError, match="only one outer"):
-        scenarios.transaction_body(source)
-
-
-def test_transaction_scanner_ignores_quoted_bodies_and_comments():
-    source = (
-        "/* COMMIT; */ BEGIN; SELECT 'COMMIT;', \"END\", E'escaped\\\'COMMIT;', "
-        "$$END;$$; DO $body$ BEGIN PERFORM 1; END $body$; -- ABORT;\nCOMMIT;"
-    )
-    body = scenarios.transaction_body(source)
-    assert "DO $body$ BEGIN PERFORM 1; END $body$;" in body
-    assert body.startswith("/* COMMIT; */ ")
-
-
 def test_invalid_selection_never_connects(tmp_path, monkeypatch):
     def refuse_connect(*args, **kwargs):
         pytest.fail("invalid scenario selection must not connect")
