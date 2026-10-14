@@ -82,7 +82,7 @@ frontend development.
 - Pick confirmation showing the target team and resulting budget; optional
   commissioner point waiver; undo with revision protection.
 - Team rosters, charged pick prices, and history including undone selections.
-- SSE snapshot/invalidation updates, automatic reconnect, monotonic revisions,
+- SSE invalidations with HTTP snapshot reads, automatic reconnect, monotonic revisions,
   session expiry/access revocation handling, and stream cleanup on account changes.
 - Responsive navigation, keyboard-accessible native dialogs, labeled forms,
   and reduced-motion support.

@@ -1,45 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { LeagueSnapshot, Session } from './types'
+import type { Session } from './types'
 
 const session: Session = {
   user: { id: 7, display_name: 'Alice' },
   csrf_token: 'session-csrf-token',
   expires_at: 2_000_000_000,
-}
-
-const snapshot: LeagueSnapshot = {
-  league_id: 3,
-  revision: 4,
-  server_now: '2026-10-13T12:00:00Z',
-  league: {
-    id: 3,
-    name: 'Autumn League',
-    commissioner_user_id: 7,
-    roster_size: 3,
-    pick_seconds: 60,
-    revision: 4,
-    created_at: '2026-10-13T12:00:00Z',
-    started_at: null,
-    turn_started_at: null,
-  },
-  state: {
-    league_id: 3,
-    revision: 4,
-    status: 'setup',
-    roster_size: 3,
-    team_count: 0,
-    active_pick_count: 0,
-    required_pick_count: 0,
-    can_start: false,
-    next_pick_number: null,
-    next_team_id: null,
-    last_pick_id: null,
-    deadline: null,
-  },
-  teams: [],
-  rosters: [],
-  history: [],
-  actions: [],
 }
 
 function json(body: unknown, status = 200) {
@@ -204,55 +169,27 @@ describe('backend API contract', () => {
 })
 
 describe('league event stream', () => {
-  it('parses snapshots and invalidations, reports reconnecting, and closes on access revocation', async () => {
+  it('refreshes on every invalidation and exposes reconnects without parsing payloads', async () => {
     vi.stubGlobal('EventSource', FakeEventSource)
     const { subscribeLeague } = await import('./api')
-    const handlers = {
-      onSnapshot: vi.fn(),
-      onChanged: vi.fn(),
-      onStatus: vi.fn(),
-      onAccessRevoked: vi.fn(),
-    }
+    const handlers = { onInvalidate: vi.fn(), onStatus: vi.fn() }
     const cleanup = subscribeLeague(3, handlers)
     const source = FakeEventSource.instances[0]
-
     expect(source.url).toBe('/api/leagues/3/events')
-    expect(handlers.onStatus).toHaveBeenCalledWith('connecting')
     source.dispatchEvent(new Event('open'))
-    source.emit('snapshot', snapshot)
-    source.emit('changed', { league_id: 3, revision: 5 })
-    source.emit('reconnect', {})
-    expect(handlers.onSnapshot).toHaveBeenCalledWith(snapshot)
-    expect(handlers.onChanged).toHaveBeenCalledWith({ league_id: 3, revision: 5 })
+    expect(handlers.onStatus).toHaveBeenLastCalledWith('connected')
+    source.emit('invalidate', null)
+    source.emit('invalidate', null)
+    expect(handlers.onInvalidate).toHaveBeenCalledTimes(2)
+    source.dispatchEvent(new Event('error'))
     expect(handlers.onStatus).toHaveBeenLastCalledWith('reconnecting')
-
-    source.emit('access_revoked', {})
-    expect(handlers.onAccessRevoked).toHaveBeenCalledOnce()
-    expect(source.close).toHaveBeenCalledOnce()
-    expect(handlers.onStatus).toHaveBeenLastCalledWith('closed')
-    source.emit('snapshot', snapshot)
-    expect(handlers.onSnapshot).toHaveBeenCalledOnce()
+    expect(handlers.onInvalidate).toHaveBeenCalledTimes(3)
+    source.dispatchEvent(new Event('open'))
+    source.emit('invalidate', null)
+    expect(handlers.onInvalidate).toHaveBeenCalledTimes(4)
     cleanup()
+    source.emit('invalidate', null)
+    expect(handlers.onInvalidate).toHaveBeenCalledTimes(4)
     expect(source.close).toHaveBeenCalledOnce()
-  })
-
-  it('closes on session expiry and reports malformed messages without applying them', async () => {
-    vi.stubGlobal('EventSource', FakeEventSource)
-    const { subscribeLeague } = await import('./api')
-    const handlers = {
-      onSnapshot: vi.fn(),
-      onChanged: vi.fn(),
-      onError: vi.fn(),
-      onSignedOut: vi.fn(),
-    }
-    subscribeLeague(3, handlers)
-    const source = FakeEventSource.instances[0]
-
-    source.dispatchEvent(new MessageEvent('snapshot', { data: '{broken' }))
-    expect(handlers.onError).toHaveBeenCalledOnce()
-    expect(handlers.onSnapshot).not.toHaveBeenCalled()
-    source.emit('signed_out', {})
-    expect(source.close).toHaveBeenCalledOnce()
-    expect(handlers.onSignedOut).toHaveBeenCalledOnce()
   })
 })

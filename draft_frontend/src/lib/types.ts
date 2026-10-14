@@ -156,18 +156,9 @@ export interface RpcResult<T> {
   result: T
 }
 
-export interface LeagueChangedEvent {
-  league_id: number
-  revision: number
-}
-
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'closed'
 
 export interface LeagueEventHandlers {
-  onSnapshot: (snapshot: LeagueSnapshot) => void
-  onChanged: (event: LeagueChangedEvent) => void
+  onInvalidate: () => void
   onStatus?: (status: ConnectionStatus) => void
-  onSignedOut?: () => void
-  onAccessRevoked?: () => void
-  onError?: (error: Error) => void
 }

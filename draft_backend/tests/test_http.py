@@ -1,7 +1,5 @@
 """Exercise the HTTP/session boundary and SSE resynchronization without a server."""
 
-import json
-import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -132,59 +130,29 @@ def test_startup_refuses_test_login_on_an_unmarked_database(application):
     db.close.assert_awaited_once()
 
 
-async def test_sse_initial_snapshot_changes_resync_revocation_and_cleanup(application):
+async def test_sse_invalidations_keepalive_and_cleanup(application):
     app, db = application
-    hub = app.state.events = EventHub("unused")
-    hub.connected.set()
+    hub = app.state.events = EventHub("unused", "test_channel")
     app.state.db = db
-    current = {"league_id": 8, "revision": 1}
-    allowed = True
-
-    async def read(user, query, params=()):
-        if not allowed:
-            return []
-        if "league_snapshot" in query:
-            return [current.copy()]
-        return [{"revision": current["revision"]}]
-
-    db.read.side_effect = read
-    request = Request(
-        {
-            "type": "http",
-            "app": app,
-            "session": {
-                "user_id": 1,
-                "expires_at": int(time.time()) + 30,
-                "csrf_token": "test",
-            },
-        }
-    )
+    db.read.return_value = [{"id": 8}]
+    request = Request({"type": "http", "app": app, "session": {"expires_at": 0}})
     endpoint = next(
-        r.endpoint
-        for r in app.routes
+        r.endpoint for r in app.routes
         if getattr(r, "path", None) == "/api/leagues/{league_id}/events"
     )
     response = await endpoint(request, 8, 1)
     chunks = response.body_iterator
     assert await anext(chunks) == "retry: 2000\n\n"
-    assert "event: snapshot\n" in await anext(chunks)
+    assert await anext(chunks) == "event: invalidate\ndata: null\n\n"
     assert response.headers["x-accel-buffering"] == "no"
-    current["revision"] = 2
-    hub.publish(current)
-    changed = await anext(chunks)
-    assert "id: 2\nevent: changed\n" in changed
-    assert json.loads(changed.split("data: ")[1]) == current
-    # A dropped LISTEN connection forces a fresh snapshot after reconnecting.
-    hub.reset()
-    assert "event: snapshot\n" in await anext(chunks)
-    # Heartbeat repairs a lost notification by comparing current revision.
-    current["revision"] = 3
-    assert "event: changed\n" in await anext(chunks)
-    allowed = False
-    hub.publish(current)
-    assert "event: access_revoked\n" in await anext(chunks)
-    with pytest.raises(StopAsyncIteration):
-        await anext(chunks)
+    hub.invalidate("8")
+    assert "event: invalidate" in await anext(chunks)
+    hub.invalidate_all()
+    assert "event: invalidate" in await anext(chunks)
+    db.read.return_value = []
+    assert await anext(chunks) == ": keep-alive\n\n"
+    db.read.assert_awaited_once()
+    await chunks.aclose()
     assert not hub.subscribers
     with pytest.raises(HTTPException) as error:
         await endpoint(request, 8, 1)
@@ -192,47 +160,16 @@ async def test_sse_initial_snapshot_changes_resync_revocation_and_cleanup(applic
     assert not hub.subscribers
 
 
-async def test_sse_expiry_closes_stream(application):
-    app, db = application
-    app.state.events = EventHub("unused")
-    app.state.db = db
-    db.read.return_value = [{"league_id": 8, "revision": 1}]
-    request = Request(
-        {
-            "type": "http",
-            "app": app,
-            "session": {
-                "user_id": 1,
-                "expires_at": int(time.time()) + 30,
-                "csrf_token": "test",
-            },
-        }
-    )
-    endpoint = next(
-        r.endpoint
-        for r in app.routes
-        if getattr(r, "path", None) == "/api/leagues/{league_id}/events"
-    )
-    response = await endpoint(request, 8, 1)
-    chunks = response.body_iterator
-    await anext(chunks)
-    await anext(chunks)
-    request.session["expires_at"] = 0
-    assert "event: signed_out\n" in await anext(chunks)
-    await chunks.aclose()
-    assert not app.state.events.subscribers
-
-
-async def test_hub_coalesces_without_losing_required_reset():
-    hub = EventHub("unused")
-    queue = hub.subscribe(1)
-    hub.publish({"league_id": 1, "revision": 2})
-    hub.publish({"league_id": 1, "revision": 3})
-    assert queue.qsize() == 1
-    assert (await queue.get())["revision"] == 3
-    hub.reset()
-    hub.publish({"league_id": 1, "revision": 4})
-    assert await queue.get() is None
+async def test_hub_routes_and_bounds_pending_invalidations():
+    hub = EventHub("unused", "test_channel")
+    first, other = hub.subscribe("a"), hub.subscribe("b")
+    hub.invalidate("a")
+    hub.invalidate("a")
+    assert first.qsize() == 1
+    assert other.empty()
+    await first.get()
+    hub.invalidate_all()
+    assert first.qsize() == other.qsize() == 1
 
 
 @pytest.mark.parametrize("function", ["add_team", "update_team"])

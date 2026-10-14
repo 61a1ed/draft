@@ -4,7 +4,6 @@ import type {
   Draftable,
   DraftActionInput,
   League,
-  LeagueChangedEvent,
   LeagueEventHandlers,
   LeagueSnapshot,
   RpcResult,
@@ -161,40 +160,18 @@ export function subscribeLeague(id: number, handlers: LeagueEventHandlers): () =
     source.close()
     handlers.onStatus?.('closed')
   }
-  const parse = <T>(event: MessageEvent<string>, handle: (value: T) => void) => {
-    if (closed) return
-    let value: T
-    try {
-      value = JSON.parse(event.data) as T
-    } catch {
-      handlers.onError?.(new ApiError(200, 'invalid_response'))
-      return
-    }
-    handle(value)
-  }
   handlers.onStatus?.('connecting')
   source.addEventListener('open', () => {
     if (!closed) handlers.onStatus?.('connected')
   })
-  source.addEventListener('snapshot', (event) => parse<LeagueSnapshot>(event, handlers.onSnapshot))
-  source.addEventListener('changed', (event) =>
-    parse<LeagueChangedEvent>(event, handlers.onChanged),
-  )
-  source.addEventListener('signed_out', () => {
-    csrfToken = null
-    close()
-    handlers.onSignedOut?.()
-  })
-  source.addEventListener('access_revoked', () => {
-    close()
-    handlers.onAccessRevoked?.()
-  })
-  source.addEventListener('reconnect', () => {
-    if (!closed) handlers.onStatus?.('reconnecting')
+  source.addEventListener('invalidate', () => {
+    if (!closed) handlers.onInvalidate()
   })
   source.addEventListener('error', () => {
     if (closed) return
     handlers.onStatus?.(source.readyState === EventSource.CLOSED ? 'closed' : 'reconnecting')
+    // HTTP can explain an authorization failure that EventSource does not expose.
+    handlers.onInvalidate()
   })
   return close
 }

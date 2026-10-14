@@ -70,8 +70,7 @@ Built-in reloads replace only leagues registered under their slug in
 users, catalog rows, assets, and credentials survive. League/team/pick identities
 continue increasing: old tabs or in-flight requests cannot accidentally operate on
 a new fixture with reused IDs and lower revisions. Refresh selects a remaining
-league; select the reloaded scenario again from the list. An old event stream may
-report access removed before refresh. SQL failure rolls the replacement back.
+league; select the reloaded scenario again from the list. A subsequent snapshot request for the old league reports access removed. SQL failure rolls the replacement back.
 
 To create a new repeatable fixture, copy a built-in file and change every occurrence
 of its registry slug plus its name/data. Apply the copy with `--file`; no application

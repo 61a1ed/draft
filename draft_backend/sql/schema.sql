@@ -363,8 +363,7 @@ END $$;
 CREATE FUNCTION dl.notify_league() RETURNS trigger LANGUAGE plpgsql
 SET search_path = pg_catalog, dl, pg_temp AS $$
 BEGIN
-    PERFORM pg_notify('dl_changed',
-        json_build_object('league_id', NEW.id, 'revision', NEW.revision)::text);
+    PERFORM pg_notify('dl_changed', NEW.id::text);
     RETURN NEW;
 END $$;
 CREATE TRIGGER league_changed AFTER INSERT OR UPDATE ON dl.league

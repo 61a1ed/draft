@@ -127,7 +127,7 @@ def create_app(settings: Settings | None = None):
         db = app.state.db = Database(settings)
         # Successful immutable image reads live until this worker restarts.
         app.state.images = {}
-        hub = app.state.events = EventHub(settings.database_url)
+        hub = app.state.events = EventHub(settings.database_url, "dl_changed")
         await db.open()
         try:
             if settings.test_login_enabled and not await db.is_test_database():
@@ -281,57 +281,34 @@ def create_app(settings: Settings | None = None):
     @app.get("/api/leagues/{league_id}/events", tags=["events"])
     async def events(request: Request, league_id: int, user: User):
         hub = app.state.events
-        # Subscribe before reading the initial snapshot, closing the setup race.
-        queue = hub.subscribe(league_id)
+        # Subscribe before checking access so changes during setup remain pending.
+        topic = str(league_id)
+        queue = hub.subscribe(topic)
         try:
-            initial = await snapshot(user, league_id)
+            rows = await app.state.db.read(
+                user, "SELECT id FROM dl.league WHERE id = %s", (league_id,)
+            )
+            if not rows:
+                raise HTTPException(404, "league_not_found")
         except BaseException:
-            hub.unsubscribe(league_id, queue)
+            hub.unsubscribe(topic, queue)
             raise
 
         async def stream():
-            revision = initial["revision"]
             try:
                 yield "retry: 2000\n\n"
-                yield event("snapshot", initial, revision)
+                yield event("invalidate")
                 while True:
                     try:
-                        notice = await asyncio.wait_for(
+                        await asyncio.wait_for(
                             queue.get(), timeout=settings.sse_heartbeat_seconds
                         )
                     except TimeoutError:
-                        notice = "heartbeat"
-                    if not session_valid(request):
-                        yield event("signed_out", {})
-                        return
-                    try:
-                        rows = await app.state.db.read(
-                            user, "SELECT revision FROM dl.league WHERE id = %s", (league_id,)
-                        )
-                        if not rows:
-                            yield event("access_revoked", {})
-                            return
-                        if notice is None and hub.connected.is_set():
-                            current = await snapshot(user, league_id)
-                            revision = current["revision"]
-                            yield event("snapshot", current, revision)
-                        elif rows[0]["revision"] > revision:
-                            # Reading current revision also repairs missed notifications.
-                            revision = rows[0]["revision"]
-                            yield event(
-                                "changed", {"league_id": league_id, "revision": revision}, revision
-                            )
-                        else:
-                            yield ": keep-alive\n\n"
-                    except HTTPException:
-                        yield event("access_revoked", {})
-                        return
-                    except (psycopg.Error, PoolTimeout):
-                        # End the stream: EventSource reconnects and gets a snapshot.
-                        yield event("reconnect", {})
-                        return
+                        yield ": keep-alive\n\n"
+                    else:
+                        yield event("invalidate")
             finally:
-                hub.unsubscribe(league_id, queue)
+                hub.unsubscribe(topic, queue)
 
         return StreamingResponse(
             stream(),

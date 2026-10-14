@@ -166,38 +166,42 @@ export function useDraft() {
       setLeagues((previous) => previous.filter((item) => item.id !== leagueId))
       setError('You no longer have access to that league.')
     }
+    let retry: ReturnType<typeof setTimeout> | undefined
+    let refreshError = ''
     const refresh = async () => {
+      if (!valid()) return
+      clearTimeout(retry)
       try {
         const next = await api.snapshot(leagueId, abort.signal)
-        if (valid()) acceptSnapshot(next, token, leagueId)
+        if (valid()) {
+          acceptSnapshot(next, token, leagueId)
+          setError((previous) => (previous === refreshError ? '' : previous))
+        }
       } catch (cause) {
         if (!valid() || abort.signal.aborted) return
         if (cause instanceof ApiError && cause.status === 401) expireSession()
         else if (cause instanceof ApiError && cause.status === 404) revoked()
-        else setError(errorMessage(cause))
+        else {
+          refreshError = errorMessage(cause)
+          setError(refreshError)
+          if (!(cause instanceof ApiError) || cause.status >= 500) {
+            clearTimeout(retry)
+            retry = setTimeout(() => void refresh(), 2000)
+          }
+        }
       }
     }
-    void refresh()
     const stop = subscribeLeague(leagueId, {
-      onSnapshot: (next) => {
-        if (valid()) acceptSnapshot(next, token, leagueId)
-      },
-      onChanged: (event) => {
-        if (valid() && event.league_id === leagueId) void refresh()
+      onInvalidate: () => {
+        if (valid()) void refresh()
       },
       onStatus: (status) => {
         if (valid()) setConnection(status)
       },
-      onSignedOut: () => {
-        if (valid()) expireSession()
-      },
-      onAccessRevoked: revoked,
-      onError: (cause) => {
-        if (valid()) setError(errorMessage(cause))
-      },
     })
     const cleanup = () => {
       active = false
+      clearTimeout(retry)
       abort.abort()
       stop()
     }

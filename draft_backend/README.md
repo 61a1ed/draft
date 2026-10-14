@@ -268,7 +268,7 @@ reads the team's active roster, without expanding the catalog into possible pick
 
 `GET /api/draftables` includes `point_cost`. Snapshot `teams` entries contain
 `point_budget`, `points_spent`, and `points_remaining`; `rosters` and `history`
-entries contain each pick's recorded `point_cost`. SSE snapshots use the same shape.
+entries contain each pick's recorded `point_cost`.
 A frontend can compare catalog prices with the next team's remaining points.
 
 Catalog writes remain administrator SQL, for example:
@@ -284,32 +284,31 @@ repricing. The seed catalog uses costs 0 through 29.
 
 ## Server-sent events
 
-```javascript
-const events = new EventSource(`/api/leagues/${leagueId}/events`);
-events.addEventListener("snapshot", e => render(JSON.parse(e.data)));
-events.addEventListener("changed", async () => {
-  const r = await fetch(`/api/leagues/${leagueId}`);
-  if (r.ok) render(await r.json());
-});
-events.addEventListener("access_revoked", () => events.close());
-events.addEventListener("signed_out", () => events.close());
-// Call events.close() when logging out or switching users.
-```
+The stream sends only `invalidate` events; their data is ignored. Every event
+starts an ordinary snapshot GET. There is no debounce or single-request lock:
+reads may overlap, and clients discard responses older than the displayed
+revision (or an older `server_now` at the same revision).
 
-The initial `snapshot` contains the same object as the snapshot GET. `changed`
-contains `{league_id, revision}`; its SSE ID is the league revision. The server
-subscribes before reading the initial snapshot, eliminating the initial gap.
-One PostgreSQL LISTEN connection per server worker feeds bounded subscriber
-queues. Intermediate invalidations may coalesce. Access is checked through RLS
-on every wakeup and heartbeat; revocation or session expiry closes the stream.
+The server subscribes before checking initial access and sends an invalidation
+when the stream opens, including after browser reconnection. One PostgreSQL
+LISTEN connection per worker routes notification payloads as opaque topic keys.
+The SQL trigger sends only the league ID as text. Each subscriber has one pending
+wake-up slot; a LISTEN reconnection invalidates all active subscriptions.
 
-These are revision invalidations, not a durable record of each pick/start/undo.
-`Last-Event-ID` does not request replay: reconnecting always gets a fresh
-snapshot. LISTEN reconnection also triggers snapshots. Heartbeats every 15
-seconds recheck the revision, covering missed notifications. A transient query
-failure emits `reconnect` and closes; native EventSource reconnects automatically.
-Consumers should ignore snapshots older than the revision already rendered when
-concurrent HTTP fetches finish out of order.
+The frontend retries failed snapshot reads after two seconds for network/server
+errors. Stream errors also trigger an HTTP read, because native EventSource does
+not expose HTTP authorization failures. Snapshot responses of 401 or 404 close
+the subscription and clear the affected state. No automatic writes are retried.
+
+Access and session validity are checked on HTTP requests and when opening a
+stream, not periodically on existing streams. Idle keep-alive comments every
+15 seconds only maintain the connection; they do not query the database or
+trigger client reads. There are no SSE snapshots, event IDs, revision payloads,
+or proactive sign-out/access-revoked messages.
+
+The notification payload changed from JSON to a plain league ID. Rebuild an
+existing disposable database (or update its `dl.notify_league` function) before
+running the new listener against it.
 
 The stream works over HTTP/1.1. Disable buffering for this route in any reverse
 proxy; the response includes `X-Accel-Buffering: no`. Idle timeouts should exceed
