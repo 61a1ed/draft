@@ -1,0 +1,36 @@
+[project]
+name = "draft-backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+description = "A thin HTTP and SSE gateway for the dl PostgreSQL schema"
+dependencies = [
+    "authlib>=1.7,<2",
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "itsdangerous>=2.2,<3",
+    "joserfc>=1.7,<2",
+    "psycopg[binary,pool]>=3.2.10,<4",
+    "uvicorn>=0.54,<1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+draft-server = "draft_backend.__main__:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["integration: requires a running, seeded, isolated PostgreSQL test database"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

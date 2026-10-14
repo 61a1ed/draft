@@ -1,0 +1,180 @@
+"""Transaction-scoped database identity and the small authentication boundary.
+
+Queries passed to read/write are application-owned SQL, never client-supplied SQL.
+PostgreSQL remains responsible for authorization and all draft state transitions.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import random
+from typing import Any
+
+import psycopg
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
+
+
+class Database:
+    def __init__(self, settings: Any) -> None:
+        self.transaction_retries = getattr(settings, "transaction_retries", 4)
+        if self.transaction_retries < 0:
+            raise ValueError("transaction_retries must be nonnegative")
+        self.pool = AsyncConnectionPool(
+            settings.database_url,
+            min_size=1,
+            max_size=getattr(settings, "pool_size", 10),
+            kwargs={"autocommit": True, "row_factory": dict_row},
+            open=False,
+        )
+
+    async def open(self) -> None:
+        await self.pool.open()
+        try:
+            await self.pool.wait()
+            async with self.pool.connection() as conn:
+                cursor = await conn.execute(
+                    """
+                    SELECT session_user AS login, current_user AS active_role,
+                           r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb,
+                           pg_has_role(session_user, n.nspowner, 'MEMBER') AS owner_member
+                    FROM pg_catalog.pg_roles r
+                    JOIN pg_catalog.pg_namespace n ON n.nspname = 'dl'
+                    WHERE r.rolname = session_user
+                    """
+                )
+                identity = await cursor.fetchone()
+                if (
+                    identity is None
+                    or identity["login"] != "dl_gateway"
+                    or identity["active_role"] != "dl_gateway"
+                    or any(
+                        identity[key]
+                        for key in (
+                            "rolsuper",
+                            "rolbypassrls",
+                            "rolcreaterole",
+                            "rolcreatedb",
+                            "owner_member",
+                        )
+                    )
+                ):
+                    raise RuntimeError(
+                        "DATABASE_URL must use the unprivileged dl_gateway login "
+                        "from the deployment SQL; the dl schema must be installed."
+                    )
+                # Fail at startup if provisioning omitted either service role.
+                async with conn.transaction():
+                    await conn.execute("SET LOCAL ROLE dl_api")
+                    await conn.execute("SET LOCAL ROLE dl_auth")
+        except BaseException:
+            await self.pool.close()
+            raise
+
+    async def close(self) -> None:
+        await self.pool.close()
+
+    async def _execute(
+        self, user_id: int, query: str, params: Any, *, write: bool
+    ) -> list[dict[str, Any]]:
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                # SET ROLE does not apply ALTER ROLE configuration defaults.
+                await conn.execute(
+                    "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ WRITE"
+                    if write
+                    else "SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY"
+                )
+                await conn.execute("SET LOCAL ROLE dl_api")
+                await conn.execute(
+                    "SELECT set_config('request.jwt.claims', %s, true)",
+                    (json.dumps({"user_id": user_id}),),
+                )
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query, params)
+                    rows = await cursor.fetchall()
+            # Commit has completed before returning results to the HTTP layer.
+        return rows
+
+    async def read(self, user_id: int, query: str, params: Any = ()) -> list[dict[str, Any]]:
+        return await self._execute(user_id, query, params, write=False)
+
+    async def image(self, image_hash: str) -> dict[str, Any] | None:
+        """Public immutable asset lookup; no user identity or league access."""
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute("SET TRANSACTION READ ONLY")
+                await conn.execute("SET LOCAL ROLE dl_api")
+                cursor = await conn.execute(
+                    "SELECT content_type, data FROM dl.asset WHERE hash = %s", (image_hash,)
+                )
+                return await cursor.fetchone()
+
+    async def write(self, user_id: int, query: str, params: Any = ()) -> list[dict[str, Any]]:
+        """Retry aborted transactions, including failures raised during commit.
+
+        transaction_retries counts retries after the initial attempt. Arguments,
+        including the client's revision, remain unchanged. PT409 is not retried.
+        """
+        for attempt in range(self.transaction_retries + 1):
+            try:
+                return await self._execute(user_id, query, params, write=True)
+            except psycopg.Error as exc:
+                if exc.sqlstate not in {"40001", "40P01"} or attempt == self.transaction_retries:
+                    raise
+                await asyncio.sleep(random.uniform(0, min(0.4, 0.025 * 2**attempt)))
+        raise AssertionError("unreachable")
+
+    async def register_google(self, subject: str, display_name: str) -> dict[str, Any]:
+        """Call only after validating Google's ID token; registration is open."""
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ WRITE")
+                await conn.execute("SET LOCAL ROLE dl_auth")
+                cursor = await conn.execute(
+                    """
+                    INSERT INTO dl.app_user (google_sub, display_name)
+                    VALUES (%s, %s)
+                    ON CONFLICT (google_sub) DO UPDATE
+                    SET display_name = EXCLUDED.display_name
+                    RETURNING id, display_name
+                    """,
+                    (subject, display_name),
+                )
+                result = await cursor.fetchone()
+                assert result is not None
+        return result
+
+    async def test_user(self, username: str) -> dict[str, Any] | None:
+        """Look up an existing fixture; this method never creates a test user."""
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute("SET TRANSACTION READ ONLY")
+                await conn.execute("SET LOCAL ROLE dl_auth")
+                cursor = await conn.execute(
+                    "SELECT id, display_name FROM dl.app_user WHERE google_sub = %s",
+                    ("test:" + username,),
+                )
+                return await cursor.fetchone()
+
+    async def user(self, user_id: int) -> dict[str, Any] | None:
+        rows = await self.read(
+            user_id, "SELECT id, display_name FROM dl.app_user WHERE id = %s", (user_id,)
+        )
+        return rows[0] if rows else None
+
+    async def is_test_database(self) -> bool:
+        """Check the test-tool marker as gateway; permission failures are errors."""
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute("SET TRANSACTION READ ONLY")
+                cursor = await conn.execute("SELECT to_regclass('dl_test.marker') AS marker")
+                result = await cursor.fetchone()
+                if result is None or result["marker"] is None:
+                    return False
+                cursor = await conn.execute(
+                    "SELECT EXISTS (SELECT FROM dl_test.marker WHERE singleton) AS is_test"
+                )
+                result = await cursor.fetchone()
+                return bool(result and result["is_test"])
