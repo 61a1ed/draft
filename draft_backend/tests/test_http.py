@@ -281,3 +281,23 @@ def test_pick_charge_parameter_defaults_and_validation(application):
                 1, "SELECT dl.draft_action(%s, %s, %s, %s, %s) AS result",
                 (2, 3, "pick", 4, expected),
             )
+
+
+@pytest.mark.parametrize(
+    "headers, expected",
+    [
+        ({}, 403),
+        ({"X-Test-Login": "1", "Origin": "https://other.example"}, 403),
+        ({"X-Test-Login": "1", "Origin": "null"}, 403),
+        ({"X-Test-Login": "1", "Origin": "http://testserver"}, 200),
+    ],
+)
+def test_fixture_login_requires_explicit_header_and_same_origin(application, headers, expected):
+    app, db = application
+    with TestClient(app) as client:
+        response = client.post("/auth/test", json={"username": "alice"}, headers=headers)
+    assert response.status_code == expected
+    if expected != 200:
+        db.test_user.assert_not_awaited()
+
+

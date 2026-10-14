@@ -66,9 +66,9 @@ Alice, Bob, and Carol **only in development** with that explicit flag. The
 backend must independently allow test login against a marked test database.
 Production builds never display this control.
 
-For Google login, configure the backend OAuth credentials and register the
-frontend-origin callback `http://127.0.0.1:5173/auth/google/callback` with Google.
-Sign-in navigates the current tab to Google. The backend callback establishes the
+Configure the backend with `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`.
+Register the frontend-origin callback `http://127.0.0.1:5173/auth/callback` with
+the provider. Sign-in navigates the current tab to that provider. The backend callback establishes the
 session and redirects to the app, which loads the session normally. Expected
 sign-in failures return to the app with a readable error and a retry option.
 Google OAuth itself requires real credentials and was not exercised during

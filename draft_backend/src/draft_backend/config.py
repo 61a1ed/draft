@@ -18,8 +18,9 @@ class Settings:
     app_env: str = "production"
     test_login_enabled: bool = False
     cookie_secure: bool = True
-    google_client_id: str = ""
-    google_client_secret: str = ""
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
     session_ttl_seconds: int = 86400
     pool_size: int = 10
     transaction_retries: int = 4
@@ -47,20 +48,33 @@ class Settings:
             raise ValueError("APP_ENV must be production, development, or test")
         if self.app_env == "production" and (not self.cookie_secure or url.scheme != "https"):
             raise ValueError("Production requires HTTPS PUBLIC_BASE_URL and COOKIE_SECURE=true")
-        if bool(self.google_client_id) != bool(self.google_client_secret):
-            raise ValueError("Set both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET")
-        if not self.google_client_id and not self.test_login_enabled:
-            raise ValueError("Google credentials are required when test login is disabled")
+        oidc = (self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret)
+        if any(oidc) and not all(oidc):
+            raise ValueError("Set OIDC_ISSUER, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET together")
+        if not all(oidc) and not self.test_login_enabled:
+            raise ValueError("OIDC configuration is required when test login is disabled")
+        if self.oidc_issuer:
+            issuer = urlsplit(self.oidc_issuer)
+            if (
+                issuer.scheme != "https"
+                or not issuer.hostname
+                or issuer.query
+                or issuer.fragment
+                or issuer.username
+                or issuer.password
+            ):
+                raise ValueError("OIDC_ISSUER must be an HTTPS issuer URL")
         if (
             min(
                 self.session_ttl_seconds,
                 self.pool_size,
-                self.transaction_retries,
                 self.sse_heartbeat_seconds,
             )
             <= 0
         ):
-            raise ValueError("Timeouts, pool size, and retry count must be positive")
+            raise ValueError("Timeouts and pool size must be positive")
+        if self.transaction_retries < 0:
+            raise ValueError("Retry count must be nonnegative")
 
     @property
     def origin(self) -> str:
@@ -75,8 +89,9 @@ class Settings:
             app_env=os.getenv("APP_ENV", "production"),
             test_login_enabled=flag("TEST_LOGIN_ENABLED", False),
             cookie_secure=flag("COOKIE_SECURE", True),
-            google_client_id=os.getenv("GOOGLE_CLIENT_ID", ""),
-            google_client_secret=os.getenv("GOOGLE_CLIENT_SECRET", ""),
+            oidc_issuer=os.getenv("OIDC_ISSUER", ""),
+            oidc_client_id=os.getenv("OIDC_CLIENT_ID", ""),
+            oidc_client_secret=os.getenv("OIDC_CLIENT_SECRET", ""),
             session_ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", "86400")),
             pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
         )

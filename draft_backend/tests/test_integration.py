@@ -290,11 +290,19 @@ def test_draft_workflow_and_database_enforced_access(client):
     assert len(state["history"]) == 5
 
 
-def test_google_registration_is_idempotent_and_updates_display_name(client):
-    subject = "integration-google-" + uuid4().hex
-    first = client.portal.call(client.app.state.db.register_google, subject, "First name")
-    second = client.portal.call(client.app.state.db.register_google, subject, "Updated name")
+def test_oidc_registration_is_idempotent_and_updates_display_name(client):
+    subject = "integration-oidc-" + uuid4().hex
+    first = client.portal.call(
+        client.app.state.db.register_identity, "https://id.example", subject, "First name"
+    )
+    second = client.portal.call(
+        client.app.state.db.register_identity, "https://id.example", subject, "Updated name"
+    )
     assert second == {"id": first["id"], "display_name": "Updated name"}
+    other = client.portal.call(
+        client.app.state.db.register_identity, "https://other.example", subject, "Other user"
+    )
+    assert other["id"] != first["id"]
     login(client, "alice")
     users = client.get("/api/users").json()
     matches = [user for user in users if user["id"] == first["id"]]
@@ -304,7 +312,7 @@ def test_google_registration_is_idempotent_and_updates_display_name(client):
 @pytest.mark.parametrize(
     "query",
     [
-        "SELECT google_sub FROM dl.app_user",
+        "SELECT issuer, subject FROM dl.app_user",
         "UPDATE dl.league SET revision = revision + 1 WHERE false",
         "INSERT INTO dl.draftable (name) VALUES ('forbidden')",
         "SELECT dl.require_writer()",

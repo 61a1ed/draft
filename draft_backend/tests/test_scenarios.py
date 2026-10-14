@@ -81,10 +81,10 @@ def test_sql_scenarios_snapshots_scoped_reset_and_atomic_rollback(tmp_path, monk
             "(SELECT count(*) FROM dl.asset) AS assets"
         ).fetchone()
         alice = conn.execute(
-            "SELECT id FROM dl.app_user WHERE google_sub = 'test:alice'"
+            "SELECT id FROM dl.app_user WHERE issuer = 'urn:draft:test' AND subject = 'alice'"
         ).fetchone()["id"]
         bob = conn.execute(
-            "SELECT id FROM dl.app_user WHERE google_sub = 'test:bob'"
+            "SELECT id FROM dl.app_user WHERE issuer = 'urn:draft:test' AND subject = 'bob'"
         ).fetchone()["id"]
         unrelated = conn.execute(
             "INSERT INTO dl.league (name, commissioner_user_id, roster_size) "

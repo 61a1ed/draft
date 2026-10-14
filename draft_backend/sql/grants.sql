@@ -18,7 +18,7 @@ GRANT EXECUTE ON FUNCTION dl.user_id(), dl.can_read(integer),
 -- Only the login code selects this role. It cannot read or modify leagues.
 GRANT USAGE ON SCHEMA dl TO dl_auth;
 GRANT SELECT ON dl.app_user TO dl_auth;
-GRANT INSERT (google_sub, display_name), UPDATE (display_name)
+GRANT INSERT (issuer, subject, display_name), UPDATE (display_name)
     ON dl.app_user TO dl_auth;
 GRANT USAGE ON SEQUENCE dl.app_user_id_seq TO dl_auth;
 

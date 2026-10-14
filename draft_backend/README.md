@@ -1,7 +1,7 @@
 # Draft backend
 
 A small Python/uv gateway for the supplied PostgreSQL schema. FastAPI handles
-HTTP, Authlib handles Google OpenID Connect, and psycopg calls the SQL functions
+HTTP, Authlib handles OpenID Connect, and psycopg calls the SQL functions
 directly. PostgreSQL owns draft rules, permissions, revisions, and snapshots.
 There is no ORM or second implementation of the draft state machine.
 
@@ -58,8 +58,9 @@ and initialize again. More provisioning details are in `scripts/README.md`.
 
 ## Authentication
 
-For real Google login, create a Google OAuth **Web application** client and
-register exactly `<PUBLIC_BASE_URL>/auth/google/callback` as its redirect URI.
+Configure one OpenID Connect provider with `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and
+`OIDC_CLIENT_SECRET`. For Google, the issuer is `https://accounts.google.com`;
+create a Google OAuth **Web application** client and register exactly `<PUBLIC_BASE_URL>/auth/callback` as its redirect URI.
 Copy `.env.example` to a private `.env`, supply the client credentials,
 `DATABASE_URL`, and a random session secret, then run:
 
@@ -67,12 +68,20 @@ Copy `.env.example` to a private `.env`, supply the client credentials,
 uv run --env-file .env draft-server
 ```
 
-Visit `/auth/google`. The server performs the authorization-code flow and
+Visit `/auth/login`. The server performs the authorization-code flow and
 validates state, nonce, signature, issuer, audience, and expiry through Authlib.
-Any valid Google account can register: the first login creates an `app_user`
-using Google's stable `sub`; subsequent logins update its display name. This
-means open **Google-based** registration, not email/password registration.
-Only `openid profile` is requested. Google tokens are not stored in the session.
+Any valid account from the configured issuer can register. The first login creates
+an `app_user` identified by the verified `(issuer, subject)` pair; subsequent
+logins update its display name. Different issuers never share identities, even
+when their subjects match. Only `openid profile` is requested; provider tokens
+are not stored in the session. Local fixtures use issuer `urn:draft:test` and
+subjects `alice`, `bob`, and `carol`.
+
+This schema replaces `google_sub` with `issuer` and `subject`. Reinitialize
+existing disposable test clusters after updating. Existing non-disposable databases
+need a data migration preserving user IDs before running this version.
+Replace `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` with the `OIDC_` variables and
+update the provider's registered redirect URI to `<PUBLIC_BASE_URL>/auth/callback`.
 
 The callback sets an HttpOnly, SameSite=Lax signed session cookie and redirects
 to `PUBLIC_BASE_URL/`. Expected sign-in failures redirect there with an
@@ -112,7 +121,7 @@ test endpoint instead requires JSON and `X-Test-Login: 1`. Use a same-origin
 frontend or a development proxy; cross-origin CORS is not enabled.
 
 For production set `APP_ENV=production`, an HTTPS `PUBLIC_BASE_URL`, and
-`COOKIE_SECURE=true`. Terminate TLS at your reverse proxy. Google callback
+`COOKIE_SECURE=true`. Terminate TLS at your reverse proxy. OIDC callback
 addresses come from configuration rather than forwarded request headers.
 
 ## HTTP contract
@@ -121,7 +130,7 @@ All `/api` routes require a session. Read results come directly from PostgreSQL:
 
 | Method/path | Result |
 |---|---|
-| `GET /api/users` | Array of `{id, display_name}`; no Google subjects |
+| `GET /api/users` | Array of `{id, display_name}`; no login identities |
 | `GET /api/draftables` | Global catalog array |
 | `GET /images/{hash}` / `HEAD /images/{hash}` | Public PNG image; no session required |
 | `GET /api/leagues` | Array of leagues visible to the caller |
@@ -356,7 +365,7 @@ rollback. The frontend's 41 tests and production build passed. Live browser chec
 through the Vite proxy covered fixture sign-in, catalog images, a persisted pick,
 undo, SQL-only updates arriving through SSE, and scenario replacement followed by
 Refresh all data. The exploration database contains the approved 263-row catalog.
-Google login tests use a mocked provider; actual login requires your OAuth credentials.
+OIDC login tests use a mocked provider; actual login requires your OAuth credentials.
 Existing Authlib/Starlette httpx deprecation warnings remain.
 
 Reference documentation: [Google OIDC](https://developers.google.com/identity/openid-connect/openid-connect),

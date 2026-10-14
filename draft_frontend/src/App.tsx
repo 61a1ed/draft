@@ -219,12 +219,11 @@ function SignIn({
         </div>
       )}
       <button
-        className="button google-button"
+        className="button signin-button"
         disabled={busy}
-        onClick={() => window.location.assign('/auth/google')}
+        onClick={() => window.location.assign('/auth/login')}
       >
-        <span className="google-mark">G</span>
-        Continue with Google
+        Continue to sign in
       </button>
       <button
         className="button text-button full-width"
@@ -442,7 +441,7 @@ export default function App() {
         <button
           className="new-league"
           disabled={draft.busy}
-          onClick={() => (mode !== 'live' ? setSignIn(true) : setCreate(true))}
+          onClick={() => setCreate(true)}
         >
           <Plus size={16} />
           Create a league
@@ -459,20 +458,14 @@ export default function App() {
               <strong>{session?.user.display_name ?? 'Guest'}</strong>
               <small>{commissioner ? 'Commissioner' : 'League member'}</small>
             </div>
-            {mode === 'live' ? (
-              <button
-                className="icon-button"
-                aria-label="Sign out"
-                disabled={draft.busy}
-                onClick={() => void draft.logout()}
-              >
-                <LogOut size={16} />
-              </button>
-            ) : (
-              <button className="profile-signin" onClick={() => setSignIn(true)}>
-                Sign in
-              </button>
-            )}
+            <button
+              className="icon-button"
+              aria-label="Sign out"
+              disabled={draft.busy}
+              onClick={() => void draft.logout()}
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </aside>
@@ -504,7 +497,7 @@ export default function App() {
             <span className="topbar-divider" />
             <button
               className="icon-button"
-              disabled={draft.busy || mode !== 'live'}
+              disabled={draft.busy}
               aria-label="Refresh all data"
               onClick={() => {
                 setSelected(null)
@@ -521,48 +514,46 @@ export default function App() {
           </div>
         </header>
         <main>
-          {mode === 'live' && (
-            <div className="mobile-league-toolbar">
-              <label>
-                League
-                <select
-                  aria-label="Choose league on mobile"
-                  value={draft.leagueId ?? ''}
-                  disabled={draft.busy}
-                  onChange={(event) => {
-                    draft.selectLeague(Number(event.target.value))
-                    setView('draft')
-                  }}
-                >
-                  {draft.leagues.length ? (
-                    draft.leagues.map((league) => (
-                      <option value={league.id} key={league.id}>
-                        {league.name}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">No leagues yet</option>
-                  )}
-                </select>
-              </label>
-              <button
-                className="icon-button"
-                aria-label="Create a league on mobile"
+          <div className="mobile-league-toolbar">
+            <label>
+              League
+              <select
+                aria-label="Choose league on mobile"
+                value={draft.leagueId ?? ''}
                 disabled={draft.busy}
-                onClick={() => setCreate(true)}
+                onChange={(event) => {
+                  draft.selectLeague(Number(event.target.value))
+                  setView('draft')
+                }}
               >
-                <Plus size={18} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Sign out on mobile"
-                disabled={draft.busy}
-                onClick={() => void draft.logout()}
-              >
-                <LogOut size={17} />
-              </button>
-            </div>
-          )}
+                {draft.leagues.length ? (
+                  draft.leagues.map((league) => (
+                    <option value={league.id} key={league.id}>
+                      {league.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No leagues yet</option>
+                )}
+              </select>
+            </label>
+            <button
+              className="icon-button"
+              aria-label="Create a league on mobile"
+              disabled={draft.busy}
+              onClick={() => setCreate(true)}
+            >
+              <Plus size={18} />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Sign out on mobile"
+              disabled={draft.busy}
+              onClick={() => void draft.logout()}
+            >
+              <LogOut size={17} />
+            </button>
+          </div>
           {draft.error && (
             <div className="error-banner" role="alert">
               <span>{draft.error}</span>

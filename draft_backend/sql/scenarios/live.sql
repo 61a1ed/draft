@@ -4,7 +4,7 @@
 DO $$
 BEGIN
     IF (SELECT count(*) FROM dl.app_user
-        WHERE google_sub IN ('test:alice', 'test:bob', 'test:carol')) <> 3 THEN
+        WHERE issuer = 'urn:draft:test' AND subject IN ('alice', 'bob', 'carol')) <> 3 THEN
         RAISE EXCEPTION 'Scenario fixtures require alice, bob, and carol test users';
     END IF;
     IF (SELECT count(*) FROM dl.draftable) < 9 THEN
@@ -28,7 +28,7 @@ WITH created AS (
     )
     SELECT 'Scenario: Live snake draft', id, 3, 90,
            current_timestamp - interval '10 minutes', current_timestamp
-    FROM dl.app_user WHERE google_sub = 'test:alice'
+    FROM dl.app_user WHERE issuer = 'urn:draft:test' AND subject = 'alice'
     RETURNING id
 )
 INSERT INTO dl_test.scenario (slug, league_id) SELECT 'live', id FROM created;
@@ -36,11 +36,11 @@ INSERT INTO dl_test.scenario (slug, league_id) SELECT 'live', id FROM created;
 INSERT INTO dl.team (league_id, name, manager_user_id, draft_position, point_budget)
 SELECT f.league_id, v.name, u.id, v.position, v.budget
 FROM (VALUES
-    ('test:alice', 'Alice - Ember', 1, 100),
-    ('test:bob', 'Bob - Tide', 2, 100),
-    ('test:carol', 'Carol - Grove', 3, 100)
+    ('alice', 'Alice - Ember', 1, 100),
+    ('bob', 'Bob - Tide', 2, 100),
+    ('carol', 'Carol - Grove', 3, 100)
 ) AS v(subject, name, position, budget)
-JOIN dl.app_user u ON u.google_sub = v.subject
+JOIN dl.app_user u ON u.issuer = 'urn:draft:test' AND u.subject = v.subject
 CROSS JOIN dl_test.scenario f WHERE f.slug = 'live';
 
 -- Snake positions are derived by the same SQL function used in the snapshot.

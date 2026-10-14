@@ -11,7 +11,9 @@ REVOKE ALL ON SCHEMA dl FROM PUBLIC;
 
 CREATE TABLE dl.app_user (
     id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    google_sub text NOT NULL UNIQUE,
+    issuer text NOT NULL,
+    subject text NOT NULL,
+    UNIQUE (issuer, subject),
     display_name text NOT NULL
 );
 -- Immutable content-addressed images, read publicly through the HTTP gateway.

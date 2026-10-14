@@ -142,8 +142,8 @@ credentials in `admin.env`, and server output in `postgres.log`. Keep these file
 private; POSIX directories/files are created with restrictive permissions. On
 Windows, place the root in a directory whose ACL limits access to your account.
 
-The fixtures contain three users (`alice`, `bob`, `carol`, with Google-subject
-placeholders `test:alice`, `test:bob`, `test:carol`) and 30 catalog players. No
+The fixtures contain three users (`alice`, `bob`, `carol`, with issuer
+`urn:draft:test` and subjects `alice`, `bob`, `carol`) and 30 catalog players. No
 league is pre-created. `dl_test.marker` is installed only by the test seed SQL.
 Test login requires this marker as well as the application test-mode settings.
 

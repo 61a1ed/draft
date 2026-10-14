@@ -15,16 +15,16 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from .config import Settings
+
 
 class Database:
-    def __init__(self, settings: Any) -> None:
-        self.transaction_retries = getattr(settings, "transaction_retries", 4)
-        if self.transaction_retries < 0:
-            raise ValueError("transaction_retries must be nonnegative")
+    def __init__(self, settings: Settings) -> None:
+        self.transaction_retries = settings.transaction_retries
         self.pool = AsyncConnectionPool(
             settings.database_url,
             min_size=1,
-            max_size=getattr(settings, "pool_size", 10),
+            max_size=settings.pool_size,
             kwargs={"autocommit": True, "row_factory": dict_row},
             open=False,
         )
@@ -126,21 +126,23 @@ class Database:
                 await asyncio.sleep(random.uniform(0, min(0.4, 0.025 * 2**attempt)))
         raise AssertionError("unreachable")
 
-    async def register_google(self, subject: str, display_name: str) -> dict[str, Any]:
-        """Call only after validating Google's ID token; registration is open."""
+    async def register_identity(
+        self, issuer: str, subject: str, display_name: str
+    ) -> dict[str, Any]:
+        """Call only with the verified issuer and subject from an ID token; registration is open."""
         async with self.pool.connection() as conn:
             async with conn.transaction():
                 await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ WRITE")
                 await conn.execute("SET LOCAL ROLE dl_auth")
                 cursor = await conn.execute(
                     """
-                    INSERT INTO dl.app_user (google_sub, display_name)
-                    VALUES (%s, %s)
-                    ON CONFLICT (google_sub) DO UPDATE
+                    INSERT INTO dl.app_user (issuer, subject, display_name)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (issuer, subject) DO UPDATE
                     SET display_name = EXCLUDED.display_name
                     RETURNING id, display_name
                     """,
-                    (subject, display_name),
+                    (issuer, subject, display_name),
                 )
                 result = await cursor.fetchone()
                 assert result is not None
@@ -153,8 +155,9 @@ class Database:
                 await conn.execute("SET TRANSACTION READ ONLY")
                 await conn.execute("SET LOCAL ROLE dl_auth")
                 cursor = await conn.execute(
-                    "SELECT id, display_name FROM dl.app_user WHERE google_sub = %s",
-                    ("test:" + username,),
+                    "SELECT id, display_name FROM dl.app_user "
+                    "WHERE issuer = 'urn:draft:test' AND subject = %s",
+                    (username,),
                 )
                 return await cursor.fetchone()
 
