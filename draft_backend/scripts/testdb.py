@@ -112,7 +112,8 @@ def connection_url(user: str, password: str, port: int, database: str) -> str:
     return f"postgresql://{credentials}@127.0.0.1:{port}/{database}"
 
 
-def init(root: Path, pg_bin: Path, port: int) -> None:
+def init(root: Path, pg_bin: Path, port: int, *, start_server=None, run_command=None) -> None:
+    execute = run_command or run
     if root.is_symlink():
         raise RuntimeError("Refusing a symbolic-link cluster root")
     root = root.resolve()
@@ -125,7 +126,7 @@ def init(root: Path, pg_bin: Path, port: int) -> None:
         )
     for name in ("initdb", "pg_ctl", "postgres"):
         binary(pg_bin, name)
-    run(pg_bin, "initdb", "--version")
+    execute(pg_bin, "initdb", "--version")
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     if os.name != "nt":
         root.chmod(0o700)
@@ -150,7 +151,7 @@ def init(root: Path, pg_bin: Path, port: int) -> None:
     password_file = root / ".initdb-password"
     private_write(password_file, admin_password + "\n")
     try:
-        run(
+        execute(
             pg_bin,
             "initdb",
             "-D",
@@ -196,8 +197,12 @@ def init(root: Path, pg_bin: Path, port: int) -> None:
     )
     started = False
     try:
-        start(pg_bin, root)
-        started = True
+        if start_server is None:
+            start(pg_bin, root)
+            started = True
+        else:
+            # The caller owns the foreground process and its cleanup, including failures.
+            start_server(pg_bin, root)
         maintenance_url = connection_url("postgres", admin_password, port, "postgres")
         with psycopg.connect(maintenance_url, autocommit=True, connect_timeout=10) as conn:
             conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(DATABASE)))

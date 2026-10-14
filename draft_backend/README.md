@@ -7,9 +7,11 @@ There is no ORM or second implementation of the draft state machine.
 
 For the full frontend + backend exploration loop, run
 `uv run python scripts/dev.py --pg-bin 'C:\postgresql\bin'` after installing the
-backend and frontend dependencies. This prepares a dedicated `.testdb-dev`
-database, imports the Pokémon catalog, loads editable SQL scenario leagues, and
-starts both servers. Subsequent runs need no binary path and preserve draft changes.
+backend and frontend dependencies. Each invocation creates a fresh database in
+`.dev-runs`, imports the Pokémon catalog, seeds users and scenarios, and starts
+both servers. Ctrl+C stops owned processes and keeps files. Use the printed
+`--data-dir` command to resume, or `--database-url-env NAME` for an existing
+network database without initialization or seeding.
 See [the SQL scenario workflow](scripts/README.md#frontend-exploration-with-sql)
 for one-command resets, custom SQL, and isolation choices.
 

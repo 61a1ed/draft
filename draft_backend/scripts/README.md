@@ -12,26 +12,37 @@ Install dependencies once (`uv sync --locked` in `draft_backend`, `npm ci` in
 uv run python scripts/dev.py --pg-bin 'C:\postgresql\bin'
 ```
 
-Replace the binary path with your PostgreSQL installation. First run creates
-`.testdb-dev` on loopback port 55440, imports `../pokemon_catalog.csv` and the PNG
-files under `../showdown`, and loads six SQL fixtures. No download is needed.
-Open **http://127.0.0.1:5173**, click **Sign in**, then **Use test account**.
-Alice is commissioner; Bob and Carol are ordinary managers. The league selector
-switches scenarios using the existing API and database access rules.
-
-Later runs are simply:
+Each invocation creates a fresh database under `.dev-runs/<unique-run>/database`,
+installs the schema, imports the Pokémon catalog/images, and seeds Alice, Bob,
+Carol and six SQL scenarios. Put PostgreSQL binaries on PATH or pass `--pg-bin`.
+Open **http://127.0.0.1:5173**, sign in with a test account, and select a scenario.
 
 ```powershell
-uv run python scripts/dev.py
+# Resume the data directory printed by an earlier run (no schema or seed changes)
+uv run python scripts/dev.py --data-dir '.dev-runs/<run>/database/data'
+# Connect to an already-prepared database using a URL stored in an environment variable
+uv run python scripts/dev.py --database-url-env DEV_DATABASE_URL
 ```
 
-The launcher preserves all draft changes and does not reimport or reseed a
-prepared database. It sets the frontend proxy, backend browser origin, and local
-test-login flags automatically. Backend failures remain visible in the frontend. Ctrl+C stops the two web servers;
-PostgreSQL remains running. Logs are `.testdb-dev/api.log` and `frontend.log`.
-Use `--prepare-only` to set up/start just PostgreSQL, or `--root`, `--db-port`,
-`--api-port`, and `--web-port` for an independent workspace. The database port is
-chosen only at initialization; later runs use its saved marker.
+Network mode never initializes, seeds, migrates, starts, or stops Postgres. Supply
+normal backend authentication settings in the environment (SESSION_SECRET and
+OIDC settings; for local HTTP use APP_ENV=development and COOKIE_SECURE=false).
+It does not automatically enable test login. Normal application actions can still
+write to the connected database; this is not a read-only application mode.
+
+Resume requires a marked local cluster and refuses one that is already running.
+`--db-port` defaults to 55440 for fresh databases and the saved port for resumed
+ones; an override affects this invocation only. `--api-port` and `--web-port`
+default to 8000 and 5173. Network mode rejects `--db-port` and `--pg-bin`.
+There is no `--root`, `--prepare-only`, seed flag, or migration support.
+
+Ctrl+C force-stops owned process trees, including foreground Postgres. All data
+and logs remain available; Postgres performs crash recovery when resumed. The
+launcher prints a resume command and creates missing `.dev-runs` parents, so old
+runs can be removed manually while stopped. Each invocation has separate logs,
+including when resuming. Both output streams are forwarded live to stderr with
+`[postgres err]`, `[backend out]`, etc., and retained in `<run>/logs/<name>.<stream>.log`.
+Vite color and screen clearing are disabled.
 
 Edit a file in `sql/scenarios/`, apply it, and click the toolbar's **Refresh all data**:
 
@@ -41,9 +52,9 @@ frontend and backend can stay running.
 
 ```powershell
 uv run python scripts/scenarios.py list
-uv run python scripts/scenarios.py --root .testdb-dev apply live
-uv run python scripts/scenarios.py --root .testdb-dev apply all
-uv run python scripts/scenarios.py --root .testdb-dev apply --file path/to/my-state.sql
+uv run python scripts/scenarios.py --root .dev-runs/<run>/database apply live
+uv run python scripts/scenarios.py --root .dev-runs/<run>/database apply all
+uv run python scripts/scenarios.py --root .dev-runs/<run>/database apply --file path/to/my-state.sql
 ```
 
 | Fixture | What to explore |

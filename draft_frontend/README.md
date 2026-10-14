@@ -11,11 +11,12 @@ cd E:\bz\draft_backend
 uv run python scripts/dev.py --pg-bin 'C:\postgresql\bin'
 ```
 
-The first run prepares `.testdb-dev`, imports the 263 PokÃ©mon and their images,
-and loads six editable SQL scenarios. Later runs only need `uv run python scripts/dev.py`
-and preserve draft changes. Open **http://127.0.0.1:5173**, sign in with a local
-test account, and choose a scenario from the league selector. The launcher sets
-the matching browser origin, API proxy, and test login.
+Each run creates a fresh database under `.dev-runs`, imports the Pokémon catalog,
+and seeds test users and six SQL scenarios. Ctrl+C stops all owned processes but
+keeps data and logs. Use the printed `--data-dir` command to resume a prior run.
+`--database-url-env NAME` connects to an existing prepared database without setup.
+Open **http://127.0.0.1:5173** and sign in; fresh local databases offer test accounts.
+The launcher forwards tagged logs and disables Vite colors and screen clearing.
 It requires backend dependencies (`uv sync --locked`) and frontend dependencies
 (`npm ci`) to be installed first. See the backend scripts README for SQL reset
 commands and the tradeoffs between leagues, schemas, and databases.
