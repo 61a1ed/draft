@@ -67,7 +67,7 @@ def test_check_does_not_load_cloud(tmp_path, monkeypatch, config):
     import manage
 
     calls = []
-    monkeypatch.setattr(manage, "load_config", lambda path: config)
+    monkeypatch.setattr(manage, "load_config", lambda path, **kwargs: config)
     monkeypatch.setattr(remote, "local_check", lambda cfg: calls.append(cfg))
     manage.main(["check"])
     assert calls == [config]
@@ -118,7 +118,7 @@ def test_host_step_runs_independently_without_aws(monkeypatch, config, action, e
             assert component == "caddy" and commit is None
             calls.append("logs")
 
-    monkeypatch.setattr(manage, "load_config", lambda path: config)
+    monkeypatch.setattr(manage, "load_config", lambda path, **kwargs: config)
     monkeypatch.setattr(manage, "load_state", lambda cfg: state)
     monkeypatch.setattr(remote, "commit_id", lambda *args: revision)
     monkeypatch.setattr(remote, "Remote", Target)
@@ -138,7 +138,7 @@ def test_deletion_is_one_explicit_action_and_preserves_local_secrets(
     before = (config.state_dir / "secrets.json").read_bytes()
     (config.state_dir / "known_hosts").write_text("verified")
     calls = []
-    monkeypatch.setattr(manage, "load_config", lambda path: config)
+    monkeypatch.setattr(manage, "load_config", lambda path, **kwargs: config)
     monkeypatch.setitem(
         sys.modules, "cloud",
         SimpleNamespace(**{action.replace("-", "_"): lambda *args: calls.append(args)}),
@@ -156,7 +156,9 @@ def test_deletion_is_one_explicit_action_and_preserves_local_secrets(
 def test_retired_commands_stop_before_loading_credentials_or_touching_cloud(monkeypatch, args):
     import manage
 
-    monkeypatch.setattr(manage, "load_config", lambda path: pytest.fail("must not load settings"))
+    monkeypatch.setattr(
+        manage, "load_config", lambda path, **kwargs: pytest.fail("must not load settings"),
+    )
     monkeypatch.setitem(sys.modules, "cloud", None)
     with pytest.raises(SystemExit) as error:
         manage.main(args)
@@ -166,7 +168,9 @@ def test_retired_commands_stop_before_loading_credentials_or_touching_cloud(monk
 def test_steps_is_read_only_and_needs_no_private_settings(monkeypatch, capsys):
     import manage
 
-    monkeypatch.setattr(manage, "load_config", lambda path: pytest.fail("must not load settings"))
+    monkeypatch.setattr(
+        manage, "load_config", lambda path, **kwargs: pytest.fail("must not load settings"),
+    )
     monkeypatch.setitem(sys.modules, "cloud", None)
     manage.main(["steps"])
     output = capsys.readouterr().out
@@ -194,7 +198,7 @@ def test_existing_bringup_receipt_connects_without_migration_or_aws(config, monk
     (config.state_dir / "state.json").write_text(json.dumps(receipt))
     before = {path.name: path.read_bytes() for path in config.state_dir.iterdir()}
     hosts = []
-    monkeypatch.setattr(manage, "load_config", lambda path: config)
+    monkeypatch.setattr(manage, "load_config", lambda path, **kwargs: config)
     monkeypatch.setattr(remote.Remote, "setup", lambda self: hosts.append(self.host))
     monkeypatch.setitem(sys.modules, "cloud", None)
     manage.main(["setup"])

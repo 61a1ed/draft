@@ -14,13 +14,13 @@ class Config:
     name: str
     region: str
     hostname: str
-    ssh_cidrs: tuple[str, ...]
-    catalog_csv: Path
-    image_root: Path
     state_dir: Path
-    oidc_client_id: str = field(repr=False)
-    oidc_client_secret: str = field(repr=False)
-    callback_path: str
+    ssh_cidrs: tuple[str, ...] = ()
+    catalog_csv: Path | None = None
+    image_root: Path | None = None
+    oidc_client_id: str = field(default="", repr=False)
+    oidc_client_secret: str = field(default="", repr=False)
+    callback_path: str = ""
     availability_zone: str | None = None
     blueprint_id: str = "ubuntu_24_04"
     bundle_id: str = "small_3_0"
@@ -118,33 +118,11 @@ def _oidc(values: dict, hostname: str) -> tuple[str, str, str]:
         )
     if selected not in candidates:
         raise ValueError("OIDC_CALLBACK_PATH must match a registered HTTPS redirect for HOSTNAME")
-    if not re.fullmatch(r"/[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*", selected) or any(
-        part in {".", ".."} for part in selected.split("/")
-    ):
-        raise ValueError("The OIDC callback must be an absolute path of ordinary URL segments")
-    reserved = (
-        "/api",
-        "/images",
-        "/assets",
-        "/ready",
-        "/healthz",
-        "/docs",
-        "/redoc",
-        "/openapi.json",
-        "/auth/login",
-        "/auth/logout",
-        "/auth/me",
-        "/auth/test",
-    )
-    if selected == "/auth" or any(
-        selected == item or selected.startswith(item + "/") for item in reserved
-    ):
-        raise ValueError("The OIDC callback conflicts with an application route")
     return web["client_id"], web["client_secret"], selected
 
 
-def load_config(path: str | Path) -> Config:
-    """Execute trusted administrator code; relative paths are relative to that module."""
+def load_config(path: str | Path, *, action="check", host=None) -> Config:
+    """Read the deployment identity and validate only the selected step's inputs."""
     path = Path(path).resolve()
     values = runpy.run_path(str(path))
     name = _text(values, "NAME")
@@ -155,61 +133,69 @@ def load_config(path: str | Path) -> Config:
         )
     if name in {"root", "ubuntu", "caddy", "postgres", "nobody", "daemon"}:
         raise ValueError("NAME must not collide with an existing system account")
-    region = _text(values, "REGION")
-    if not re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-\d+", region):
+    standalone = action in {"create-certs", "renew-certs"} or (
+        host is not None and action in {"verify-db", "init-db", "import-catalog"}
+    )
+    region = "" if standalone else _text(values, "REGION")
+    if region and not re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-\d+", region):
         raise ValueError("REGION must be an AWS region name, for example us-west-2")
-    hostname = _text(values, "HOSTNAME").lower()
+    hostname = "" if standalone else _text(values, "HOSTNAME").lower()
     labels = hostname.split(".")
-    if (
+    if hostname and (
         len(hostname) > 253
         or len(labels) < 2
         or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
     ):
         raise ValueError("HOSTNAME must be a DNS hostname without a scheme, port or path")
-    raw_cidrs = values.get("SSH_CIDRS")
-    if not isinstance(raw_cidrs, (list, tuple)) or not raw_cidrs:
-        raise ValueError("SSH_CIDRS must be a nonempty list or tuple of administrator IPv4 CIDRs")
-    try:
-        networks = [ip_network(value, strict=True) for value in raw_cidrs]
-    except (TypeError, ValueError):
-        raise ValueError(
-            "SSH_CIDRS contains an invalid network; use your public IPv4 address /32"
-        )
-    if any(network.version != 4 for network in networks):
-        raise ValueError("SSH_CIDRS must contain IPv4 networks; this deployment uses IPv4 only")
-    zone = _optional(values, "AVAILABILITY_ZONE")
-    if zone and not re.fullmatch(re.escape(region) + r"[a-z]", zone):
-        raise ValueError("AVAILABILITY_ZONE must belong to REGION")
-    if values.get("HOSTED_ZONE_ID") is not None:
+    options = {}
+    if action in {"check", "open-ports"}:
+        raw_cidrs = values.get("SSH_CIDRS")
+        if not isinstance(raw_cidrs, (list, tuple)) or not raw_cidrs:
+            raise ValueError("SSH_CIDRS must be a nonempty list of administrator IPv4 CIDRs")
+        try:
+            networks = [ip_network(value, strict=True) for value in raw_cidrs]
+        except (TypeError, ValueError):
+            raise ValueError("SSH_CIDRS contains an invalid network; use your public IPv4 /32")
+        if any(network.version != 4 for network in networks):
+            raise ValueError("SSH_CIDRS must contain IPv4 networks; this deployment uses IPv4 only")
+        options["ssh_cidrs"] = tuple(str(network) for network in networks)
+    if action == "check" and values.get("HOSTED_ZONE_ID") is not None:
         raise ValueError("HOSTED_ZONE_ID is no longer supported; remove it and manage DNS manually")
-    blueprint = _text(values, "BLUEPRINT_ID", "ubuntu_24_04")
-    if blueprint != "ubuntu_24_04":
-        raise ValueError("This host installer currently supports BLUEPRINT_ID ubuntu_24_04 only")
-    bundle = _text(values, "BUNDLE_ID", "small_3_0")
-    if not re.fullmatch(r"[A-Za-z0-9_]+", bundle):
-        raise ValueError("BUNDLE_ID must be a Lightsail bundle identifier")
-    versions = {
-        key: _text(values, key, default)
-        for key, default in (("UV_VERSION", "0.12.20"), ("NODE_VERSION", "24.22.0"))
-    }
-    if any(not re.fullmatch(r"\d+\.\d+\.\d+", version) for version in versions.values()):
-        raise ValueError("UV_VERSION and NODE_VERSION must be exact numeric x.y.z versions")
-    client_id, client_secret, callback_path = _oidc(values, hostname)
+    if action in {"check", "create-instance"}:
+        zone = _optional(values, "AVAILABILITY_ZONE")
+        if zone and not re.fullmatch(re.escape(region) + r"[a-z]", zone):
+            raise ValueError("AVAILABILITY_ZONE must belong to REGION")
+        blueprint = _text(values, "BLUEPRINT_ID", Config.blueprint_id)
+        if blueprint != Config.blueprint_id:
+            raise ValueError("This host installer supports BLUEPRINT_ID ubuntu_24_04 only")
+        bundle = _text(values, "BUNDLE_ID", Config.bundle_id)
+        if not re.fullmatch(r"[A-Za-z0-9_]+", bundle):
+            raise ValueError("BUNDLE_ID must be a Lightsail bundle identifier")
+        options.update(availability_zone=zone, blueprint_id=blueprint, bundle_id=bundle)
+    if action in {"check", "setup"}:
+        for key in ("uv_version", "node_version"):
+            version = _text(values, key.upper(), getattr(Config, key))
+            if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+                raise ValueError("UV_VERSION and NODE_VERSION must be exact numeric x.y.z versions")
+            options[key] = version
+        client_id, client_secret, callback_path = _oidc(values, hostname)
+        options.update(
+            oidc_client_id=client_id, oidc_client_secret=client_secret, callback_path=callback_path,
+        )
+    if action in {"check", "import-catalog"}:
+        options.update(
+            catalog_csv=_path(values, "CATALOG_CSV", path.parent),
+            image_root=_path(values, "IMAGE_ROOT", path.parent),
+        )
+    if action in {
+        "check", "create-key", "create-instance", "open-ports", "allocate-ip", "attach-ip",
+        "trust-host", "open-db-port", "cloud-status", "delete-instance", "release-ip", "delete-key",
+    }:
+        options["aws_profile"] = _optional(values, "AWS_PROFILE")
     return Config(
         name=name,
         region=region,
         hostname=hostname,
-        ssh_cidrs=tuple(str(network) for network in networks),
-        catalog_csv=_path(values, "CATALOG_CSV", path.parent),
-        image_root=_path(values, "IMAGE_ROOT", path.parent),
         state_dir=_path(values, "STATE_DIR", path.parent, Path(__file__).parent / "private" / name),
-        oidc_client_id=client_id,
-        oidc_client_secret=client_secret,
-        callback_path=callback_path,
-        availability_zone=zone,
-        blueprint_id=blueprint,
-        bundle_id=bundle,
-        aws_profile=_optional(values, "AWS_PROFILE"),
-        uv_version=versions["UV_VERSION"],
-        node_version=versions["NODE_VERSION"],
+        **options,
     )

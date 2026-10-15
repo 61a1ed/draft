@@ -189,6 +189,14 @@ def test_client_validation_requires_only_public_ca_and_selected_client(config):
         tls.validate_client_certificates(config, "dl_gateway")
 
 
+def test_server_installation_needs_no_client_or_ca_private_keys(config):
+    directory = tls.ensure_certificates(config)
+    for name in tls.FILES:
+        if name not in {"ca.crt", "server.crt", "server.key"}:
+            (directory / name).unlink()
+    assert tls.validate_server_certificates(config) == directory
+
+
 def test_certificate_from_another_deployment_is_rejected(config):
     tls.ensure_certificates(config)
     config.name = "another"

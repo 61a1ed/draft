@@ -254,6 +254,15 @@ def validate_client_certificates(config: Config, role: str = "dl_importer") -> P
     """Validate the public CA and selected local client without server/CA private keys."""
     if role not in {"postgres", "dl_importer"}:
         raise ValueError("The database certificate role must be postgres or dl_importer")
+    return _validate_leaf(config, role)
+
+
+def validate_server_certificates(config: Config) -> Path:
+    """Require only the server certificate/key and public CA for host installation."""
+    return _validate_leaf(config, "server")
+
+
+def _validate_leaf(config: Config, role: str) -> Path:
     directory = config.state_dir / "tls"
     _require_files(directory, ("ca.crt", f"{role}.crt", f"{role}.key"))
     _protect_directory(directory)

@@ -4,6 +4,7 @@ import base64
 import os
 import socket
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -99,9 +100,20 @@ def tls_database(tmp_path, request, monkeypatch):
         processes.close()
 
 
-def test_fresh_tls_setup_idempotence_role_limits_and_serialized_import(tls_database, tmp_path):
+@pytest.fixture
+def verify_transport(monkeypatch):
+    # Exercise the operator's transport check against the same disposable server.
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    from database import verify_transport
+
+    return verify_transport
+
+
+def test_fresh_tls_setup_idempotence_role_limits_and_serialized_import(
+    tls_database, tmp_path, verify_transport,
+):
     options, importer, rogue = tls_database
-    deployment.verify(options, "test", REVISION, rogue[2], rogue[3])
+    verify_transport(options, rogue[2], rogue[3])
     # An unmarked database is never overwritten, even if it is empty.
     with psycopg.connect(**options, dbname="postgres", user="postgres", autocommit=True) as conn:
         conn.execute("CREATE DATABASE draft TEMPLATE template0")
@@ -142,4 +154,4 @@ def test_fresh_tls_setup_idempotence_role_limits_and_serialized_import(tls_datab
         conn.execute("SET ROLE dl_owner")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM dl_deployment.completion")
-    deployment.verify(options, "test", REVISION, rogue[2], rogue[3])
+    verify_transport(options, rogue[2], rogue[3])

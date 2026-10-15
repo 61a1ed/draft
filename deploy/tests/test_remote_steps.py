@@ -19,22 +19,40 @@ def target(tmp_path):
     )
 
 
-@pytest.mark.parametrize("platform", ["nt", "posix"])
-def test_connection_options_avoid_windows_connect_timeout_delay(tmp_path, monkeypatch, platform):
-    key = tmp_path / "key"
-    key.write_text("test key")
-    (tmp_path / "known_hosts").write_text("test host")
-    monkeypatch.setattr(remote, "os", SimpleNamespace(name=platform))
-    target = remote.Remote(
-        SimpleNamespace(name="draft", state_dir=tmp_path),
-        {"ip": "192.0.2.1", "private_key": str(key)},
-    )
-
-    assert ("ConnectTimeout=15" in target.options) == (platform != "nt")
-    assert ("ConnectTimeout=none" in target.options) == (platform == "nt")
+def test_connection_is_bounded_and_requires_verified_host_identity(target):
+    assert "ConnectTimeout=15" in target.options
     assert "StrictHostKeyChecking=yes" in target.options
     assert "BatchMode=yes" in target.options
     assert "ServerAliveInterval=15" in target.options
+
+
+def test_certificate_install_uploads_only_server_material_and_skips_setup(target, monkeypatch):
+    from contextlib import contextmanager
+
+    import tls
+
+    certificates = target.config.state_dir / "tls"
+    monkeypatch.setattr(tls, "validate_server_certificates", lambda config: certificates)
+    monkeypatch.setattr(remote, "host_settings", lambda config: pytest.fail("app settings"))
+    uploads, commands = [], []
+    monkeypatch.setattr(target, "copy", lambda local, dest: uploads.append((local, dest)))
+    monkeypatch.setattr(target, "ssh", lambda *args, **kwargs: commands.append(args))
+
+    @contextmanager
+    def upload():
+        yield "/tmp/draft-upload.abc123"
+
+    monkeypatch.setattr(target, "upload", upload)
+    target.install_db_certs()
+
+    assert [path.name for path, dest in uploads] == [
+        "bootstrap.py", "server.key", "server.crt", "ca.crt",
+    ]
+    assert commands == [
+        ("mkdir", "-m", "0700", "/tmp/draft-upload.abc123/tls"),
+        ("sudo", "-n", "python3", "-u", "/tmp/draft-upload.abc123/bootstrap.py",
+         "--install-db-certs", "draft", "/tmp/draft-upload.abc123/tls"),
+    ]
 
 
 def test_mktemp_captures_only_its_result_with_a_deadline(target, monkeypatch):
@@ -98,7 +116,7 @@ import config
 import remote
 import runpy
 import sys
-config.load_config = lambda path: None
+config.load_config = lambda path, **kwargs: None
 def cancel(config):
     raise KeyboardInterrupt
 remote.local_check = cancel

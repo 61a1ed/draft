@@ -239,21 +239,37 @@ def open_ports(config):
     state = load_state(config)
     client, _ = _client(config, state)
     instance = _recorded(client, state, "instance")
-    ports = [
-        {"fromPort": 22, "toPort": 22, "protocol": "tcp", "cidrs": list(config.ssh_cidrs)},
-        {"fromPort": 80, "toPort": 80, "protocol": "tcp", "cidrs": ["0.0.0.0/0"]},
-        {"fromPort": 443, "toPort": 443, "protocol": "tcp", "cidrs": ["0.0.0.0/0"]},
+    parameters = {"instanceName": instance["name"]}
+    _show(config, "get_instance_port_states", parameters)
+    existing = client.get_instance_port_states(**parameters)["portStates"]
+    # PutInstancePublicPorts opens every supplied rule; never replay closed entries.
+    existing = [rule for rule in existing if rule["state"] == "open"]
+    ports = {22: list(config.ssh_cidrs), 80: ["0.0.0.0/0"], 443: ["0.0.0.0/0"]}
+    for rule in existing:
+        if rule["protocol"] == "all" or (
+            rule["protocol"] == "tcp" and rule["fromPort"] != rule["toPort"]
+            and any(rule["fromPort"] <= port <= rule["toPort"] for port in ports)
+        ):
+            raise RuntimeError(
+                "An existing all-protocol or TCP range rule overlaps SSH/HTTP/HTTPS; "
+                "inspect get-instance-port-states and split that rule in Lightsail first. "
+                "Nothing changed."
+            )
+    # Opening a new SSH rule alone would leave the old sources allowed. Replace
+    # those exact rules while retaining the live firewall's unrelated rules.
+    updated = [
+        {"fromPort": port, "toPort": port, "protocol": "tcp", "cidrs": cidrs,
+         "ipv6Cidrs": [], "cidrListAliases": []}
+        for port, cidrs in ports.items()
     ]
-    if state.get("database_port_open"):
-        from remote import Remote
-
-        Remote(config, state).check_database_tls()
-        ports.append({
-            "fromPort": 5432, "toPort": 5432, "protocol": "tcp", "cidrs": ["0.0.0.0/0"],
+    for rule in existing:
+        if rule["protocol"] == "tcp" and rule["fromPort"] == rule["toPort"] in ports:
+            continue
+        updated.append({
+            **{key: rule[key] for key in ("fromPort", "toPort", "protocol")},
+            **{key: rule.get(key, []) for key in ("cidrs", "ipv6Cidrs", "cidrListAliases")},
         })
-    _perform(
-        config, client, "put_instance_public_ports", instanceName=instance["name"], portInfos=ports,
-    )
+    _perform(config, client, "put_instance_public_ports", **parameters, portInfos=updated)
     return state
 
 
@@ -267,10 +283,9 @@ def open_database_port(config):
     Remote(config, state).check_database_tls()
     _perform(
         config, client, "open_instance_public_ports", instanceName=instance["name"],
-        portInfo={"fromPort": 5432, "toPort": 5432, "protocol": "tcp", "cidrs": ["0.0.0.0/0"]},
+        portInfo={"fromPort": 5432, "toPort": 5432, "protocol": "tcp", "cidrs": ["0.0.0.0/0"],
+                  "ipv6Cidrs": [], "cidrListAliases": []},
     )
-    state["database_port_open"] = True
-    _save(config, state)
     return state
 
 
@@ -316,8 +331,6 @@ def _delete(config, confirmation, kind, method, parameter):
     del state["resources"][kind]
     if kind in {"instance", "static_ip"}:
         state.pop("ip", None)
-    if kind == "instance":
-        state.pop("database_port_open", None)
     _save(config, state)
     return state
 

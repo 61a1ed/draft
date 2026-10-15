@@ -29,7 +29,7 @@ import sys
 import config
 import remote
 
-config.load_config = lambda path: None
+config.load_config = lambda path, **kwargs: None
 def fail_check(config):
     raise {exception}
 remote.local_check = fail_check

@@ -39,7 +39,7 @@ def command_text(args):
     return shlex.join(str(arg) for arg in args)
 
 
-def _stop_process(process, *, interactive, restore_console=None):
+def _stop_process(process, *, interactive):
     """Stop local children too: Git can own an SSH process holding output pipes open."""
     previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
     try:
@@ -63,42 +63,10 @@ def _stop_process(process, *, interactive, restore_console=None):
         try:
             return process.communicate(timeout=5)
         except subprocess.TimeoutExpired:
-            if restore_console is not None:
-                restore_console()
             print("Local command stopped, but an output pipe did not close.", file=sys.stderr)
             return None, None
     finally:
         signal.signal(signal.SIGINT, previous)
-
-
-def _console_mode_restore():
-    """Preserve shared console modes that older Windows SSH clients can reset."""
-    if os.name != "nt":
-        return lambda: None
-
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
-    kernel32.GetStdHandle.restype = wintypes.HANDLE
-    kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetConsoleMode.restype = wintypes.BOOL
-    kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-    kernel32.SetConsoleMode.restype = wintypes.BOOL
-    modes = []
-    for stream in (-10, -11, -12):
-        handle = kernel32.GetStdHandle(stream)
-        mode = wintypes.DWORD()
-        # Redirected streams are pipes/files, not console buffers.
-        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-            modes.append((handle, mode.value))
-
-    def restore():
-        for handle, mode in modes:
-            kernel32.SetConsoleMode(handle, mode)
-
-    return restore
 
 
 def run(*args, timeout=60, progress=None, interactive=False, **kwargs):
@@ -117,7 +85,6 @@ def run(*args, timeout=60, progress=None, interactive=False, **kwargs):
     next_update = started + PROGRESS_INTERVAL
     if progress:
         print(f"{progress}...", flush=True)
-    restore_console = _console_mode_restore()
     process = subprocess.Popen(args, **kwargs)
     try:
         while True:
@@ -134,8 +101,6 @@ def run(*args, timeout=60, progress=None, interactive=False, **kwargs):
                 elapsed = now - started
                 if timeout is not None and elapsed >= timeout:
                     if progress:
-                        if not interactive:
-                            restore_console()
                         print(
                             f"Timed out: {progress} after {elapsed:.0f}s.",
                             file=sys.stderr, flush=True,
@@ -144,18 +109,12 @@ def run(*args, timeout=60, progress=None, interactive=False, **kwargs):
                         args, timeout, output=error.output, stderr=error.stderr
                     ) from None
                 if progress and now >= next_update:
-                    if not interactive:
-                        restore_console()
                     print(f"Still waiting: {progress} ({elapsed:.0f}s elapsed).", flush=True)
                     next_update = now + PROGRESS_INTERVAL
     except BaseException as error:
         # Never launch another remote command while handling a cancelled local one.
-        if not interactive:
-            restore_console()
         try:
-            stdout, stderr = _stop_process(
-                process, interactive=interactive, restore_console=restore_console
-            )
+            stdout, stderr = _stop_process(process, interactive=interactive)
             if isinstance(error, subprocess.TimeoutExpired):
                 # Windows reader threads publish their buffers only when the pipe closes.
                 if stdout is not None:
@@ -163,13 +122,8 @@ def run(*args, timeout=60, progress=None, interactive=False, **kwargs):
                 if stderr is not None:
                     error.stderr = stderr
         except (OSError, subprocess.SubprocessError) as cleanup_error:
-            restore_console()
             print(f"Could not finish local process cleanup: {cleanup_error}", file=sys.stderr)
         raise
-    finally:
-        # OpenSSH 8.1 can restore an uninitialized output mode even after -T.
-        # Restore before printing the outcome or returning to the caller.
-        restore_console()
     result = subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
     if result.returncode and progress:
         print(f"Failed: {progress} (exit {result.returncode}).", file=sys.stderr, flush=True)
@@ -310,10 +264,8 @@ class Remote:
             "StrictHostKeyChecking=yes",
             "-o",
             "UserKnownHostsFile=" + known.as_posix(),
-            # Win32-OpenSSH #1352: 8.1 waits out a numeric ConnectTimeout even
-            # on success. Override user config too; run() bounds the whole step.
             "-o",
-            "ConnectTimeout=none" if os.name == "nt" else "ConnectTimeout=15",
+            "ConnectTimeout=15",
             "-o",
             "ConnectionAttempts=1",
             "-o",
@@ -404,6 +356,21 @@ class Remote:
                     "sudo", "-n", "python3", "-u", upload + "/bootstrap.py", upload + "/host.json",
                     timeout=1800, progress=f"Installing host services on {self.host}",
                 )
+
+    def install_db_certs(self):
+        from tls import validate_server_certificates
+
+        certificates = validate_server_certificates(self.config)
+        with self.upload() as upload:
+            self.copy(HERE / "host/bootstrap.py", upload + "/bootstrap.py")
+            self.ssh("mkdir", "-m", "0700", upload + "/tls")
+            for name in ("server.key", "server.crt", "ca.crt"):
+                self.copy(certificates / name, upload + "/tls/" + name)
+            self.ssh(
+                "sudo", "-n", "python3", "-u", upload + "/bootstrap.py",
+                "--install-db-certs", self.config.name, upload + "/tls",
+                timeout=120, progress=f"Installing PostgreSQL certificates on {self.host}",
+            )
 
     def check_database_tls(self):
         self.ssh(

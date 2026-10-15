@@ -94,12 +94,15 @@ def read_environment(path: Path) -> dict[str, str]:
     return result
 
 
-def validate(config: dict) -> dict:
-    name = config.get("name", "")
+def validate_name(name: str):
     if not isinstance(name, str) or not NAME.fullmatch(name):
         raise ValueError("Invalid application name")
     if name in {"root", "ubuntu", "caddy", "postgres", "nobody", "daemon"}:
         raise ValueError("Application name conflicts with an operating-system account")
+
+
+def validate(config: dict) -> dict:
+    validate_name(config.get("name", ""))
     hostname = config.get("hostname", "")
     if (
         not isinstance(hostname, str)
@@ -111,29 +114,6 @@ def validate(config: dict) -> dict:
     for label in hostname.split("."):
         if not 1 <= len(label) <= 63 or label.startswith("-") or label.endswith("-"):
             raise ValueError("Invalid hostname label")
-    callback = config.get("callback_path", "")
-    reserved = (
-        "/api",
-        "/images",
-        "/assets",
-        "/ready",
-        "/healthz",
-        "/docs",
-        "/redoc",
-        "/openapi.json",
-        "/auth/login",
-        "/auth/logout",
-        "/auth/me",
-        "/auth/test",
-    )
-    if (
-        not isinstance(callback, str)
-        or not re.fullmatch(r"/[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*", callback)
-        or any(part in {".", ".."} for part in callback.split("/"))
-        or callback == "/auth"
-        or any(callback == path or callback.startswith(path + "/") for path in reserved)
-    ):
-        raise ValueError("OIDC callback must be a non-conflicting root-relative path")
     for field in ("uv_version", "node_version"):
         if not isinstance(config.get(field), str) or not VERSION.fullmatch(config[field]):
             raise ValueError(f"{field} must be an exact three-part version")
@@ -143,21 +123,6 @@ def validate(config: dict) -> dict:
     if not isinstance(values, dict):
         raise ValueError("app_environment must be an object")
     environment_text(values)
-    required = {
-        "PUBLIC_BASE_URL": f"https://{hostname}",
-        "APP_ENV": "production",
-        "COOKIE_SECURE": "true",
-        "OIDC_ISSUER": "https://accounts.google.com",
-        "OIDC_CALLBACK_PATH": callback,
-    }
-    if any(values.get(key) != value for key, value in required.items()):
-        raise ValueError("Application origin, environment, or OIDC settings are inconsistent")
-    if values.get("TEST_LOGIN_ENABLED", "false") != "false":
-        raise ValueError("Fixture login must be disabled on this host")
-    if len(values.get("SESSION_SECRET", "")) < 32:
-        raise ValueError("SESSION_SECRET must contain at least 32 characters")
-    if not values.get("OIDC_CLIENT_ID") or not values.get("OIDC_CLIENT_SECRET"):
-        raise ValueError("Google OIDC client credentials are required")
     database = urlsplit(values.get("DATABASE_URL", ""))
     password = config.get("gateway_password", unquote(database.password or ""))
     if (
@@ -346,9 +311,6 @@ def ensure_accounts(name: str) -> bool:
         account = pwd.getpwnam(name)
     if account.pw_dir != f"/var/lib/{name}" or account.pw_shell != "/usr/sbin/nologin":
         raise RuntimeError("Existing application account is not owned by this deployment")
-    # PostgreSQL administration executes the app's prepared interpreter. Only
-    # the app owns its home; other users need traversal to its uv Python runtime.
-    Path(account.pw_dir).chmod(0o755)
     caddy = pwd.getpwnam("caddy")
     web = grp.getgrnam(group)
     needs_restart = "caddy" not in web.gr_mem and caddy.pw_gid != web.gr_gid
@@ -363,7 +325,6 @@ def install_layout(config: dict, source: Path):
         f"/srv/{name}",
         f"/srv/{name}/releases",
         f"/srv/{name}/assets",
-        f"/srv/{name}/imports",
         f"/usr/local/lib/{name}",
     ):
         run("install", "-d", "-m", "0755", path)
@@ -549,7 +510,7 @@ def validate_existing_ca(name: str, tls: dict[str, bytes]):
     if path.exists() and path.read_bytes() != tls["ca.crt"]:
         raise RuntimeError(
             "The uploaded CA differs from this host's trusted CA; restore the original "
-            "workstation TLS files. Setup does not rotate the deployment CA."
+            "workstation TLS files. Host commands do not rotate the deployment CA."
         )
 
 
@@ -575,8 +536,7 @@ def postgres_state(*, reload=False) -> dict:
 
 def check_database_tls(name: str):
     """Assert the running cluster is safe before opening the public database port."""
-    if not NAME.fullmatch(name):
-        raise ValueError("Invalid application name")
+    validate_name(name)
     directory = ETC / "postgresql" / f"{name}-tls"
     validate_tls_source(directory)
     import grp
@@ -595,7 +555,7 @@ def check_database_tls(name: str):
 
     def check_state(current):
         if current["settings"] != postgres_settings(name) or current["pending_restart"]:
-            raise RuntimeError("Running PostgreSQL settings differ; run setup again")
+            raise RuntimeError("Running PostgreSQL settings differ; run install-db-certs again")
         if current["hba_errors"]:
             raise RuntimeError("PostgreSQL authentication configuration contains errors")
 
@@ -674,6 +634,17 @@ ExecReload=/usr/bin/caddy reload --config /etc/caddy/caddy.json
     run("systemctl", "restart" if caddy_restart else "start", "caddy")
 
 
+def install_db_certs(name: str, directory: Path):
+    """Renew server material for an existing deployment without redoing host setup."""
+    validate_name(name)
+    tls = validate_tls_source(directory)
+    if not (ETC / "postgresql" / f"{name}-tls" / "ca.crt").is_file():
+        raise RuntimeError("Host CA is missing; run setup before installing renewed certificates")
+    validate_existing_ca(name, tls)
+    configure_postgres({"name": name}, tls)
+    print("PostgreSQL server certificates installed and verified.", flush=True)
+
+
 def bootstrap(config: dict, source: Path):
     print("Checking host configuration and saved credentials...", flush=True)
     validate(config)
@@ -695,10 +666,9 @@ def bootstrap(config: dict, source: Path):
     install_node(config["node_version"])
     print("Preparing application directories and deployment scripts...", flush=True)
     install_layout(config, source)
-    print("Installing Python 3.12 for root and the application account...", flush=True)
+    print("Installing Python 3.12 for the application account...", flush=True)
     # runuser preserves the caller's cwd, which may be an inaccessible SSH home.
     # Host runtime installation must not discover configuration from that home.
-    run(UV, "--no-config", "python", "install", "3.12", cwd="/")
     run(
         "runuser", "-u", config["name"], "--",
         UV, "--no-config", "python", "install", "3.12",
@@ -713,20 +683,27 @@ def bootstrap(config: dict, source: Path):
 
 
 def main():
-    if len(sys.argv) == 3 and sys.argv[1] == "--check-database-tls":
+    if (
+        len(sys.argv) == 3 and sys.argv[1] == "--check-database-tls"
+        or len(sys.argv) == 4 and sys.argv[1] == "--install-db-certs"
+    ):
         host_preflight()
         name = sys.argv[2]
-        if not NAME.fullmatch(name):
-            raise ValueError("Invalid application name")
+        validate_name(name)
         import fcntl
 
         with open(f"/run/{name}-deploy.lock", "w") as lock:
+            print("Waiting for the host deployment lock...", flush=True)
             fcntl.flock(lock, fcntl.LOCK_EX)
-            check_database_tls(name)
+            if sys.argv[1] == "--install-db-certs":
+                install_db_certs(name, Path(sys.argv[3]))
+            else:
+                check_database_tls(name)
         return
     if len(sys.argv) != 2:
         raise SystemExit(
-            "Usage: sudo python3 bootstrap.py HOST_CONFIG.json | --check-database-tls NAME"
+            "Usage: sudo python3 bootstrap.py HOST_CONFIG.json | --check-database-tls NAME "
+            "| --install-db-certs NAME TLS_DIR"
         )
     config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     validate(config)

@@ -1,7 +1,6 @@
 """Deployment connection isolation, incomplete-state protection, and mTLS checks."""
 
 import os
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -133,62 +132,6 @@ def test_existing_unmarked_database_is_never_bootstrapped(monkeypatch):
     with pytest.raises(RuntimeError, match="unmarked or partially"):
         deployment.initialize({}, "test", REVISION, "secret")
     assert not any("CREATE" in query for query, _ in maintenance.queries + app.queries)
-
-
-@pytest.mark.parametrize("missing,message", [
-    (True, "connection requires a valid client certificate"),
-    (False, "SSL error: tlsv1 alert unknown ca"),
-    (False, "certificate authentication failed for user postgres"),
-])
-def test_certificate_negative_checks_require_server_rejection(monkeypatch, missing, message):
-    def reject(**kwargs):
-        raise psycopg.OperationalError(message)
-
-    monkeypatch.setattr(deployment.psycopg, "connect", reject)
-    deployment.rejected_certificate({}, missing=missing)
-
-
-@pytest.mark.parametrize("message", [
-    "connection timed out", "could not read private key file", "certificate verify failed",
-    "connection refused", "invalid connection option sslcertmode",
-])
-def test_local_tls_errors_and_outages_do_not_pass_negative_tests(monkeypatch, message):
-    def reject(**kwargs):
-        raise psycopg.OperationalError(message)
-
-    monkeypatch.setattr(deployment.psycopg, "connect", reject)
-    with pytest.raises(RuntimeError, match="could not be verified"):
-        deployment.rejected_certificate({}, missing=False)
-
-
-def test_missing_certificate_must_not_be_accepted(monkeypatch):
-    monkeypatch.setattr(deployment.psycopg, "connect", lambda **kwargs: nullcontext())
-    with pytest.raises(RuntimeError, match="Server accepted"):
-        deployment.rejected_certificate({}, missing=True)
-
-
-def test_verification_disables_client_cert_and_rechecks_trusted_after_failures(
-    environment, monkeypatch
-):
-    options = deployment.connection_options(environment)
-    calls = []
-
-    def connect(**kwargs):
-        calls.append(kwargs)
-        if kwargs.get("sslcertmode") == "disable":
-            raise psycopg.OperationalError("connection requires a valid client certificate")
-        if kwargs["sslcert"] != options["sslcert"]:
-            raise psycopg.OperationalError("tlsv1 alert unknown ca")
-        return Connection([[('postgres', True, 'CN=postgres')]])
-
-    monkeypatch.setattr(deployment.psycopg, "connect", connect)
-    deployment.verify(options, "test", REVISION,
-                      Path(environment["PGSSLROOTCERT"]), Path(environment["PGSSLKEY"]))
-    assert len(calls) == 4
-    assert calls[0] == calls[-1]
-    assert calls[1]["sslcertmode"] == "disable"
-    assert all(call["sslmode"] == "verify-ca" for call in calls)
-    assert all(call["dbname"] == "postgres" for call in calls)
 
 
 def test_import_refuses_busy_initialization_before_reading_marker(environment, monkeypatch):

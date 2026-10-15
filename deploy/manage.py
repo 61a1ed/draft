@@ -23,7 +23,7 @@ DELETE_STEPS = {
     "release-ip": "release_ip",
     "delete-key": "delete_key",
 }
-DATABASE_STEPS = {"init-db": "init", "import-catalog": "import", "verify-db": "verify"}
+DATABASE_STEPS = {"init-db": "init", "import-catalog": "import"}
 
 
 def show_steps(config_path):
@@ -40,7 +40,7 @@ def show_steps(config_path):
     for action in (
         "setup", "open-db-port", "verify-db", "prepare", "init-db", "import-catalog", "deploy",
     ):
-        args = [] if action in {"setup", "open-db-port"} else ["--revision", "HEAD"]
+        args = [] if action in {"setup", "open-db-port", "verify-db"} else ["--revision", "HEAD"]
         print(remote.command_text([*prefix, action, *args]))
     print("Replace HEAD with one full commit ID to pin all steps to the same source.")
     print("Set DNS manually to the saved IP, then run:")
@@ -56,9 +56,11 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="action", required=True)
     for name in (
         "steps", "check", *CLOUD_STEPS, "setup", "cloud-status", "status", "smoke", "ssh",
-        "create-certs", "renew-certs", "open-db-port",
+        "create-certs", "renew-certs", "install-db-certs", "open-db-port",
     ):
         commands.add_parser(name)
+    verify = commands.add_parser("verify-db")
+    verify.add_argument("--host", help="Database address; defaults to the saved IP")
     for name in ("prepare", *DATABASE_STEPS, "deploy", "rollback"):
         command = commands.add_parser(name)
         command.add_argument("--revision", default="HEAD", required=name == "rollback")
@@ -90,14 +92,14 @@ def main(argv=None):
             "Run 'steps' or read deploy/README.md. For an existing host, start with 'setup'. "
             "Deletion uses delete-instance, release-ip and delete-key individually."
         )
-    config = load_config(args.config)
+    config = load_config(args.config, action=args.action, host=getattr(args, "host", None))
     if args.action in {"create-certs", "renew-certs"}:
         from tls import ensure_certificates
 
         path = ensure_certificates(config, renew=args.action == "renew-certs")
         print(f"Database certificates ready: {path}")
         if args.action == "renew-certs":
-            print("Run setup to install the renewed server certificate, then verify-db.")
+            print("Run install-db-certs to install the renewed server certificate, then verify-db.")
         return
     if args.action == "check":
         remote.local_check(config)
@@ -123,17 +125,21 @@ def main(argv=None):
     if hasattr(args, "allow_dirty"):
         revision = remote.commit_id(args.revision, args.allow_dirty)
         print(f"Selected committed revision: {revision}", flush=True)
-    if args.action in DATABASE_STEPS:
-        from database import run_database
+    if args.action in {*DATABASE_STEPS, "verify-db"}:
+        from database import run_database, verify_database
 
-        run_database(
-            config, load_state(config), DATABASE_STEPS[args.action], revision, host=args.host,
-        )
+        state = {} if args.host else load_state(config)
+        if args.action == "verify-db":
+            verify_database(config, state, host=args.host)
+        else:
+            run_database(config, state, DATABASE_STEPS[args.action], revision, host=args.host)
         return
     # Host operations use verified SSH; ordinary database operations above do not.
     target = remote.Remote(config, load_state(config))
     if args.action == "setup":
         target.setup()
+    elif args.action == "install-db-certs":
+        target.install_db_certs()
     elif args.action == "prepare":
         target.prepare(revision)
     elif args.action in {"deploy", "rollback"}:

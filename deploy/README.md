@@ -7,8 +7,8 @@ keep the old release serving until the candidate is ready.
 
 `manage.py` supplies the configured names, paths and credentials to each step.
 It does not choose which cloud resources to create next or reconcile a partially
-completed installation. `bringup`, `provision` and `destroy` are retired; they
-print guidance without changing anything.
+completed installation. `state.json` records resource identities and connection
+details; it does not prescribe the firewall or the next operation.
 
 ## Inputs and prerequisites
 
@@ -33,6 +33,7 @@ GOOGLE_OIDC_JSON = r'''{
 Use the complete downloaded Google **web application** JSON. The callback is
 selected from the registered HTTPS redirect URI for `HOSTNAME`; set
 `OIDC_CALLBACK_PATH` if several match. Register that exact URI in Google Cloud.
+The backend checks callback syntax and route conflicts when starting.
 For a consent screen in testing mode, add the intended accounts as test users.
 
 The example also documents the optional AWS profile and Availability Zone,
@@ -43,7 +44,7 @@ creation uses `REGION` followed by `a` (for example `us-west-2a`).
 
 You need:
 
-- uv, Git and OpenSSH (`ssh` and `scp`) on the workstation.
+- uv, Git and an updated OpenSSH (`ssh` and `scp`) on the workstation.
 - AWS credentials with the Lightsail operations used by `cloud.py` and
   `sts:GetCallerIdentity`. Credentials stay on the workstation.
 - A registered domain, access to its DNS records and the Google client JSON.
@@ -51,6 +52,19 @@ You need:
 
 No local Node or PostgreSQL installation is needed. The scripts do not edit IAM
 permissions or DNS records.
+
+On Windows, ensure the upgraded OpenSSH installation is ahead of the bundled
+client in `PATH`. For this workstation, set it in the PowerShell session used
+for deployment, then confirm the selected executables and version:
+
+```powershell
+$env:Path = 'C:\Program Files\OpenSSH-Win64;' + $env:Path
+Get-Command ssh,scp
+ssh -V
+```
+
+SSH, SCP and Git pushes use that session's `PATH`. The scripts do not select an
+installation automatically or compensate for older Windows OpenSSH behavior.
 
 The ignored `deploy/private/` directory contains the settings module, SSH private
 key, verified `known_hosts`, `state.json` resource receipt and generated database
@@ -98,10 +112,13 @@ uv run --project deploy python deploy/manage.py check
 uv run --project deploy python deploy/manage.py steps
 ```
 
-`check` validates local inputs and tools without calling AWS. `steps` prints the
-sequence without executing it. If the default uv cache is unavailable, add
-`--cache-dir deploy/.uv-cache` to uv commands. To use another input module, put
-`--config PATH` before the action.
+`check` validates all local inputs and tools without calling AWS. Other commands
+validate the inputs they consume: Google settings and runtime pins for `setup`,
+SSH CIDRs for `open-ports`, and catalog paths for `import-catalog`. Broken Google
+or catalog settings do not block cloud inspection, deletion or diagnostic SSH.
+`steps` prints the sequence without loading settings or executing it. If the
+default uv cache is unavailable, add `--cache-dir deploy/.uv-cache` to uv commands.
+To use another input module, put `--config PATH` before the action.
 
 ## Create a new machine
 
@@ -118,20 +135,24 @@ uv run --project deploy python deploy/manage.py trust-host
 uv run --project deploy python deploy/manage.py cloud-status
 ```
 
-`open-ports` applies the configured SSH CIDRs and public HTTP/HTTPS access.
+`open-ports` updates exact TCP 22/80/443 rules for the configured SSH CIDRs and
+public HTTP/HTTPS, preserving other live firewall rules, including TCP 5432.
+It needs no SSH connection, so it can restore access after your public IP changes.
+It stops if a TCP range or all-protocol rule overlaps those ports; split the rule
+in Lightsail while preserving its other intended access, then retry. Avoid
+concurrent firewall edits because reading and replacing the rules is not atomic.
+
 `cloud-status` reads AWS and shows the recorded resources and IP. If a command
-fails, inspect its output and `cloud-status`, then run the exact remaining step.
-Do not rerun all creation commands to resume. A conflicting resource or an AWS
-operation with an uncertain outcome needs inspection in AWS before continuing.
-Fix the failed step and rerun that step only. `trust-host` also stops if AWS has
-not reported the host keys yet; retry it once the instance is ready. Keep the
-receipt and key; deleting them does not resolve a resource conflict.
+fails, inspect its output and `cloud-status`. For an uncertain outcome or a
+resource conflict, follow [cloud recovery](#recover-an-interrupted-cloud-step)
+before retrying. Do not rerun all creation commands to resume. `trust-host` may
+need a retry once AWS reports the host keys. Keep the receipt and key; deleting
+them does not resolve a resource conflict.
 
 ## Install the host and first release
 
-**For the interrupted `bringup` that already created the machine and trusted its
-host key, start here with `setup`. Do not recreate the cloud resources.** `setup`
-uses the existing `state.json`, SSH key and `known_hosts` without contacting AWS.
+For an existing machine, start with the needed host step. `setup` uses the saved
+`state.json`, SSH key and `known_hosts` without contacting AWS.
 Run `trust-host` only if `known_hosts` is absent or a replacement host needs its
 new key verified through AWS.
 
@@ -156,10 +177,10 @@ These are separate steps:
    restarts PostgreSQL, causing a brief database interruption.
 2. `open-db-port` verifies the running TLS settings and authentication rules over
    verified SSH, then adds permanent public IPv4 TCP `5432` access in Lightsail.
-   Initial `open-ports` exposes only SSH/HTTP/HTTPS; later runs preserve a recorded
-   database port after checking its policy again.
-3. `verify-db` uses the selected backend revision locally to test trusted mTLS
-   access and prove missing/untrusted client certificates cannot authenticate.
+   It changes only the database rule. No local firewall state is saved.
+3. `verify-db` tests trusted mTLS access and rejection of missing/untrusted client
+   certificates directly from the deployment environment. It requires no backend
+   checkout, revision or clean application working tree.
 4. `prepare` pushes a Git revision and installs/builds its locked dependencies.
 5. `init-db` uses the local backend environment and bootstrap `postgres`
    certificate to create the fresh database, initialize its schema, and create
@@ -172,24 +193,25 @@ These are separate steps:
    previous release. It prepares the selected revision if needed.
 
 Commit the intended app changes before preparing a release. The default revision
-is `HEAD`; use `--revision FULL_COMMIT_ID` on `prepare`, `verify-db`, `init-db`, `import-catalog`
+is `HEAD`; use `--revision FULL_COMMIT_ID` on `prepare`, `init-db`, `import-catalog`
 and `deploy` to pin the same source revision across steps. These commands refuse
 dirty application/deployment directories by default. Add `--allow-dirty` to each
 if intentionally deploying the selected **committed** revision while local edits
 exist; uncommitted app files are excluded. `setup` uses the local `deploy/host/`
 scripts, so changes to the installer do not require an application commit.
-The selected backend commit must contain `scripts/deployment_db.py`; commit this
-workflow before running the database commands. Each database command extracts
-that exact backend revision locally and prepares its locked dependencies with uv.
-It does not require a prepared remote release.
+The selected backend commit must contain `scripts/deployment_db.py`. `init-db`
+and `import-catalog` extract that exact backend revision locally and prepare its
+locked dependencies with uv; neither requires a prepared remote release.
+`verify-db` accepts neither `--revision` nor `--allow-dirty`.
 
-`setup`, release commands, `status`, `ssh` and `logs` use the saved receipt and
-verified host keys; they do not call AWS. `open-db-port` is the explicit SSH/AWS
-step. `init-db`, `import-catalog` and `verify-db` use direct PostgreSQL connections
-without SSH or AWS. They default to the saved IP; pass `--host ADDRESS` to use an
-explicit database address without a receipt. Routine imports need only the
-public CA, importer certificate/key, local inputs and selected backend revision;
-initialization additionally needs the saved gateway password in `secrets.json`.
+`setup`, `install-db-certs`, release commands, `status`, `ssh` and `logs` use the
+saved receipt and verified host keys; they do not call AWS. `open-db-port` is the
+explicit SSH/AWS step. `init-db`, `import-catalog` and `verify-db` use direct
+PostgreSQL connections without SSH or AWS. They default to the saved IP; pass
+`--host ADDRESS` to use an explicit database address without a receipt. Routine
+imports need only the public CA, importer certificate/key, local inputs and
+selected backend revision; initialization additionally needs the saved gateway
+password in `secrets.json`.
 
 Commands print their nonsecret command lines and stream installation/build output.
 Short values needed by the scripts, such as the upload-directory path, are
@@ -197,14 +219,10 @@ captured. Long workstation waits print elapsed progress every 15 seconds and
 have finite time limits. `status: done` from `cloud-init` means only that Ubuntu's
 first boot has finished; the named host installation step follows.
 
-Progress is plain text with new lines, without spinners or ANSI animation. The
-runner restores Windows console modes after commands: the bundled Windows
-OpenSSH 8.1 client can otherwise leave newlines displaying as glyphs and disable
-line wrapping after a noninteractive connection. On Windows, SSH's
-`ConnectTimeout` option is set to `none` because that client waits the full interval
-even on successful connections ([upstream bug](https://github.com/PowerShell/Win32-OpenSSH/issues/1352)).
-The runner still limits the initial SSH check to 30 seconds, the first-boot wait
-to 10 minutes, and host installation to 30 minutes, with Ctrl-C cancellation.
+Progress is plain text with new lines, without spinners or ANSI animation. SSH
+uses a 15-second connection timeout. The runner limits the initial SSH check to
+30 seconds, the first-boot wait to 10 minutes, and host installation to 30 minutes,
+with Ctrl-C cancellation.
 
 `Completed: Checking SSH` means authentication and host-key verification both
 succeeded. The next step is `sudo -n cloud-init status --wait`. The deployment
@@ -272,19 +290,22 @@ than expecting an automatic reset. Catalog import requires completed initializat
 and upserts without deleting omitted rows/assets. Code rollback does not undo
 database changes.
 
-The older host-side `database.py` workflow and its filesystem completion marker
-are no longer used or installed. An existing database initialized by that workflow
-has no new completion record and is deliberately not adopted automatically.
-Inspect such a database before deciding whether to rebuild the disposable host.
-
 Certificates last one year (the CA lasts ten years). Renewal is explicit and
 retains the CA and identity keys:
 
 ```text
 uv run --project deploy python deploy/manage.py renew-certs
-uv run --project deploy python deploy/manage.py setup
-uv run --project deploy python deploy/manage.py verify-db --revision FULL_COMMIT_ID
+uv run --project deploy python deploy/manage.py install-db-certs
+uv run --project deploy python deploy/manage.py verify-db
 ```
+
+`install-db-certs` uploads only `bootstrap.py`, `server.key`, `server.crt` and
+public `ca.crt`; it needs no CA or client private keys. Under the host deployment
+lock it validates the certificates, requires the installed CA to match, and
+configures/restarts PostgreSQL as needed. It does not generate certificates,
+require Google settings, or rerun package, runtime, application or Caddy setup.
+A changed server certificate briefly interrupts database connections. Run
+`setup` for the first installation.
 
 Renewal does not silently replace an expired/missing CA and does not revoke old
 certificates. Keep the private CA backed up; CA replacement or compromise needs
@@ -312,6 +333,88 @@ The local settings, SSH key and application secrets are retained. To generate ne
 database/session secrets for a replacement host, remove only `secrets.json` from
 this deployment's state directory after all cloud resources have been deleted.
 
+## Recover an interrupted cloud step
+
+AWS may finish a request whose response or receipt update was lost. Stop other
+cloud commands and console edits while inspecting it. Keep the printed request,
+operation ID and time. Use the AWS CLI for the following inspection, with your
+actual `STATE_DIR` and profile; omit both `--profile` and `YOUR_PROFILE` when
+using default credentials:
+
+```powershell
+$receiptPath = 'E:\bz\deploy\private\draft-preprod\state.json'
+$receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+Copy-Item -LiteralPath $receiptPath -Destination "$receiptPath.before-repair-$(Get-Date -Format yyyyMMdd-HHmmss)"
+$awsArgs = @('--region', $receipt.region, '--profile', 'YOUR_PROFILE', '--no-cli-pager')
+aws @awsArgs sts get-caller-identity
+aws @awsArgs lightsail get-key-pair --key-pair-name $receipt.key_pair_name
+aws @awsArgs lightsail get-instance --instance-name $receipt.instance_name
+aws @awsArgs lightsail get-static-ip --static-ip-name $receipt.static_ip_name
+```
+
+The STS account must equal `account_id`. Check resource names, ARNs, regions and
+creation times. Recorded ARNs must match exactly. `NotFoundException` means
+absent; a permissions or network error does not. Resources whose creation step
+has not run will be absent.
+
+Inspect the printed operation ID, or the affected resource's operation history
+if no ID reached the workstation:
+
+```powershell
+aws @awsArgs lightsail get-operation --operation-id 'PRINTED_OPERATION_ID'
+aws @awsArgs lightsail get-operations-for-resource --resource-name 'RECORDED_RESOURCE_NAME'
+```
+
+Follow pagination tokens and match the request time, operation type, resource
+name and parameters. Wait for pending operations. For key imports or incomplete
+operation history, inspect CloudTrail Event history in the same region. Filter
+by the request's time window and API event (`ImportKeyPair`, `CreateInstances`,
+`AllocateStaticIp`, `AttachStaticIp`, `DeleteInstance`, `ReleaseStaticIp` or
+`DeleteKeyPair`). Confirm the caller, account, parameters, outcome and any later
+deletion or recreation of that name. See
+[Lightsail audit events](https://docs.aws.amazon.com/lightsail/latest/userguide/logging-lightsail-api-calls-using-aws-cloudtrail.html).
+
+For creation recovery, a matching name is insufficient. Compare the instance's
+`sshKeyName`, blueprint, bundle and location with the printed request. For an
+imported key, compare the audit event's submitted public key with `id_rsa.pub`,
+and confirm it comes from the saved private key using
+`ssh-keygen -y -f PATH_TO_ID_RSA`. Compare the public file's SHA-256 with
+`key_sha256`:
+
+```powershell
+Get-FileHash -Algorithm SHA256 -LiteralPath ([IO.Path]::ChangeExtension($receipt.private_key, 'pub'))
+```
+
+Once identity and outcome are established, edit `state.json` in a text editor:
+
+| Interrupted step | Confirmed outcome | Receipt repair and next action |
+| --- | --- | --- |
+| `create-key`, `create-instance`, `allocate-ip` | The current resource was created by this request | Add its exact AWS `arn` alongside `name` in `resources.key_pair`, `resources.instance` or `resources.static_ip`. Continue with the next step. |
+| Those creation steps | Request failed, resource is absent, receipt entry contains only `name` | Leave the receipt unchanged. Fix the cause and rerun that creation step. |
+| `attach-ip` | Both ARNs match; `isAttached` is true; `attachedTo` equals the recorded instance name; its `publicIpAddress` equals the static IP's `ipAddress` | Set top-level `ip` to that `ipAddress`. Continue with `trust-host`. |
+| `attach-ip` | Operation finished and the recorded static IP remains unattached | Leave the receipt unchanged and rerun `attach-ip`. Investigate an attachment to any other instance separately. |
+| `delete-instance`, `release-ip`, `delete-key` | Original deletion/release completed and the resource is absent | Remove only its object from `resources`. Also remove top-level `ip` after instance deletion or IP release. Continue with the next deletion step. |
+| Those deletion steps | Operation failed and the resource retains its recorded ARN | Leave the receipt unchanged, fix the cause and rerun that deletion with the deployment-name confirmation. |
+
+Keep the version, deployment/account/region fields, top-level resource names,
+private-key path and key hash unchanged. Never substitute a same-named
+replacement's ARN. If evidence is missing or contradictory, resolve ownership
+in AWS before editing. Preserve keys, TLS material, secrets and `known_hosts`;
+a replacement instance needs its host key separately verified by `trust-host`.
+After repair, run `cloud-status`, confirm surviving resources have
+`matches_receipt: true`, and compare the receipt with its backup.
+
+Firewall recovery needs no receipt edit:
+
+```powershell
+aws @awsArgs lightsail get-instance-port-states --instance-name $receipt.instance_name
+```
+
+Inspect the live rules, then rerun `open-ports` or `open-db-port` as needed.
+`open-ports` preserves a live database rule and never recreates one from the
+obsolete `database_port_open` receipt field; that field is ignored and can be
+removed. `open-db-port` still verifies host TLS before adding TCP 5432.
+
 ## Verification and implementation
 
 ```text
@@ -334,8 +437,9 @@ during crashes/reboot are expected on this single host.
 
 Read `cloud.py` for individual AWS actions, `remote.py` for SSH/copy commands, and
 `host/bootstrap.py` and `host/release.py` for the scripts run on the machine.
-`tls.py` manages certificates, `database.py` selects the local backend environment,
-and `draft_backend/scripts/deployment_db.py` owns database initialization and import.
+`tls.py` manages certificates, `database.py` verifies transport and selects the
+local backend environment, and `draft_backend/scripts/deployment_db.py` owns
+database initialization and import.
 The release handoff follows
 [the reference spec](../caddy-uv-systemd-deployment.md). No automatic release or
 shared-asset pruning, backups or database migration runner is included.

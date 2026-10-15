@@ -114,21 +114,6 @@ def test_oidc_selects_registered_callback_when_ambiguous(tmp_path):
     )
 
 
-@pytest.mark.parametrize("path", ["/", "/auth/../callback", "/auth/{callback}", "/auth%2fcallback"])
-def test_oidc_rejects_unsafe_route_paths(tmp_path, path):
-    value = json.dumps(
-        {
-            "web": {
-                "client_id": "fake",
-                "client_secret": "fake-secret",
-                "redirect_uris": ["https://draft.example.com" + path],
-            }
-        }
-    )
-    with pytest.raises(ValueError, match="callback must"):
-        load_config(settings(tmp_path, GOOGLE_OIDC_JSON=value))
-
-
 def test_settings_exception_preserves_original_message(tmp_path):
     path = tmp_path / "settings.py"
     path.write_text("raise ValueError('secret-credential')", encoding="utf-8")
@@ -137,7 +122,7 @@ def test_settings_exception_preserves_original_message(tmp_path):
 
 
 @pytest.mark.parametrize("path", ["/api/custom", "/auth/login", "/assets/callback", "/auth"])
-def test_callback_cannot_shadow_application_routes(tmp_path, path):
+def test_callback_route_policy_is_left_to_the_application(tmp_path, path):
     value = json.dumps(
         {
             "web": {
@@ -147,5 +132,38 @@ def test_callback_cannot_shadow_application_routes(tmp_path, path):
             }
         }
     )
-    with pytest.raises(ValueError, match="conflicts"):
-        load_config(settings(tmp_path, GOOGLE_OIDC_JSON=value))
+    assert load_config(settings(tmp_path, GOOGLE_OIDC_JSON=value)).callback_path == path
+
+
+@pytest.mark.parametrize("action", [
+    "cloud-status", "delete-instance", "release-ip", "delete-key", "ssh", "logs", "status",
+    "install-db-certs", "verify-db",
+])
+def test_maintenance_does_not_require_application_or_installation_inputs(tmp_path, action):
+    config = load_config(settings(
+        tmp_path, GOOGLE_OIDC_JSON="broken", SSH_CIDRS=[], CATALOG_CSV=None, IMAGE_ROOT=None,
+        UV_VERSION="broken", NODE_VERSION="broken", BLUEPRINT_ID="broken", BUNDLE_ID=None,
+        AVAILABILITY_ZONE="wrong-region",
+    ), action=action)
+    assert config.name == "example"
+
+
+def test_firewall_update_requires_only_identity_cloud_access_and_ssh_cidrs(tmp_path):
+    path = settings(tmp_path, GOOGLE_OIDC_JSON="broken", CATALOG_CSV=None, UV_VERSION="broken")
+    assert load_config(path, action="open-ports").ssh_cidrs == ("192.0.2.10/32",)
+    with pytest.raises(ValueError, match="SSH_CIDRS"):
+        load_config(settings(tmp_path, SSH_CIDRS=[]), action="open-ports")
+
+
+@pytest.mark.parametrize("action", ["create-certs", "renew-certs", "verify-db", "init-db"])
+def test_standalone_certificate_and_database_steps_need_only_local_identity(tmp_path, action):
+    path = tmp_path / "settings.py"
+    path.write_text("NAME = 'example'\nSTATE_DIR = './state'\n")
+    config = load_config(path, action=action, host="192.0.2.1")
+    assert config.name == "example"
+    assert config.state_dir == tmp_path / "state"
+
+
+def test_explicit_database_address_ignores_unrelated_cloud_identity(tmp_path):
+    path = settings(tmp_path, REGION="broken", HOSTNAME="broken", GOOGLE_OIDC_JSON="broken")
+    assert load_config(path, action="verify-db", host="192.0.2.1").name == "example"

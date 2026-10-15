@@ -235,6 +235,62 @@ def test_ca_replacement_is_refused_before_saving_configuration(
         bootstrap.bootstrap(host_config, etc / "uploaded")
 
 
+def test_certificate_install_only_updates_postgres_under_host_lock(
+    host_paths, tmp_path, monkeypatch
+):
+    etc, pg = host_paths
+    uploaded = certificates(tmp_path / "uploaded" / "tls")
+    installed = etc / "postgresql" / "draft-tls"
+    installed.mkdir()
+    (installed / "ca.crt").write_bytes((uploaded / "ca.crt").read_bytes())
+    calls = []
+    monkeypatch.setattr(bootstrap, "host_preflight", lambda: calls.append("preflight"))
+
+    def lock_file(path, mode):
+        assert calls == ["preflight"]
+        assert path == "/run/draft-deploy.lock" and mode == "w"
+        return (tmp_path / "host.lock").open(mode)
+
+    def flock(lock, operation):
+        assert operation == "exclusive"
+        calls.append("locked")
+
+    monkeypatch.setattr(bootstrap, "open", lock_file, raising=False)
+    monkeypatch.setitem(sys.modules, "fcntl", SimpleNamespace(LOCK_EX="exclusive", flock=flock))
+    monkeypatch.setattr(bootstrap, "run", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(bootstrap, "check_database_tls", lambda name: calls.append(("check", name)))
+    monkeypatch.setattr(sys, "argv", ["bootstrap.py", "--install-db-certs", "draft", str(uploaded)])
+
+    bootstrap.main()
+
+    assert calls[:2] == ["preflight", "locked"]
+    assert all(call[0] in {"chown", "systemctl", "check"} for call in calls[2:])
+    assert ("systemctl", "restart", "postgresql@16-main.service") in calls
+    assert calls[-1] == ("check", "draft")
+    for filename in bootstrap.TLS_FILES:
+        assert (installed / filename).read_bytes() == (uploaded / filename).read_bytes()
+    assert (pg / "pg_hba.conf").read_bytes() == bootstrap.PG_HBA
+    assert not (etc / "draft" / "app.env").exists()
+    assert not (etc / "draft" / "deploy.json").exists()
+
+
+@pytest.mark.parametrize("existing_ca", [None, b"another deployment CA"])
+def test_certificate_install_requires_original_host_ca(
+    host_paths, tmp_path, monkeypatch, existing_ca
+):
+    etc, _ = host_paths
+    uploaded = certificates(tmp_path / "uploaded" / "tls")
+    if existing_ca is not None:
+        installed = etc / "postgresql" / "draft-tls"
+        installed.mkdir()
+        (installed / "ca.crt").write_bytes(existing_ca)
+    monkeypatch.setattr(
+        bootstrap, "configure_postgres", lambda *args: pytest.fail("Must not modify PostgreSQL")
+    )
+    with pytest.raises(RuntimeError, match="CA is missing|uploaded CA differs"):
+        bootstrap.install_db_certs("draft", uploaded)
+
+
 @pytest.fixture
 def runtime_check(host_paths, monkeypatch):
     etc, pg = host_paths

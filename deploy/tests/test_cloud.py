@@ -18,6 +18,7 @@ class FakeLightsail:
         self.resources = {"key_pair": {}, "instance": {}, "static_ip": {}}
         self.mutations = []
         self.public_key = None
+        self.ports = []
 
     def _get(self, kind, name, result):
         if name not in self.resources[kind]:
@@ -51,11 +52,17 @@ class FakeLightsail:
 
     def put_instance_public_ports(self, **kwargs):
         self.mutations.append(("put_instance_public_ports", kwargs))
+        self.ports = deepcopy(kwargs["portInfos"])
         return {}
 
     def open_instance_public_ports(self, **kwargs):
         self.mutations.append(("open_instance_public_ports", kwargs))
+        self.ports.append(deepcopy(kwargs["portInfo"]))
         return {}
+
+    def get_instance_port_states(self, instanceName):
+        assert instanceName in self.resources["instance"]
+        return {"portStates": [{"state": "open", **deepcopy(rule)} for rule in self.ports]}
 
     def allocate_static_ip(self, **kwargs):
         self.mutations.append(("allocate_static_ip", kwargs))
@@ -228,13 +235,91 @@ def test_database_port_opens_only_after_verified_host_policy(environment, monkey
     assert lightsail.mutations[-1] == ("open_instance_public_ports", {
         "instanceName": "example", "portInfo": {
             "fromPort": 5432, "toPort": 5432, "protocol": "tcp", "cidrs": ["0.0.0.0/0"],
+            "ipv6Cidrs": [], "cidrListAliases": [],
         },
     })
-    assert cloud.load_state(config)["database_port_open"] is True
+    assert "database_port_open" not in cloud.load_state(config)
     cloud.open_ports(config)
     assert any(p["fromPort"] == 5432 for p in lightsail.mutations[-1][1]["portInfos"])
-    cloud.delete_instance(config, config.name)
-    assert "database_port_open" not in cloud.load_state(config)
+
+
+def test_changed_ssh_cidrs_need_no_ssh_and_preserve_unrelated_live_rules(environment, monkeypatch):
+    import remote
+
+    config, lightsail, _, _ = environment
+    state = complete_steps(config)
+    unrelated = [
+        {"fromPort": 5432, "toPort": 5432, "protocol": "tcp", "cidrs": ["0.0.0.0/0"],
+         "ipv6Cidrs": [], "cidrListAliases": []},
+        {"fromPort": 9000, "toPort": 9010, "protocol": "tcp", "cidrs": [],
+         "ipv6Cidrs": ["2001:db8::/64"], "cidrListAliases": []},
+        {"fromPort": 3389, "toPort": 3389, "protocol": "tcp", "cidrs": [],
+         "ipv6Cidrs": [], "cidrListAliases": ["lightsail-connect"]},
+        {"fromPort": 22, "toPort": 443, "protocol": "udp", "cidrs": ["192.0.2.9/32"],
+         "ipv6Cidrs": [], "cidrListAliases": []},
+        {"fromPort": 8, "toPort": -1, "protocol": "icmp", "cidrs": ["0.0.0.0/0"],
+         "ipv6Cidrs": [], "cidrListAliases": []},
+    ]
+    lightsail.ports.extend(deepcopy(unrelated))
+    # Default/legacy SSH can also have IPv6 and browser-console access. Both
+    # must be removed rather than leaving an alternative path past SSH_CIDRS.
+    lightsail.ports[0].update(ipv6Cidrs=["::/0"], cidrListAliases=["lightsail-connect"])
+    state["database_port_open"] = True  # Old receipts must not trigger an SSH check.
+    cloud._save(config, state)
+    monkeypatch.setattr(remote, "Remote", lambda *a: pytest.fail("must not use SSH"))
+    previous = len(lightsail.mutations)
+    cloud.open_ports(replace(config, ssh_cidrs=("192.0.2.2/32",)))
+    assert len(lightsail.mutations) == previous + 1
+    assert lightsail.ports[0] == {
+        "fromPort": 22, "toPort": 22, "protocol": "tcp", "cidrs": ["192.0.2.2/32"],
+        "ipv6Cidrs": [], "cidrListAliases": [],
+    }
+    assert lightsail.ports[3:] == unrelated
+    assert cloud.load_state(config) == state
+
+
+def test_stale_receipt_flag_does_not_reopen_database_port(environment, monkeypatch):
+    import remote
+
+    config, lightsail, _, _ = environment
+    state = complete_steps(config)
+    state["database_port_open"] = True
+    cloud._save(config, state)
+    monkeypatch.setattr(remote, "Remote", lambda *a: pytest.fail("must not use SSH"))
+    cloud.open_ports(config)
+    assert [rule["fromPort"] for rule in lightsail.ports] == [22, 80, 443]
+
+
+@pytest.mark.parametrize("protocol,start,end", [
+    ("tcp", 5432, 5432), ("tcp", 20, 23), ("all", -1, -1),
+])
+def test_closed_firewall_rules_are_not_reopened_or_treated_as_live_overlaps(
+    environment, protocol, start, end,
+):
+    config, lightsail, _, _ = environment
+    complete_steps(config)
+    lightsail.ports.append({
+        "fromPort": start, "toPort": end, "protocol": protocol,
+        "cidrs": ["0.0.0.0/0"], "state": "closed",
+    })
+    cloud.open_ports(config)
+    assert [rule["fromPort"] for rule in lightsail.ports] == [22, 80, 443]
+
+
+@pytest.mark.parametrize("protocol,start,end", [
+    ("tcp", 20, 23), ("tcp", 79, 81), ("tcp", 443, 444), ("all", -1, -1),
+])
+def test_overlapping_firewall_ranges_require_manual_inspection(
+    environment, protocol, start, end,
+):
+    config, lightsail, _, _ = environment
+    complete_steps(config)
+    lightsail.ports.append({"fromPort": start, "toPort": end, "protocol": protocol,
+                           "cidrs": ["0.0.0.0/0"]})
+    previous = list(lightsail.mutations)
+    with pytest.raises(RuntimeError, match="split that rule.*Nothing changed"):
+        cloud.open_ports(config)
+    assert lightsail.mutations == previous
 
 
 def test_database_port_stays_closed_when_tls_check_fails(environment, monkeypatch):

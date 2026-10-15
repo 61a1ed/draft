@@ -1,11 +1,13 @@
 import io
 import json
+import os
 import sys
 import tarfile
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
+import psycopg
 import pytest
 
 import database
@@ -42,10 +44,10 @@ def test_connection_is_explicit_and_ignores_ambient_credentials(config, monkeypa
     assert env.get("DL_GATEWAY_PASSWORD") == ("s" * 40 if action == "init" else None)
 
 
-@pytest.mark.parametrize("action", ["init-db", "import-catalog", "verify-db"])
+@pytest.mark.parametrize("action", ["init-db", "import-catalog"])
 def test_database_cli_needs_no_ssh_files_or_cloud(config, monkeypatch, action):
     calls = []
-    monkeypatch.setattr(manage, "load_config", lambda path: config)
+    monkeypatch.setattr(manage, "load_config", lambda path, **kwargs: config)
     monkeypatch.setattr(manage, "load_state", lambda cfg: {})
     monkeypatch.setattr(remote, "commit_id", lambda *args: REVISION)
     monkeypatch.setattr(remote, "Remote", lambda *args: pytest.fail("Database must not need SSH"))
@@ -53,6 +55,93 @@ def test_database_cli_needs_no_ssh_files_or_cloud(config, monkeypatch, action):
     monkeypatch.setattr(database, "run_database", lambda *a, **kw: calls.append((a, kw)))
     manage.main([action, "--host", "192.0.2.1"])
     assert calls == [((config, {}, manage.DATABASE_STEPS[action], REVISION), {"host": "192.0.2.1"})]
+
+
+def test_verify_cli_needs_no_revision_checkout_cloud_or_receipt(config, monkeypatch):
+    calls = []
+    monkeypatch.setattr(manage, "load_config", lambda path, **kwargs: config)
+    monkeypatch.setattr(manage, "load_state", lambda cfg: pytest.fail("No receipt needed"))
+    monkeypatch.setattr(remote, "commit_id", lambda *a: pytest.fail("No revision needed"))
+    monkeypatch.setattr(remote, "Remote", lambda *a: pytest.fail("No SSH needed"))
+    monkeypatch.setitem(sys.modules, "cloud", None)
+    monkeypatch.setattr(database, "selected_backend", lambda *a: pytest.fail("No checkout needed"))
+    monkeypatch.setattr(database, "verify_database", lambda *a, **kw: calls.append((a, kw)))
+    manage.main(["verify-db", "--host", "192.0.2.1"])
+    assert calls == [((config, {}), {"host": "192.0.2.1"})]
+
+
+@pytest.mark.parametrize("host", ["/tmp/socket", "@socket", "host1,host2", "host\n", "host\0"])
+def test_database_target_is_one_tcp_host(config, host):
+    with pytest.raises(ValueError, match="one database IP address or hostname"):
+        database.connection_environment(config, {}, "verify", host)
+
+
+def trusted_connection():
+    return nullcontext(SimpleNamespace(
+        info=SimpleNamespace(server_version=160000),
+        execute=lambda query: SimpleNamespace(fetchone=lambda: ("postgres", True, "CN=postgres")),
+    ))
+
+
+def test_verify_uses_local_certificates_and_restores_ambient_environment(config, monkeypatch):
+    monkeypatch.setenv("PGSERVICE", "ambient-service")
+    monkeypatch.setenv("PGHOSTADDR", "192.0.2.222")
+    monkeypatch.setenv("PGPASSWORD", "ambient-secret")
+    monkeypatch.setattr(
+        database.tls, "validate_client_certificates", lambda cfg, role: cfg.state_dir / "tls",
+    )
+
+    def untrusted(directory):
+        directory.mkdir()
+        certificate, key = directory / "untrusted.crt", directory / "untrusted.key"
+        certificate.touch()
+        key.touch()
+        return certificate, key
+
+    calls = []
+
+    def connect(**kwargs):
+        assert not any(key.upper().startswith("PG") for key in os.environ)
+        calls.append(kwargs)
+        if kwargs["sslcertmode"] == "disable":
+            raise psycopg.OperationalError("connection requires a valid client certificate")
+        if Path(kwargs["sslcert"]).name == "untrusted.crt":
+            raise psycopg.OperationalError("tlsv1 alert unknown ca")
+        return trusted_connection()
+
+    monkeypatch.setattr(database.tls, "create_untrusted_client", untrusted)
+    monkeypatch.setattr(database.psycopg, "connect", connect)
+    monkeypatch.setattr(database, "selected_backend", lambda *a: pytest.fail("No checkout needed"))
+    database.verify_database(config, {}, host="192.0.2.1")
+    assert len(calls) == 4
+    assert calls[0]["host"] == "192.0.2.1"
+    assert calls[0]["sslmode"] == "verify-ca" and calls[0]["sslcertmode"] == "require"
+    assert calls[0]["password"] == "" and calls[0]["passfile"] == os.devnull
+    assert calls[0]["gssencmode"] == "disable"
+    assert calls[0]["sslcert"] == str((config.state_dir / "tls/postgres.crt").resolve())
+    assert calls[0]["sslkey"] == str((config.state_dir / "tls/postgres.key").resolve())
+    assert calls[0]["sslrootcert"] == str((config.state_dir / "tls/ca.crt").resolve())
+    assert os.environ["PGSERVICE"] == "ambient-service"
+    assert os.environ["PGHOSTADDR"] == "192.0.2.222"
+    assert os.environ["PGPASSWORD"] == "ambient-secret"
+    assert not list(config.state_dir.glob("verify-db-*"))
+
+
+def test_verification_sanitizes_connection_failure_and_restores_environment(tmp_path, monkeypatch):
+    certificate = tmp_path / "untrusted.crt"
+    key = tmp_path / "untrusted.key"
+    certificate.touch()
+    key.touch()
+    monkeypatch.setenv("PGPASSWORD", "ambient-secret")
+
+    def reject(**kwargs):
+        raise psycopg.OperationalError("failure with password=ambient-secret")
+
+    monkeypatch.setattr(database.psycopg, "connect", reject)
+    with pytest.raises(RuntimeError, match="Database verification failed") as error:
+        database.verify_transport({}, certificate, key)
+    assert "secret" not in str(error.value)
+    assert os.environ["PGPASSWORD"] == "ambient-secret"
 
 
 def test_import_runs_local_files_in_selected_revision_environment(config, monkeypatch):
@@ -123,10 +212,69 @@ def test_setup_uploads_only_server_tls_material(config, monkeypatch):
 @pytest.mark.parametrize("action,renew", [("create-certs", False), ("renew-certs", True)])
 def test_certificates_need_no_saved_ip_or_remote_connection(config, monkeypatch, action, renew):
     calls = []
-    monkeypatch.setattr(manage, "load_config", lambda path: config)
+    monkeypatch.setattr(manage, "load_config", lambda path, **kwargs: config)
     monkeypatch.setattr(manage, "load_state", lambda cfg: pytest.fail("No host receipt needed"))
     monkeypatch.setattr(
         database.tls, "ensure_certificates", lambda cfg, **kw: calls.append((cfg, kw)) or "tls",
     )
     manage.main([action])
     assert calls == [(config, {"renew": renew})]
+
+
+@pytest.mark.parametrize("missing,message", [
+    (True, "connection requires a valid client certificate"),
+    (False, "SSL error: tlsv1 alert unknown ca"),
+    (False, "certificate authentication failed for user postgres"),
+])
+def test_certificate_negative_checks_require_server_rejection(monkeypatch, missing, message):
+    def reject(**kwargs):
+        raise psycopg.OperationalError(message)
+
+    monkeypatch.setattr(database.psycopg, "connect", reject)
+    database.rejected_certificate({}, missing=missing)
+
+
+@pytest.mark.parametrize("message", [
+    "connection timed out", "could not read private key file", "certificate verify failed",
+    "connection refused", "invalid connection option sslcertmode",
+])
+def test_local_tls_errors_and_outages_do_not_pass_negative_tests(monkeypatch, message):
+    def reject(**kwargs):
+        raise psycopg.OperationalError(message)
+
+    monkeypatch.setattr(database.psycopg, "connect", reject)
+    with pytest.raises(RuntimeError, match="could not be verified"):
+        database.rejected_certificate({}, missing=False)
+
+
+def test_missing_certificate_must_not_be_accepted(monkeypatch):
+    monkeypatch.setattr(database.psycopg, "connect", lambda **kwargs: nullcontext())
+    with pytest.raises(RuntimeError, match="Server accepted"):
+        database.rejected_certificate({}, missing=True)
+
+
+def test_verification_disables_client_cert_and_rechecks_trusted_after_failures(
+    tmp_path, monkeypatch
+):
+    certificate = tmp_path / "untrusted.crt"
+    key = tmp_path / "untrusted.key"
+    certificate.touch()
+    key.touch()
+    options = {"sslmode": "verify-ca", "sslcert": "trusted.crt"}
+    calls = []
+
+    def connect(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("sslcertmode") == "disable":
+            raise psycopg.OperationalError("connection requires a valid client certificate")
+        if kwargs["sslcert"] != options["sslcert"]:
+            raise psycopg.OperationalError("tlsv1 alert unknown ca")
+        return trusted_connection()
+
+    monkeypatch.setattr(database.psycopg, "connect", connect)
+    database.verify_transport(options, certificate, key)
+    assert len(calls) == 4
+    assert calls[0] == calls[-1]
+    assert calls[1]["sslcertmode"] == "disable"
+    assert all(call["sslmode"] == "verify-ca" for call in calls)
+    assert all(call["dbname"] == "postgres" for call in calls)

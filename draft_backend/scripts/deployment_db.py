@@ -1,4 +1,4 @@
-"""Initialize, import, and verify a deployed database over client-certificate TLS.
+"""Initialize and import a deployed database over client-certificate TLS.
 
 The deployment controller supplies the six PG connection environment variables.
 Certificates use verify-ca: the CA is checked without matching a server hostname.
@@ -166,63 +166,16 @@ def import_data(
     return len(pokemon), len(images)
 
 
-def rejected_certificate(options: dict[str, str], *, missing: bool) -> None:
-    try:
-        with psycopg.connect(**options, dbname="postgres", user="postgres"):
-            pass
-    except psycopg.OperationalError as exc:
-        # Only actual server authentication/TLS alerts are evidence. A timeout,
-        # broken local PEM, missing file, or server-CA failure cannot pass a test.
-        detail = str(exc).lower()
-        expected = (
-            ("connection requires a valid client certificate",)
-            if missing else (
-                "alert unknown ca", "alert bad certificate", "alert certificate unknown",
-                "alert certificate required", "certificate authentication failed",
-                "connection requires a valid client certificate",
-            )
-        )
-        if any(message in detail for message in expected):
-            return
-        raise RuntimeError("Client-certificate rejection could not be verified") from None
-    raise RuntimeError("Server accepted a missing or untrusted client certificate")
-
-
-def verify(
-    options: dict[str, str], name: str, revision: str, untrusted_cert: Path, untrusted_key: Path
-) -> None:
-    validate_identity(name, revision)
-    if not untrusted_cert.is_file() or not untrusted_key.is_file():
-        raise ValueError("Untrusted client certificate and key must be existing files")
-
-    def trusted() -> None:
-        # Transport verification also runs on a fresh host before init-db.
-        with psycopg.connect(**options, dbname="postgres", user="postgres") as conn:
-            check_connection(conn, "postgres")
-
-    trusted()
-    rejected_certificate({**options, "sslcertmode": "disable"}, missing=True)
-    rejected_certificate(
-        {**options, "sslcert": str(untrusted_cert.resolve()),
-         "sslkey": str(untrusted_key.resolve())}, missing=False,
-    )
-    trusted()
-
-
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("init", "import", "verify"))
+    parser.add_argument("action", choices=("init", "import"))
     parser.add_argument("--name", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--csv", type=Path)
     parser.add_argument("--image-root", type=Path)
-    parser.add_argument("--untrusted-cert", type=Path)
-    parser.add_argument("--untrusted-key", type=Path)
     args = parser.parse_args(argv)
     if args.action == "import" and (args.csv is None or args.image_root is None):
         parser.error("import requires --csv and --image-root")
-    if args.action == "verify" and (args.untrusted_cert is None or args.untrusted_key is None):
-        parser.error("verify requires --untrusted-cert and --untrusted-key")
     try:
         environment = {key: os.environ.get(key, "") for key in ENVIRONMENT}
         # Reject ambient PGUSER/PGSERVICE/PGHOSTADDR/etc, including unknown future
@@ -242,9 +195,6 @@ def main(argv: list[str] | None = None) -> None:
                 options, args.name, args.revision, args.csv, args.image_root
             )
             print(f"Imported {count} Pokémon and {images} unique PNG images.")
-        else:
-            verify(options, args.name, args.revision, args.untrusted_cert, args.untrusted_key)
-            print("Verified trusted mTLS access and rejection of missing/untrusted certificates.")
     except (psycopg.Error, OSError, ValueError, RuntimeError, csv.Error) as exc:
         if isinstance(exc, psycopg.Error):
             detail = f"database operation failed (SQLSTATE {exc.sqlstate or 'connection error'})"
