@@ -265,29 +265,18 @@ def main():
     name = Path(__file__).resolve().parent.name
     if not NAME.fullmatch(name):
         parser.error("Install database.py under /usr/local/lib/APPLICATION first")
-    try:
-        settings = json.loads(Path(f"/etc/{name}/deploy.json").read_text())
-        if settings["name"] != name:
-            raise RuntimeError("Installed database script does not match the host configuration")
-        with open(f"/run/{name}-deploy.lock", "w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            admin = DatabaseAdmin(name)
-            if args.command == "init":
-                admin.init(args.revision)
-            elif args.command == "import":
-                admin.import_catalog(args.revision, args.csv, args.image_root)
-            else:
-                admin.import_archive(args.revision, args.archive)
-    except (
-        OSError,
-        ValueError,
-        RuntimeError,
-        KeyError,
-        tarfile.TarError,
-        subprocess.CalledProcessError,
-    ) as exc:
-        detail = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
-        raise SystemExit(f"Database administration failed: {detail}") from None
+    settings = json.loads(Path(f"/etc/{name}/deploy.json").read_text())
+    if settings["name"] != name:
+        raise RuntimeError("Installed database script does not match the host configuration")
+    with open(f"/run/{name}-deploy.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        admin = DatabaseAdmin(name)
+        if args.command == "init":
+            admin.init(args.revision)
+        elif args.command == "import":
+            admin.import_catalog(args.revision, args.csv, args.image_root)
+        else:
+            admin.import_archive(args.revision, args.archive)
 
 
 if __name__ == "__main__":

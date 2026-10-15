@@ -1,4 +1,4 @@
-"""Load the administrator's private Python configuration without displaying secrets."""
+"""Load and validate the administrator's private Python configuration."""
 
 import json
 import re
@@ -63,7 +63,7 @@ def _oidc(values: dict, hostname: str) -> tuple[str, str, str]:
             raise ValueError("Expected a JSON string")
         document = json.loads(raw_json)
     except (ValueError, TypeError):
-        raise ValueError("GOOGLE_OIDC_JSON must contain valid Google web-client JSON") from None
+        raise ValueError("GOOGLE_OIDC_JSON must contain valid Google web-client JSON")
     web = document.get("web") if isinstance(document, dict) else None
     if not isinstance(web, dict):
         raise ValueError("GOOGLE_OIDC_JSON must describe a web application client")
@@ -126,13 +126,7 @@ def _oidc(values: dict, hostname: str) -> tuple[str, str, str]:
 def load_config(path: str | Path) -> Config:
     """Execute trusted administrator code; relative paths are relative to that module."""
     path = Path(path).resolve()
-    try:
-        values = runpy.run_path(str(path))
-    except Exception:
-        # SyntaxError and arbitrary user exceptions can contain the literal secret JSON.
-        raise ValueError(
-            "Could not load the private settings module; check its path and Python syntax"
-        ) from None
+    values = runpy.run_path(str(path))
     name = _text(values, "NAME")
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,18}[a-z0-9]|[a-z]", name):
         raise ValueError(
@@ -160,7 +154,7 @@ def load_config(path: str | Path) -> Config:
     except (TypeError, ValueError):
         raise ValueError(
             "SSH_CIDRS contains an invalid network; use your public IPv4 address /32"
-        ) from None
+        )
     if any(network.version != 4 for network in networks):
         raise ValueError("SSH_CIDRS must contain IPv4 networks; this deployment uses IPv4 only")
     zone = _optional(values, "AVAILABILITY_ZONE")

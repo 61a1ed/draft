@@ -3,6 +3,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,38 @@ import pytest
 from host import bootstrap, database
 
 REVISION = "a" * 40
+
+
+@pytest.mark.parametrize(
+    "script,arguments",
+    [
+        ("bootstrap.py", ["host.json"]),
+        ("database.py", ["init", REVISION]),
+        ("release.py", ["--config", "deploy.json", "status"]),
+    ],
+)
+def test_host_commands_show_original_traceback(script, arguments):
+    program = """
+import os, pathlib, runpy, sys, types
+os.geteuid = lambda: 0
+sys.modules['fcntl'] = types.SimpleNamespace()
+def fail_read(*args, **kwargs):
+    raise OSError('configuration could not be read: diagnostic detail')
+pathlib.Path.read_text = fail_read
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name='__main__')
+"""
+    path = Path(bootstrap.__file__).with_name(script)
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(path), *arguments],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Traceback (most recent call last):" in result.stderr
+    assert script in result.stderr
+    assert "in fail_read" in result.stderr
+    assert "OSError: configuration could not be read: diagnostic detail" in result.stderr
 
 
 @pytest.fixture

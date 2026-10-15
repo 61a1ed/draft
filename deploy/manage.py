@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import remote
@@ -100,27 +98,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        raise SystemExit(
-            "Interrupted. State retained; inspect status. Incomplete cloud provisioning "
-            "requires cleanup before retrying (see deploy/README.md)."
-        ) from None
-    except subprocess.CalledProcessError as exc:
-        # Never include command arguments or environments in a generic diagnostic.
-        raise SystemExit(
-            f"A local/SSH command failed (exit {exc.returncode}); see its output above."
-        ) from None
-    except Exception as exc:
-        # SDK/server exceptions may echo request data; report only vetted errors.
-        if isinstance(exc, (ValueError, RuntimeError, FileNotFoundError)):
-            print(str(exc), file=sys.stderr)
-        else:
-            print(
-                f"Operation failed ({type(exc).__name__}); state retained for inspection. "
-                "Incomplete cloud provisioning requires cleanup before retrying "
-                "(see deploy/README.md).",
-                file=sys.stderr,
-            )
-        raise SystemExit(1) from None
+    main()

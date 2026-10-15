@@ -129,12 +129,11 @@ def test_oidc_rejects_unsafe_route_paths(tmp_path, path):
         load_config(settings(tmp_path, GOOGLE_OIDC_JSON=value))
 
 
-def test_settings_exception_does_not_reveal_secret(tmp_path):
+def test_settings_exception_preserves_original_message(tmp_path):
     path = tmp_path / "settings.py"
     path.write_text("raise ValueError('secret-credential')", encoding="utf-8")
-    with pytest.raises(ValueError) as error:
+    with pytest.raises(ValueError, match="secret-credential"):
         load_config(path)
-    assert "secret-credential" not in str(error.value)
 
 
 @pytest.mark.parametrize("path", ["/api/custom", "/auth/login", "/assets/callback", "/auth"])

@@ -16,6 +16,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import traceback
 import urllib.request
 from pathlib import Path
 
@@ -357,6 +358,7 @@ with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as archive:
         try:
             self.retire(revision)
         except (OSError, subprocess.CalledProcessError):
+            traceback.print_exc()
             print(
                 "Warning: release is active, but old-service cleanup failed; inspect status.",
                 flush=True,
@@ -406,7 +408,4 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
-        raise SystemExit(str(exc)) from None
+    main()

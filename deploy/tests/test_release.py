@@ -104,6 +104,28 @@ def test_success_persists_before_retiring(releases, monkeypatch):
     assert events == ["prepare", "start", "ready", "enable", "load", "persist", "retire"]
 
 
+def test_cleanup_failure_keeps_release_active_and_shows_traceback(releases, monkeypatch, capsys):
+    monkeypatch.setattr(releases, "prepare", lambda revision: None)
+    monkeypatch.setattr(release, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(releases, "wait_ready", lambda revision: None)
+    monkeypatch.setattr(releases, "load_caddy", lambda data: None)
+    monkeypatch.setattr(release, "atomic_write", lambda path, data: path.write_bytes(data))
+    candidate = releases.candidate_config(B)
+
+    def fail_retire(revision):
+        raise OSError("old-service cleanup diagnostic detail")
+
+    monkeypatch.setattr(releases, "retire", fail_retire)
+    releases.activate(B)
+
+    assert releases.config.read_bytes() == candidate
+    output = capsys.readouterr()
+    assert "release is active" in output.out
+    assert "Traceback (most recent call last):" in output.err
+    assert "in fail_retire" in output.err
+    assert "OSError: old-service cleanup diagnostic detail" in output.err
+
+
 def test_asset_collision_preserves_previous_bytes(releases, monkeypatch):
     directory = releases.releases / B
     assets = directory / "draft_frontend/dist/assets"

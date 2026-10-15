@@ -1,4 +1,5 @@
 import base64
+import traceback
 from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
@@ -204,6 +205,28 @@ def test_partial_provision_requires_cleanup_before_retry(environment):
     assert (config.state_dir / "id_rsa").read_bytes() == key_before
 
 
+def test_provision_preserves_aws_exception_and_traceback(environment, monkeypatch):
+    config, lightsail, _, _ = environment
+    error = ClientError(
+        {"Error": {"Code": "InvalidInputException", "Message": "Invalid bundle small_3_0"}},
+        "CreateInstances",
+    )
+
+    def rejected_create(**kwargs):
+        raise error
+
+    monkeypatch.setattr(lightsail, "create_instances", rejected_create)
+    with pytest.raises(ClientError) as caught:
+        cloud.provision(config)
+    assert caught.value is error
+    rendered = "".join(traceback.format_exception(error))
+    assert "rejected_create" in rendered
+    assert "InvalidInputException" in rendered
+    assert "CreateInstances" in rendered
+    assert "Invalid bundle small_3_0" in rendered
+    assert cloud.MANUAL_CLEANUP in rendered
+
+
 def test_existing_unowned_instance_is_not_repurposed(environment):
     config, lightsail, _, _ = environment
     lightsail._create("instance", config.name, tags=[])
@@ -331,8 +354,9 @@ def test_lost_create_response_is_not_retried_or_adopted(environment, monkeypatch
         raise TimeoutError("response lost")
 
     monkeypatch.setattr(lightsail, "import_key_pair", lost_response)
-    with pytest.raises(RuntimeError, match="TimeoutError.*Provisioning is incomplete"):
+    with pytest.raises(TimeoutError, match="response lost") as caught:
         cloud.provision(config)
+    assert cloud.MANUAL_CLEANUP in caught.value.__notes__
     with pytest.raises(RuntimeError, match="Provisioning is incomplete"):
         cloud.provision(config)
     with pytest.raises(RuntimeError, match="Cannot prove ownership"):
@@ -377,12 +401,17 @@ def test_failed_create_does_not_claim_a_concurrent_name_collision(environment, m
         lightsail._create("instance", name, tags=[])
         return {
             "operations": [
-                {"id": "failed-create", "status": "Failed", "errorCode": "AlreadyExists"}
+                {
+                    "id": "failed-create",
+                    "status": "Failed",
+                    "errorCode": "AlreadyExists",
+                    "errorDetails": "Instance name already in use",
+                }
             ]
         }
 
     monkeypatch.setattr(lightsail, "create_instances", collision)
-    with pytest.raises(RuntimeError, match="AlreadyExists"):
+    with pytest.raises(RuntimeError, match="AlreadyExists.*Instance name already in use"):
         cloud.provision(config)
     assert "arn" not in cloud.load_state(config)["resources"]["instance"]
     with pytest.raises(RuntimeError, match="Cannot prove ownership"):

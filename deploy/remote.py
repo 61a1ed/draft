@@ -224,7 +224,7 @@ class Remote:
                 if time.monotonic() >= deadline:
                     raise RuntimeError(
                         "SSH did not become available; check SSH_CIDRS and retry setup"
-                    ) from None
+                    )
                 time.sleep(5)
         self.ssh("sudo", "-n", "cloud-init", "status", "--wait")
         settings = host_settings(self.config)

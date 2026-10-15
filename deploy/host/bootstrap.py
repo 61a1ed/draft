@@ -519,20 +519,14 @@ def bootstrap(config: dict, source: Path):
 def main():
     if len(sys.argv) != 2:
         raise SystemExit("Usage: sudo python3 bootstrap.py HOST_CONFIG.json")
-    try:
-        config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-        validate(config)
-        host_preflight()
-        import fcntl
+    config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    validate(config)
+    host_preflight()
+    import fcntl
 
-        with open(f"/run/{config['name']}-deploy.lock", "w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            bootstrap(config, Path(__file__).resolve().parent)
-    except (OSError, ValueError, RuntimeError, KeyError, subprocess.CalledProcessError) as exc:
-        # The uploaded JSON and environment can contain credentials. Do not
-        # include arbitrary input values or subprocess environments in errors.
-        detail = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
-        raise SystemExit(f"Host setup failed: {detail}") from None
+    with open(f"/run/{config['name']}-deploy.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        bootstrap(config, Path(__file__).resolve().parent)
 
 
 if __name__ == "__main__":

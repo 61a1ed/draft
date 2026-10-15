@@ -71,7 +71,7 @@ def _lock(config: Config):
 
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            raise RuntimeError("Another cloud command is using this deployment state") from None
+            raise RuntimeError("Another cloud command is using this deployment state")
         try:
             yield
         finally:
@@ -91,7 +91,7 @@ def load_state(config: Config) -> dict:
     except (ValueError, OSError):
         raise RuntimeError(
             "Cannot read deployment state.json; restore it before proceeding"
-        ) from None
+        )
     if (
         not isinstance(state, dict)
         or state.get("version") != 1
@@ -125,7 +125,7 @@ def ensure_ssh_key(config: Config) -> Path:
         except (ValueError, TypeError):
             raise RuntimeError(
                 "Existing SSH private key is invalid; it has not been overwritten"
-            ) from None
+            )
         if not isinstance(key, rsa.RSAPrivateKey):
             raise RuntimeError("Existing SSH private key must be RSA for Lightsail import")
     else:
@@ -191,7 +191,8 @@ def _wait_operations(client, response: dict) -> None:
             if operation.get("status") == "Failed":
                 raise RuntimeError(
                     f"Lightsail operation failed: {operation.get('id')} "
-                    f"({operation.get('errorCode', 'unknown error')})"
+                    f"({operation.get('errorCode', 'unknown error')}): "
+                    f"{operation.get('errorDetails', 'no details')}"
                 )
             if time.monotonic() >= deadline:
                 raise RuntimeError("Timed out waiting for Lightsail; inspect the operation in AWS")
@@ -435,8 +436,7 @@ def provision(config: Config) -> dict:
             return state
         except Exception as error:
             if not state.get("ip"):
-                detail = str(error) if isinstance(error, RuntimeError) else type(error).__name__
-                raise RuntimeError(f"{detail}. {MANUAL_CLEANUP}") from None
+                error.add_note(MANUAL_CLEANUP)
             raise
 
 
@@ -563,7 +563,7 @@ def trust_host(config: Config) -> Path:
             except (ValueError, TypeError, UnicodeError):
                 raise RuntimeError(
                     "AWS returned an invalid SSH host key; nothing was trusted"
-                ) from None
+                )
             lines.append(f"{state['ip']} {algorithm} {encoded}\n")
         if not lines:
             raise RuntimeError("AWS has not reported SSH host keys yet; wait briefly and retry")
