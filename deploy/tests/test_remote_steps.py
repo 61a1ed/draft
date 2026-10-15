@@ -19,6 +19,24 @@ def target(tmp_path):
     )
 
 
+@pytest.mark.parametrize("platform", ["nt", "posix"])
+def test_connection_options_avoid_windows_connect_timeout_delay(tmp_path, monkeypatch, platform):
+    key = tmp_path / "key"
+    key.write_text("test key")
+    (tmp_path / "known_hosts").write_text("test host")
+    monkeypatch.setattr(remote, "os", SimpleNamespace(name=platform))
+    target = remote.Remote(
+        SimpleNamespace(name="draft", state_dir=tmp_path),
+        {"ip": "192.0.2.1", "private_key": str(key)},
+    )
+
+    assert ("ConnectTimeout=15" in target.options) == (platform != "nt")
+    assert ("ConnectTimeout=none" in target.options) == (platform == "nt")
+    assert "StrictHostKeyChecking=yes" in target.options
+    assert "BatchMode=yes" in target.options
+    assert "ServerAliveInterval=15" in target.options
+
+
 def test_mktemp_captures_only_its_result_with_a_deadline(target, monkeypatch):
     calls = []
 

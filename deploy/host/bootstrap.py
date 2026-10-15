@@ -519,8 +519,14 @@ def bootstrap(config: dict, source: Path):
     print("Preparing application directories and deployment scripts...", flush=True)
     install_layout(config, source)
     print("Installing Python 3.12 for root and the application account...", flush=True)
-    run(UV, "python", "install", "3.12")
-    run("runuser", "-u", config["name"], "--", UV, "python", "install", "3.12")
+    # runuser preserves the caller's cwd, which may be an inaccessible SSH home.
+    # Host runtime installation must not discover configuration from that home.
+    run(UV, "--no-config", "python", "install", "3.12", cwd="/")
+    run(
+        "runuser", "-u", config["name"], "--",
+        UV, "--no-config", "python", "install", "3.12",
+        cwd=f"/var/lib/{config['name']}",
+    )
     print("Configuring and starting PostgreSQL and Caddy services...", flush=True)
     configure_services(config, restart_caddy)
     print(

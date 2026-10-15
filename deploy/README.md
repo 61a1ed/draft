@@ -149,6 +149,21 @@ captured. Long workstation waits print elapsed progress every 15 seconds and
 have finite time limits. `status: done` from `cloud-init` means only that Ubuntu's
 first boot has finished; the named host installation step follows.
 
+Progress is plain text with new lines, without spinners or ANSI animation. The
+runner restores Windows console modes after commands: the bundled Windows
+OpenSSH 8.1 client can otherwise leave newlines displaying as glyphs and disable
+line wrapping after a noninteractive connection. On Windows, SSH's
+`ConnectTimeout` option is set to `none` because that client waits the full interval
+even on successful connections ([upstream bug](https://github.com/PowerShell/Win32-OpenSSH/issues/1352)).
+The runner still limits the initial SSH check to 30 seconds, the first-boot wait
+to 10 minutes, and host installation to 30 minutes, with Ctrl-C cancellation.
+
+`Completed: Checking SSH` means authentication and host-key verification both
+succeeded. The next step is `sudo -n cloud-init status --wait`. The deployment
+uses `deploy/private/NAME/known_hosts`; plain `ssh -i ...` uses your user's default
+known-hosts file and may therefore ask you to trust the same server separately.
+Use `manage.py ssh` to connect with the deployment's saved trust settings.
+
 Press Ctrl-C once to cancel the local command. Remote work may still be running:
 inspect it using `ssh` before rerunning that step. Failed or interrupted uploads
 remain at the printed remote path for inspection; cancellation does not start a

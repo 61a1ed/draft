@@ -73,6 +73,41 @@ def test_host_contract_accepts_controller_generated_config(host_config):
     assert bootstrap.validate(host_config) is host_config
 
 
+@pytest.mark.parametrize("name", ["draft", "draft-preprod"])
+def test_python_install_does_not_inherit_ssh_working_directory(
+    host_config, monkeypatch, tmp_path, name
+):
+    host_config["name"] = name
+    ssh_home = tmp_path / "ubuntu"
+    ssh_home.mkdir()
+    monkeypatch.chdir(ssh_home)
+    for operation in (
+        "host_preflight", "save_configuration", "install_packages", "ensure_accounts",
+        "install_uv", "install_node", "install_layout", "configure_services",
+    ):
+        monkeypatch.setattr(bootstrap, operation, lambda *args: None)
+    calls = []
+    monkeypatch.setattr(
+        bootstrap.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append((command, kwargs)),
+    )
+
+    bootstrap.bootstrap(host_config, Path(bootstrap.__file__).parent)
+
+    assert len(calls) == 2
+    root_install, app_install = calls
+    assert root_install[0][0] == str(bootstrap.UV)
+    assert root_install[1]["cwd"] == "/"
+    assert app_install[0][:4] == ["runuser", "-u", name, "--"]
+    assert app_install[1]["cwd"] == f"/var/lib/{name}"
+    for command, options in calls:
+        assert "--no-config" in command
+        assert command[-3:] == ["python", "install", "3.12"]
+        assert options["check"] is True
+    assert Path.cwd() == ssh_home
+
+
 @pytest.mark.parametrize("callback", ["/g", "/auth/callback", "/login.v2/~callback"])
 def test_host_accepts_backend_callback_paths(host_config, callback):
     host_config["callback_path"] = callback
