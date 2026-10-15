@@ -13,6 +13,15 @@ from pathlib import Path, PureWindowsPath
 import psycopg
 
 COLUMNS = ("dex", "species", "form", "points", "image_path")
+# The deployment initializer takes this same database-scoped transaction lock.
+CATALOG_LOCK = 0x444C434154414C4F
+
+
+def lock_catalog(conn: psycopg.Connection) -> None:
+    """Serialize catalog/schema work without tying ownership to a host machine."""
+    row = conn.execute("SELECT pg_try_advisory_xact_lock(%s)", (CATALOG_LOCK,)).fetchone()
+    if not row or not row[0]:
+        raise RuntimeError("Another database initialization or catalog import is running")
 
 
 @dataclass(frozen=True)
@@ -78,6 +87,15 @@ def load_catalog(csv_path: Path, image_root: Path) -> tuple[list[Pokemon], dict[
 def import_catalog(conninfo: str, pokemon: list[Pokemon], images: dict[str, bytes]) -> None:
     """Atomically upsert by dex/form; preserve IDs, picks, and omitted catalog rows."""
     with psycopg.connect(conninfo) as conn:
+        import_catalog_connection(conn, pokemon, images)
+
+
+def import_catalog_connection(
+    conn: psycopg.Connection, pokemon: list[Pokemon], images: dict[str, bytes]
+) -> None:
+    """Import on a caller-owned connection so deployment checks share its lock."""
+    with conn.transaction():
+        lock_catalog(conn)
         conn.execute("SET LOCAL ROLE dl_owner")
         with conn.cursor() as cursor:
             cursor.executemany(
@@ -93,6 +111,7 @@ def import_catalog(conninfo: str, pokemon: list[Pokemon], images: dict[str, byte
                 "image_hash = EXCLUDED.image_hash",
                 [(p.dex, p.species, p.form, p.name, p.points, p.image_hash) for p in pokemon],
             )
+        conn.execute("RESET ROLE")
 
 
 def main() -> None:
@@ -108,7 +127,7 @@ def main() -> None:
         pokemon, images = load_catalog(args.csv, args.image_root)
         if not args.dry_run:
             import_catalog(conninfo, pokemon, images)
-    except (OSError, ValueError, csv.Error, psycopg.Error) as exc:
+    except (OSError, ValueError, RuntimeError, csv.Error, psycopg.Error) as exc:
         detail = (
             f"database operation failed (SQLSTATE {exc.sqlstate or 'connection error'})"
             if isinstance(exc, psycopg.Error) else str(exc)

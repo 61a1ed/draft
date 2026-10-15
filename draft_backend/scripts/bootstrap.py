@@ -20,11 +20,17 @@ ROLES = ("dl_owner", "dl_api", "dl_auth", "dl_gateway")
 
 def bootstrap(conninfo: str, gateway_password: str) -> None:
     """Atomically provision fresh roles, schema, and grants; never print secrets."""
+    with psycopg.connect(conninfo) as conn:
+        initialize_connection(conn, gateway_password)
+
+
+def initialize_connection(conn: psycopg.Connection, gateway_password: str) -> None:
+    """Install on an existing connection; the caller owns the transaction."""
     if not gateway_password or "\x00" in gateway_password:
         raise ValueError("A nonempty gateway password without NUL is required")
     source = (PROJECT / "sql" / "schema.sql").read_text(encoding="utf-8")
     grants = (PROJECT / "sql" / "grants.sql").read_text(encoding="utf-8")
-    with psycopg.connect(conninfo) as conn:
+    with conn.transaction():
         if conn.info.server_version < 160000:
             raise RuntimeError("PostgreSQL 16 or newer is required")
         row = conn.execute("SELECT rolsuper FROM pg_roles WHERE rolname = current_user").fetchone()
