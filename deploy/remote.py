@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 import re
@@ -12,12 +11,11 @@ import shutil
 import signal
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
 import urllib.request
 from contextlib import contextmanager
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 
 from config import Config
 
@@ -285,38 +283,6 @@ def commit_id(revision="HEAD", allow_dirty=False):
     return revision
 
 
-def build_catalog_archive(config, destination):
-    """Transfer only referenced PNGs; the existing backend importer validates data."""
-    root = config.image_root.resolve(strict=True)
-    paths = {}
-    with config.catalog_csv.open(encoding="utf-8-sig", newline="") as stream:
-        reader = csv.DictReader(stream)
-        if not reader.fieldnames or "image_path" not in reader.fieldnames:
-            raise ValueError("Catalog CSV lacks image_path")
-        for row in reader:
-            relative = (row.get("image_path") or "").strip()
-            pure = PurePosixPath(relative)
-            if (
-                not relative
-                or ":" in relative
-                or "\\" in relative
-                or PureWindowsPath(relative).anchor
-                or pure.is_absolute()
-                or ".." in pure.parts
-            ):
-                raise ValueError("Catalog image paths must be relative files beneath IMAGE_ROOT")
-            path = (root / relative).resolve(strict=True)
-            if not path.is_relative_to(root) or not path.is_file():
-                raise ValueError("Catalog image escapes IMAGE_ROOT")
-            paths[pure.as_posix()] = path
-    if not paths:
-        raise ValueError("Catalog is empty")
-    with tarfile.open(destination, "w:gz") as archive:
-        archive.add(config.catalog_csv, arcname="catalog.csv", recursive=False)
-        for relative, path in paths.items():
-            archive.add(path, arcname="images/" + relative, recursive=False)
-
-
 class Remote:
     def __init__(self, config, state):
         self.config = config
@@ -420,18 +386,32 @@ class Remote:
             "sudo", "-n", "cloud-init", "status", "--wait", timeout=600,
             progress="Waiting for Ubuntu first-boot initialization (cloud-init)",
         )
+        from tls import ensure_certificates
+
+        certificates = ensure_certificates(self.config)
         settings = host_settings(self.config)
         with tempfile.TemporaryDirectory(dir=self.config.state_dir, prefix="setup-") as directory:
             payload = Path(directory) / "host.json"
             private_json(payload, settings)
             with self.upload() as upload:
-                for name in ("bootstrap.py", "database.py", "release.py", "start"):
+                for name in ("bootstrap.py", "release.py", "start"):
                     self.copy(HERE / "host" / name, upload + "/" + name)
+                self.ssh("mkdir", "-m", "0700", upload + "/tls")
+                for name in ("server.key", "server.crt", "ca.crt"):
+                    self.copy(certificates / name, upload + "/tls/" + name)
                 self.copy(payload, upload + "/host.json")
                 self.ssh(
                     "sudo", "-n", "python3", "-u", upload + "/bootstrap.py", upload + "/host.json",
                     timeout=1800, progress=f"Installing host services on {self.host}",
                 )
+
+    def check_database_tls(self):
+        self.ssh(
+            "sudo", "-n", "python3", "-u",
+            f"/usr/local/lib/{self.config.name}/bootstrap.py",
+            "--check-database-tls", self.config.name,
+            timeout=60, progress=f"Checking PostgreSQL TLS configuration on {self.host}",
+        )
 
     def push(self, revision):
         env = dict(os.environ, GIT_SSH_COMMAND=shlex.join(["ssh", *self.options]))
@@ -471,40 +451,6 @@ class Remote:
         self.push(revision)
         self.release("prepare", revision)
 
-    def initialize_database(self, revision):
-        self.ssh(
-            "sudo",
-            "-n",
-            "python3",
-            "-u",
-            f"/usr/local/lib/{self.config.name}/database.py",
-            "init",
-            revision,
-            timeout=900,
-            progress=f"Initializing PostgreSQL on {self.host}",
-        )
-
-    def import_catalog(self, revision):
-        with tempfile.TemporaryDirectory(dir=self.config.state_dir, prefix="catalog-") as directory:
-            archive = Path(directory) / "catalog.tar.gz"
-            print("Building catalog upload archive...", flush=True)
-            build_catalog_archive(self.config, archive)
-            with self.upload() as upload:
-                self.copy(archive, upload + "/catalog.tar.gz")
-                # Extraction is an installed, constrained operation; no root tar shell expansion.
-                self.ssh(
-                    "sudo",
-                    "-n",
-                    "python3",
-                    "-u",
-                    f"/usr/local/lib/{self.config.name}/database.py",
-                    "import-archive",
-                    revision,
-                    upload + "/catalog.tar.gz",
-                    timeout=900,
-                    progress=f"Importing catalog on {self.host}",
-                )
-
     def logs(self, component, revision=None):
         if component == "app":
             if not revision:
@@ -539,7 +485,7 @@ def smoke(config):
 
 
 def local_check(config):
-    for command in ("git", "ssh", "scp"):
+    for command in ("uv", "git", "ssh", "scp"):
         if not shutil.which(command):
             raise RuntimeError(f"Install {command} and add it to PATH")
     if not config.catalog_csv.is_file() or not config.image_root.is_dir():

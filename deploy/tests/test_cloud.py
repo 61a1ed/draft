@@ -53,6 +53,10 @@ class FakeLightsail:
         self.mutations.append(("put_instance_public_ports", kwargs))
         return {}
 
+    def open_instance_public_ports(self, **kwargs):
+        self.mutations.append(("open_instance_public_ports", kwargs))
+        return {}
+
     def allocate_static_ip(self, **kwargs):
         self.mutations.append(("allocate_static_ip", kwargs))
         return self._create("static_ip", kwargs["staticIpName"],
@@ -207,6 +211,47 @@ def test_open_ports_only_updates_firewall_and_preserves_other_receipt_fields(env
     assert len(lightsail.mutations) == previous + 1
     assert lightsail.mutations[-1][0] == "put_instance_public_ports"
     assert lightsail.mutations[-1][1]["portInfos"][0]["cidrs"] == ["192.0.2.2/32"]
+
+
+def test_database_port_opens_only_after_verified_host_policy(environment, monkeypatch):
+    import remote
+
+    config, lightsail, _, _ = environment
+    complete_steps(config)
+    checks = []
+    monkeypatch.setattr(
+        remote, "Remote",
+        lambda *a: SimpleNamespace(check_database_tls=lambda: checks.append(True)),
+    )
+    cloud.open_database_port(config)
+    assert checks == [True]
+    assert lightsail.mutations[-1] == ("open_instance_public_ports", {
+        "instanceName": "example", "portInfo": {
+            "fromPort": 5432, "toPort": 5432, "protocol": "tcp", "cidrs": ["0.0.0.0/0"],
+        },
+    })
+    assert cloud.load_state(config)["database_port_open"] is True
+    cloud.open_ports(config)
+    assert any(p["fromPort"] == 5432 for p in lightsail.mutations[-1][1]["portInfos"])
+    cloud.delete_instance(config, config.name)
+    assert "database_port_open" not in cloud.load_state(config)
+
+
+def test_database_port_stays_closed_when_tls_check_fails(environment, monkeypatch):
+    import remote
+
+    config, lightsail, _, _ = environment
+    complete_steps(config)
+    previous = list(lightsail.mutations)
+
+    def fail():
+        raise RuntimeError("Unsafe authentication rules")
+
+    monkeypatch.setattr(remote, "Remote", lambda *a: SimpleNamespace(check_database_tls=fail))
+    with pytest.raises(RuntimeError, match="Unsafe"):
+        cloud.open_database_port(config)
+    assert lightsail.mutations == previous
+    assert "database_port_open" not in cloud.load_state(config)
 
 
 def test_mutation_refuses_changed_account_and_replaced_instance(environment):

@@ -60,11 +60,35 @@ name, region, hostname or AWS account. Existing version 1 receipts and SSH keys
 remain usable.
 
 `create-key` generates the local RSA key if absent and imports its public key to
-Lightsail. Only the SSH private key receives restrictive OpenSSH permissions;
+Lightsail. The SSH private key receives restrictive OpenSSH permissions;
 the settings and state directory retain normal inherited filesystem permissions.
 `setup` generates application secrets once and reuses them on later runs.
 `trust-host` obtains SSH host keys through authenticated AWS and writes
 `known_hosts`; SSH host checking stays enabled.
+
+Database TLS uses a separate, deployment-specific private CA. Generate it before
+creating the machine if desired:
+
+```text
+uv run --project deploy python deploy/manage.py create-certs
+```
+
+Python generates `ca`, `server`, `postgres` and `dl_importer` certificate/key pairs
+under `STATE_DIR/tls`, restricted to the current OS user. Certificates have no
+IP/DNS subject alternative names: clients explicitly use `sslmode=verify-ca` to
+validate the deployment CA without hostname matching. An address is needed only
+when connecting. This is independent of the website hostname and its HTTPS/DNS
+setup. See [PostgreSQL's TLS modes](https://www.postgresql.org/docs/16/libpq-ssl.html).
+The server certificate has server-auth usage; the client certificates have
+client-auth usage and common names matching their database roles.
+
+Repeated `create-certs` and `setup` validate and reuse existing material. Partial,
+mismatched or expired bundles are rejected. The CA key and client private keys
+stay on the workstation; only `server.key`, `server.crt` and public `ca.crt` go to
+the host. `STATE_DIR/tls-ca.sha256` pins the original CA even if the TLS directory
+is lost; preserve it with the certificate backup. Host setup also refuses to
+replace an already installed CA. Keep the CA dedicated to this deployment because `verify-ca` trusts
+server certificates issued by that CA regardless of their names.
 
 ## Check and inspect the runbook
 
@@ -113,35 +137,59 @@ new key verified through AWS.
 
 ```text
 uv run --project deploy python deploy/manage.py setup
+uv run --project deploy python deploy/manage.py open-db-port
+uv run --project deploy python deploy/manage.py verify-db
 uv run --project deploy python deploy/manage.py prepare
 uv run --project deploy python deploy/manage.py init-db
 uv run --project deploy python deploy/manage.py import-catalog
 uv run --project deploy python deploy/manage.py deploy
 ```
 
-These are five separate steps:
+These are separate steps:
 
 1. `setup` checks the SSH connection and waits for Ubuntu first boot, copies the
    readable scripts in `deploy/host/`, and runs `bootstrap.py` to install host
-   services and runtimes.
-2. `prepare` pushes a Git revision and installs/builds its locked dependencies.
-3. `init-db` runs the application's initializer on the fresh database.
-4. `import-catalog` uploads the catalog and referenced images, then runs the
-   application's importer.
-5. `deploy` starts the candidate, checks readiness, switches Caddy and retires the
+   services and runtimes, and install PostgreSQL's mTLS configuration. It generates
+   the certificates if absent. PostgreSQL listens on standard TCP port `5432`; external access
+   requires certificates for `postgres` or `dl_importer`. The local gateway keeps
+   its existing password and continues using `127.0.0.1:5432`. Applying TLS changes
+   restarts PostgreSQL, causing a brief database interruption.
+2. `open-db-port` verifies the running TLS settings and authentication rules over
+   verified SSH, then adds permanent public IPv4 TCP `5432` access in Lightsail.
+   Initial `open-ports` exposes only SSH/HTTP/HTTPS; later runs preserve a recorded
+   database port after checking its policy again.
+3. `verify-db` uses the selected backend revision locally to test trusted mTLS
+   access and prove missing/untrusted client certificates cannot authenticate.
+4. `prepare` pushes a Git revision and installs/builds its locked dependencies.
+5. `init-db` uses the local backend environment and bootstrap `postgres`
+   certificate to create the fresh database, initialize its schema, and create
+   `dl_importer`. The importer can assume `dl_owner` (schema-owner privileges)
+   but has no PostgreSQL superuser, role-creation or database-creation privileges.
+6. `import-catalog` reads the local CSV and referenced images and writes directly
+   through psycopg with the importer certificate. There is no archive upload or
+   remote importer process.
+7. `deploy` starts the candidate, checks readiness, switches Caddy and retires the
    previous release. It prepares the selected revision if needed.
 
 Commit the intended app changes before preparing a release. The default revision
-is `HEAD`; use `--revision FULL_COMMIT_ID` on `prepare`, `init-db`, `import-catalog`
+is `HEAD`; use `--revision FULL_COMMIT_ID` on `prepare`, `verify-db`, `init-db`, `import-catalog`
 and `deploy` to pin the same source revision across steps. These commands refuse
 dirty application/deployment directories by default. Add `--allow-dirty` to each
 if intentionally deploying the selected **committed** revision while local edits
 exist; uncommitted app files are excluded. `setup` uses the local `deploy/host/`
 scripts, so changes to the installer do not require an application commit.
+The selected backend commit must contain `scripts/deployment_db.py`; commit this
+workflow before running the database commands. Each database command extracts
+that exact backend revision locally and prepares its locked dependencies with uv.
+It does not require a prepared remote release.
 
-`setup`, release and database commands, `status`, `ssh` and `logs` use the saved
-receipt and verified host keys; they do not call AWS. Host-key verification is
-the separate `trust-host` step.
+`setup`, release commands, `status`, `ssh` and `logs` use the saved receipt and
+verified host keys; they do not call AWS. `open-db-port` is the explicit SSH/AWS
+step. `init-db`, `import-catalog` and `verify-db` use direct PostgreSQL connections
+without SSH or AWS. They default to the saved IP; pass `--host ADDRESS` to use an
+explicit database address without a receipt. Routine imports need only the
+public CA, importer certificate/key, local inputs and selected backend revision;
+initialization additionally needs the saved gateway password in `secrets.json`.
 
 Commands print their nonsecret command lines and stream installation/build output.
 Short values needed by the scripts, such as the upload-directory path, are
@@ -216,12 +264,31 @@ sudo systemctl disable --now NAME@FULL_COMMIT_ID.service
 ```
 
 Ordinary releases never initialize, reset or migrate the database. `init-db`
-checks its completion marker and preserves initialized data. If initialization
-stopped after creating the database but before writing that marker, it refuses
+checks its administrator-owned completion record inside PostgreSQL and preserves
+initialized data. Initialization and imports use database advisory locks. If
+initialization stopped after creating the database but before committing that record, it refuses
 the unmarked database; inspect the failure and rebuild the disposable host rather
 than expecting an automatic reset. Catalog import requires completed initialization
 and upserts without deleting omitted rows/assets. Code rollback does not undo
 database changes.
+
+The older host-side `database.py` workflow and its filesystem completion marker
+are no longer used or installed. An existing database initialized by that workflow
+has no new completion record and is deliberately not adopted automatically.
+Inspect such a database before deciding whether to rebuild the disposable host.
+
+Certificates last one year (the CA lasts ten years). Renewal is explicit and
+retains the CA and identity keys:
+
+```text
+uv run --project deploy python deploy/manage.py renew-certs
+uv run --project deploy python deploy/manage.py setup
+uv run --project deploy python deploy/manage.py verify-db --revision FULL_COMMIT_ID
+```
+
+Renewal does not silently replace an expired/missing CA and does not revoke old
+certificates. Keep the private CA backed up; CA replacement or compromise needs
+a separate coordinated trust change. Ordinary imports need no renewal or host setup.
 
 ## Delete the deployment
 
@@ -250,17 +317,25 @@ this deployment's state directory after all cloud resources have been deleted.
 ```text
 uv run --project deploy python -m pytest deploy/tests -q
 uv run --project deploy ruff check deploy
+uv run --project draft_backend python -m pytest draft_backend/tests/test_deployment_db.py -q
 ```
 
-Local tests use fake AWS clients and host commands. They do not provision or
-contact a server. Live acceptance still needs a fresh installation, Google login,
+Local tests use fake AWS clients and host commands, plus in-memory TLS handshakes.
+They do not provision or contact a server. The optional
+`draft_backend/tests/test_deployment_tls_integration.py` suite starts a fresh local
+PostgreSQL cluster to exercise trusted and rejected certificates, initialization,
+imports and operation locks. Run it from `draft_backend` with
+`uv run python -m pytest tests/test_deployment_tls_integration.py --integration --pg-bin PATH -q`.
+Live acceptance still needs a fresh installation, Google login,
 two-browser draft changes, a schema-compatible update and rollback, a failed
 candidate, and service/reboot recovery. Check that data and sessions survive the
 release changes, and that the saved release returns after reboot. Brief failures
 during crashes/reboot are expected on this single host.
 
 Read `cloud.py` for individual AWS actions, `remote.py` for SSH/copy commands, and
-`host/bootstrap.py`, `host/database.py` and `host/release.py` for the scripts run
-on the machine. The release handoff follows
+`host/bootstrap.py` and `host/release.py` for the scripts run on the machine.
+`tls.py` manages certificates, `database.py` selects the local backend environment,
+and `draft_backend/scripts/deployment_db.py` owns database initialization and import.
+The release handoff follows
 [the reference spec](../caddy-uv-systemd-deployment.md). No automatic release or
 shared-asset pruning, backups or database migration runner is included.

@@ -46,7 +46,12 @@ def environment(path: Path) -> dict[str, str]:
 
 def clean_environment(**extra) -> dict[str, str]:
     # In particular, ignore inherited PGHOST/PGSERVICE/PGPASSWORD settings.
-    return {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", **extra}
+    # Ubuntu installs runuser in /usr/sbin, outside the ordinary user PATH.
+    return {
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "LANG": "C.UTF-8",
+        **extra,
+    }
 
 
 def psql(database: str, sql: str) -> str:

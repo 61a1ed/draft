@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 import tarfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -83,7 +83,8 @@ def test_python_install_does_not_inherit_ssh_working_directory(
     monkeypatch.chdir(ssh_home)
     for operation in (
         "host_preflight", "save_configuration", "install_packages", "ensure_accounts",
-        "install_uv", "install_node", "install_layout", "configure_services",
+        "install_uv", "install_node", "install_layout", "configure_services", "validate_tls_source",
+        "validate_existing_ca",
     ):
         monkeypatch.setattr(bootstrap, operation, lambda *args: None)
     calls = []
@@ -326,6 +327,41 @@ def test_postgres_admin_ignores_inherited_connection_settings(monkeypatch):
     assert "private" not in str(calls[0][0])
     assert not {"PGHOST", "PGSERVICE", "PGPASSWORD"} & calls[0][1]["env"].keys()
     assert "--no-password" in calls[0][0]
+
+
+@pytest.mark.parametrize("operation", ["psql", "init", "backend"])
+def test_database_commands_find_runuser_with_a_sanitized_path(admin, monkeypatch, operation):
+    monkeypatch.setenv("PATH", "/untrusted/bin")
+    monkeypatch.setenv("PGHOST", "external")
+    calls = []
+
+    def ubuntu_run(command, **kwargs):
+        # Model Ubuntu's executable location even when tests run on Windows.
+        candidates = {
+            PurePosixPath(directory) / command[0]
+            for directory in kwargs["env"]["PATH"].split(":")
+        }
+        if PurePosixPath("/usr/sbin/runuser") not in candidates:
+            raise FileNotFoundError(command[0])
+        assert "/untrusted/bin" not in kwargs["env"]["PATH"]
+        assert "PGHOST" not in kwargs["env"]
+        calls.append(command)
+        return SimpleNamespace(stdout="ok")
+
+    monkeypatch.setattr(database.subprocess, "run", ubuntu_run)
+    monkeypatch.setattr(
+        database,
+        "cluster_state",
+        lambda: {"version": 160010, "database_exists": False, "roles": []},
+    )
+    if operation == "psql":
+        assert database.psql("postgres", "SELECT 1") == "ok"
+    elif operation == "init":
+        admin.init(REVISION)
+        assert admin.marker.is_file()
+    else:
+        admin.run_backend(admin.release(REVISION), "import_catalog.py")
+    assert len(calls) == (2 if operation == "init" else 1)
 
 
 def test_catalog_import_trusts_completion_marker(admin, monkeypatch):

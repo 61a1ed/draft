@@ -14,10 +14,13 @@ import platform
 import re
 import shlex
 import shutil
+import ssl
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -27,6 +30,18 @@ VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 CADDY_CONFIG = Path("/etc/caddy/caddy.json")
 CADDY_DROPIN = Path("/etc/systemd/system/caddy.service.d/config.conf")
 UV = Path("/usr/local/bin/uv")
+ETC = Path("/etc")
+PG_DIRECTORY = Path("/etc/postgresql/16/main")
+DATABASE_PORT = 5432
+TLS_FILES = ("server.key", "server.crt", "ca.crt")
+PG_HBA = b"""# Managed by this dedicated application deployment.
+local   all             postgres                    peer
+host    draft           dl_gateway  127.0.0.1/32     scram-sha-256
+hostssl postgres,draft  postgres    0.0.0.0/0        cert
+hostssl draft           dl_importer 0.0.0.0/0        cert
+host    all             all         0.0.0.0/0        reject
+host    all             all         ::/0             reject
+"""
 
 
 def run(*args, **kwargs):
@@ -148,7 +163,7 @@ def validate(config: dict) -> dict:
     if (
         database.scheme != "postgresql"
         or database.hostname != "127.0.0.1"
-        or database.port not in {None, 5432}
+        or database.port not in {None, DATABASE_PORT}
         or database.username != "dl_gateway"
         or database.path != "/draft"
         or database.query
@@ -157,7 +172,9 @@ def validate(config: dict) -> dict:
         or not password
         or unquote(database.password or "") != password
     ):
-        raise ValueError("DATABASE_URL must use the supplied local draft gateway credentials")
+        raise ValueError(
+            "DATABASE_URL must use the supplied local draft gateway credentials on port 5432"
+        )
     return config
 
 
@@ -373,7 +390,7 @@ def install_layout(config: dict, source: Path):
         != "true"
     ):
         raise RuntimeError("Existing deployment repository is not bare")
-    for filename in ("release.py", "database.py", "start"):
+    for filename in ("bootstrap.py", "release.py", "start"):
         content = (source / filename).read_bytes().replace(b"\r\n", b"\n")
         atomic_write(Path(f"/usr/local/lib/{name}") / filename, content, 0o755)
 
@@ -465,23 +482,181 @@ WantedBy=multi-user.target
 """
 
 
-def configure_services(config: dict, caddy_restart: bool):
+def validate_tls_source(directory: Path) -> dict[str, bytes]:
+    """Check the uploaded server material without trusting hostnames or using the network."""
+    if directory.is_symlink() or not directory.is_dir():
+        raise RuntimeError("Upload the server TLS files in the tls directory")
+    if {path.name for path in directory.iterdir()} != set(TLS_FILES):
+        raise RuntimeError("The tls directory must contain only server.key, server.crt, and ca.crt")
+    for filename in TLS_FILES:
+        path = directory / filename
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError("Server TLS inputs must be regular files")
+    try:
+        server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server.load_cert_chain(
+            directory / "server.crt", directory / "server.key", password=lambda: b""
+        )
+        client = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        client.check_hostname = False
+        client.load_verify_locations(cafile=directory / "ca.crt")
+        server_input, server_output = ssl.MemoryBIO(), ssl.MemoryBIO()
+        client_input, client_output = ssl.MemoryBIO(), ssl.MemoryBIO()
+        server_connection = server.wrap_bio(server_input, server_output, server_side=True)
+        client_connection = client.wrap_bio(client_input, client_output)
+        completed = set()
+        # An in-memory handshake checks trust, expiry, server usage and the key
+        # pair, while deliberately performing the same verify-ca policy as libpq.
+        for _ in range(20):
+            for connection, output, peer_input in (
+                (client_connection, client_output, server_input),
+                (server_connection, server_output, client_input),
+            ):
+                if connection not in completed:
+                    try:
+                        connection.do_handshake()
+                        completed.add(connection)
+                    except ssl.SSLWantReadError:
+                        pass
+                peer_input.write(output.read())
+            if len(completed) == 2:
+                return {filename: (directory / filename).read_bytes() for filename in TLS_FILES}
+        raise RuntimeError("Server TLS validation did not finish")
+    except (OSError, ValueError) as error:
+        raise RuntimeError(
+            "Server TLS files failed certificate, trust, or private-key validation"
+        ) from error
+
+
+def postgres_settings(name: str) -> dict[str, str]:
+    directory = ETC / "postgresql" / f"{name}-tls"
+    return {
+        "listen_addresses": "0.0.0.0",
+        "port": str(DATABASE_PORT),
+        "ssl": "on",
+        "ssl_cert_file": str(directory / "server.crt"),
+        "ssl_key_file": str(directory / "server.key"),
+        "ssl_ca_file": str(directory / "ca.crt"),
+        "hba_file": str(PG_DIRECTORY / "pg_hba.conf"),
+        "password_encryption": "scram-sha-256",
+    }
+
+
+def validate_existing_ca(name: str, tls: dict[str, bytes]):
+    path = ETC / "postgresql" / f"{name}-tls" / "ca.crt"
+    if path.is_symlink():
+        raise RuntimeError("Refusing a symbolic-link PostgreSQL CA certificate")
+    if path.exists() and path.read_bytes() != tls["ca.crt"]:
+        raise RuntimeError(
+            "The uploaded CA differs from this host's trusted CA; restore the original "
+            "workstation TLS files. Setup does not rotate the deployment CA."
+        )
+
+
+def postgres_state(*, reload=False) -> dict:
+    query = """SELECT json_build_object(
+        'settings', (SELECT json_object_agg(name, setting) FROM pg_settings
+            WHERE name IN ('listen_addresses', 'port', 'ssl', 'ssl_cert_file',
+                'ssl_key_file', 'ssl_ca_file', 'hba_file', 'password_encryption')),
+        'pending_restart', (SELECT bool_or(pending_restart) FROM pg_settings),
+        'hba_errors', (SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL),
+        'loaded_at', pg_conf_load_time()::text,
+        'reload', RELOAD_EXPRESSION);"""
+    result = run(
+        "runuser", "-u", "postgres", "--", "psql", "-X", "--no-password",
+        "--host=/var/run/postgresql", f"--port={DATABASE_PORT}", "--dbname=postgres",
+        "--username=postgres",
+        "--tuples-only", "--no-align", "--set=ON_ERROR_STOP=1", "--command",
+        query.replace("RELOAD_EXPRESSION", "pg_reload_conf()" if reload else "false"),
+        stdout=subprocess.PIPE, text=True, cwd="/",
+    )
+    return json.loads(result.stdout)
+
+
+def check_database_tls(name: str):
+    """Assert the running cluster is safe before opening the public database port."""
+    if not NAME.fullmatch(name):
+        raise ValueError("Invalid application name")
+    directory = ETC / "postgresql" / f"{name}-tls"
+    validate_tls_source(directory)
+    import grp
+
+    key = (directory / "server.key").stat()
+    if (
+        key.st_uid != 0
+        or key.st_gid != grp.getgrnam("postgres").gr_gid
+        or stat.S_IMODE(key.st_mode) != 0o640
+    ):
+        raise RuntimeError("PostgreSQL server.key must be root:postgres with mode 0640")
+    hba = PG_DIRECTORY / "pg_hba.conf"
+    if hba.is_symlink() or hba.read_bytes() != PG_HBA:
+        raise RuntimeError("PostgreSQL authentication rules differ from the required mTLS policy")
+    state = postgres_state()
+
+    def check_state(current):
+        if current["settings"] != postgres_settings(name) or current["pending_restart"]:
+            raise RuntimeError("Running PostgreSQL settings differ; run setup again")
+        if current["hba_errors"]:
+            raise RuntimeError("PostgreSQL authentication configuration contains errors")
+
+    check_state(state)
+    # pg_hba_file_rules describes the file on disk. Explicitly reload and wait
+    # for PostgreSQL to process it before allowing the firewall to be opened.
+    if not postgres_state(reload=True)["reload"]:
+        raise RuntimeError("PostgreSQL could not reload its authentication rules")
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        current = postgres_state()
+        check_state(current)
+        if current["loaded_at"] != state["loaded_at"]:
+            print("PostgreSQL mTLS configuration verified on port 5432.", flush=True)
+            return
+        time.sleep(0.1)
+    raise RuntimeError("PostgreSQL did not finish reloading its authentication rules")
+
+
+def configure_postgres(config: dict, tls: dict[str, bytes]):
     name = config["name"]
-    pg_directory = Path("/etc/postgresql/16/main")
-    if not (pg_directory / "postgresql.conf").is_file():
+    validate_existing_ca(name, tls)
+    if not (PG_DIRECTORY / "postgresql.conf").is_file():
         raise RuntimeError(
             "Expected PostgreSQL 16/main cluster is missing; no replacement was initialized"
         )
-    changed = atomic_write(
-        pg_directory / "conf.d" / f"99-{name}.conf",
-        (
-            "# Managed by this dedicated application deployment.\n"
-            "listen_addresses = '127.0.0.1'\n"
-            "password_encryption = 'scram-sha-256'\n"
-        ).encode(),
+    directory = ETC / "postgresql" / f"{name}-tls"
+    if directory.is_symlink():
+        raise RuntimeError("Refusing a symbolic-link TLS directory")
+    directory.mkdir(parents=True, exist_ok=True)
+    run("chown", "root:postgres", directory)
+    directory.chmod(0o750)
+    settings = "# Managed by this dedicated application deployment.\n" + "".join(
+        f"{key} = '{value}'\n" for key, value in postgres_settings(name).items()
     )
+    files = {
+        PG_DIRECTORY / "conf.d" / f"99-{name}.conf": (settings.encode(), 0o644),
+        PG_DIRECTORY / "pg_hba.conf": (PG_HBA, 0o644),
+        **{
+            directory / filename: (tls[filename], 0o640 if filename == "server.key" else 0o644)
+            for filename in TLS_FILES
+        },
+    }
+    marker = ETC / name / "postgresql-restart-required"
+    for path, (content, _) in files.items():
+        if path.is_symlink():
+            raise RuntimeError(f"Refusing a symbolic-link PostgreSQL configuration file: {path}")
+        if not path.exists() or path.read_bytes() != content:
+            atomic_write(marker, b"configuration changed\n", 0o600)
+    for path, (content, mode) in files.items():
+        atomic_write(path, content, mode)
+        run("chown", "root:postgres", path)
     run("systemctl", "enable", "postgresql")
-    run("systemctl", "restart" if changed else "start", "postgresql@16-main.service")
+    run("systemctl", "restart" if marker.exists() else "start", "postgresql@16-main.service")
+    check_database_tls(name)
+    marker.unlink(missing_ok=True)
+
+
+def configure_services(config: dict, caddy_restart: bool, tls: dict[str, bytes]):
+    name = config["name"]
+    configure_postgres(config, tls)
     atomic_write(Path(f"/etc/systemd/system/{name}@.service"), service_unit(name).encode())
     caddy_restart |= ensure_caddy_config(config["hostname"])
     caddy_restart |= atomic_write(
@@ -503,11 +678,13 @@ def bootstrap(config: dict, source: Path):
     print("Checking host configuration and saved credentials...", flush=True)
     validate(config)
     host_preflight()
-    # Check ownership and persisted secrets before changing OS state.
-    save_configuration(config, Path(f"/etc/{config['name']}"))
-    for filename in ("release.py", "database.py", "start"):
+    tls = validate_tls_source(source / "tls")
+    validate_existing_ca(config["name"], tls)
+    for filename in ("bootstrap.py", "release.py", "start"):
         if not (source / filename).is_file():
-            raise RuntimeError("Upload bootstrap.py, release.py, database.py, and start together")
+            raise RuntimeError("Upload bootstrap.py, release.py, and start together")
+    # Check ownership and persisted secrets before changing OS state.
+    save_configuration(config, ETC / config["name"])
     print("Installing operating system packages (PostgreSQL and Caddy)...", flush=True)
     install_packages()
     print("Preparing application accounts...", flush=True)
@@ -528,7 +705,7 @@ def bootstrap(config: dict, source: Path):
         cwd=f"/var/lib/{config['name']}",
     )
     print("Configuring and starting PostgreSQL and Caddy services...", flush=True)
-    configure_services(config, restart_caddy)
+    configure_services(config, restart_caddy, tls)
     print(
         "Host prepared. Database initialization and release activation remain explicit steps.",
         flush=True,
@@ -536,8 +713,21 @@ def bootstrap(config: dict, source: Path):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--check-database-tls":
+        host_preflight()
+        name = sys.argv[2]
+        if not NAME.fullmatch(name):
+            raise ValueError("Invalid application name")
+        import fcntl
+
+        with open(f"/run/{name}-deploy.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            check_database_tls(name)
+        return
     if len(sys.argv) != 2:
-        raise SystemExit("Usage: sudo python3 bootstrap.py HOST_CONFIG.json")
+        raise SystemExit(
+            "Usage: sudo python3 bootstrap.py HOST_CONFIG.json | --check-database-tls NAME"
+        )
     config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     validate(config)
     host_preflight()

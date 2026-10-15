@@ -239,11 +239,38 @@ def open_ports(config):
     state = load_state(config)
     client, _ = _client(config, state)
     instance = _recorded(client, state, "instance")
-    _perform(config, client, "put_instance_public_ports", instanceName=instance["name"], portInfos=[
+    ports = [
         {"fromPort": 22, "toPort": 22, "protocol": "tcp", "cidrs": list(config.ssh_cidrs)},
         {"fromPort": 80, "toPort": 80, "protocol": "tcp", "cidrs": ["0.0.0.0/0"]},
         {"fromPort": 443, "toPort": 443, "protocol": "tcp", "cidrs": ["0.0.0.0/0"]},
-    ])
+    ]
+    if state.get("database_port_open"):
+        from remote import Remote
+
+        Remote(config, state).check_database_tls()
+        ports.append({
+            "fromPort": 5432, "toPort": 5432, "protocol": "tcp", "cidrs": ["0.0.0.0/0"],
+        })
+    _perform(
+        config, client, "put_instance_public_ports", instanceName=instance["name"], portInfos=ports,
+    )
+    return state
+
+
+def open_database_port(config):
+    """Verify the installed TLS policy before exposing PostgreSQL permanently."""
+    from remote import Remote
+
+    state = load_state(config)
+    client, _ = _client(config, state)
+    instance = _recorded(client, state, "instance")
+    Remote(config, state).check_database_tls()
+    _perform(
+        config, client, "open_instance_public_ports", instanceName=instance["name"],
+        portInfo={"fromPort": 5432, "toPort": 5432, "protocol": "tcp", "cidrs": ["0.0.0.0/0"]},
+    )
+    state["database_port_open"] = True
+    _save(config, state)
     return state
 
 
@@ -289,6 +316,8 @@ def _delete(config, confirmation, kind, method, parameter):
     del state["resources"][kind]
     if kind in {"instance", "static_ip"}:
         state.pop("ip", None)
+    if kind == "instance":
+        state.pop("database_port_open", None)
     _save(config, state)
     return state
 

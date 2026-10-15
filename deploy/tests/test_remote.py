@@ -1,6 +1,5 @@
 import json
 import sys
-import tarfile
 from types import SimpleNamespace
 
 import pytest
@@ -56,25 +55,6 @@ def test_ssh_checks_host_identity_and_quotes_remote_arguments(config, monkeypatc
     assert command[-1] == "echo 'literal;$(touch /bad)'"
 
 
-def test_catalog_only_contains_referenced_files(config, tmp_path):
-    config.image_root.mkdir()
-    (config.image_root / "one.png").write_bytes(b"image")
-    (config.image_root / "unrelated.txt").write_text("private")
-    config.catalog_csv.write_text("dex,species,form,points,image_path\n1,One,,1,one.png\n")
-    output = tmp_path / "catalog.tar.gz"
-    remote.build_catalog_archive(config, output)
-    with tarfile.open(output) as archive:
-        assert archive.getnames() == ["catalog.csv", "images/one.png"]
-
-
-@pytest.mark.parametrize("relative", ["../secret.png", "/etc/passwd", "C:\\secret.png"])
-def test_catalog_rejects_external_paths(config, tmp_path, relative):
-    config.image_root.mkdir()
-    config.catalog_csv.write_text(f"image_path\n{relative}\n")
-    with pytest.raises(ValueError, match="relative"):
-        remote.build_catalog_archive(config, tmp_path / "bad.tar.gz")
-
-
 def test_dirty_tree_cannot_silently_deploy_stale_commit(monkeypatch):
     monkeypatch.setattr(
         remote, "run", lambda *args, **kwargs: SimpleNamespace(stdout=" M draft_backend/app.py")
@@ -98,8 +78,6 @@ def test_check_does_not_load_cloud(tmp_path, monkeypatch, config):
     [
         ("setup", ["setup"]),
         ("prepare", ["prepare"]),
-        ("init-db", ["init-db"]),
-        ("import-catalog", ["import-catalog"]),
         ("deploy", ["push", "activate"]),
         ("status", ["status"]),
         ("logs", ["logs"]),
@@ -127,14 +105,6 @@ def test_host_step_runs_independently_without_aws(monkeypatch, config, action, e
         def prepare(self, commit):
             assert commit == revision
             calls.append("prepare")
-
-        def initialize_database(self, commit):
-            assert commit == revision
-            calls.append("init-db")
-
-        def import_catalog(self, commit):
-            assert commit == revision
-            calls.append("import-catalog")
 
         def push(self, commit):
             assert commit == revision
