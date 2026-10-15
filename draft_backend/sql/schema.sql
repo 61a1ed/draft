@@ -358,16 +358,61 @@ BEGIN
     RETURN result;
 END $$;
 
--- Every supported mutation touches league exactly once. Delivery is post-commit.
--- Relay only to authorized subscribers; reconnecting clients fetch a snapshot.
+-- Empty, account-scoped wake-ups. PostgreSQL delivers only after commit and
+-- folds duplicate channel/payload pairs in a transaction. Reconnects reload
+-- current data; notifications are deliberately not a durable event log.
+-- These private helpers are not callable by dl_api (see revokes below).
+CREATE FUNCTION dl.notify_account(p_user integer) RETURNS void LANGUAGE sql STRICT
+SET search_path = pg_catalog, dl, pg_temp AS $$
+    SELECT pg_notify('dl_user_' || p_user::text, '')
+$$;
+CREATE FUNCTION dl.notify_league_accounts(p_league integer) RETURNS void LANGUAGE plpgsql
+SET search_path = pg_catalog, dl, pg_temp AS $$
+BEGIN
+    PERFORM dl.notify_account(account_id) FROM (
+        SELECT commissioner_user_id AS account_id FROM league WHERE id = p_league
+        UNION
+        SELECT manager_user_id FROM team WHERE league_id = p_league
+    ) AS recipients;
+END $$;
+
+-- Every supported setup/draft RPC touches league exactly once, preserving its
+-- existing revision rules. OLD also covers a commissioner who just lost access.
 CREATE FUNCTION dl.notify_league() RETURNS trigger LANGUAGE plpgsql
 SET search_path = pg_catalog, dl, pg_temp AS $$
 BEGIN
-    PERFORM pg_notify('dl_changed', NEW.id::text);
-    RETURN NEW;
+    IF TG_OP <> 'INSERT' THEN
+        PERFORM dl.notify_account(OLD.commissioner_user_id);
+    END IF;
+    IF TG_OP <> 'DELETE' THEN
+        PERFORM dl.notify_league_accounts(NEW.id);
+        RETURN NEW;
+    END IF;
+    PERFORM dl.notify_league_accounts(OLD.id);
+    RETURN OLD;
 END $$;
-CREATE TRIGGER league_changed AFTER INSERT OR UPDATE ON dl.league
+CREATE TRIGGER league_changed AFTER INSERT OR UPDATE OR DELETE ON dl.league
 FOR EACH ROW EXECUTE FUNCTION dl.notify_league();
+
+-- Membership changes must also wake the departing manager, who is absent from
+-- the current audience by the time the league revision changes. Table triggers
+-- cover SQL mutations as well as calls through the HTTP gateway.
+CREATE FUNCTION dl.notify_team() RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, dl, pg_temp AS $$
+BEGIN
+    IF TG_OP <> 'INSERT' THEN
+        PERFORM dl.notify_account(OLD.manager_user_id);
+        PERFORM dl.notify_league_accounts(OLD.league_id);
+    END IF;
+    IF TG_OP <> 'DELETE' THEN
+        PERFORM dl.notify_account(NEW.manager_user_id);
+        PERFORM dl.notify_league_accounts(NEW.league_id);
+        RETURN NEW;
+    END IF;
+    RETURN OLD;
+END $$;
+CREATE TRIGGER team_changed AFTER INSERT OR UPDATE OR DELETE ON dl.team
+FOR EACH ROW EXECUTE FUNCTION dl.notify_team();
 
 REVOKE ALL ON ALL TABLES IN SCHEMA dl FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA dl FROM PUBLIC;

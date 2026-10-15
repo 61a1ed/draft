@@ -1,8 +1,8 @@
 import { act, createElement } from 'react'
 import { create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, subscribeLeague } from './api'
-import type { LeagueEventHandlers, LeagueSnapshot, Session } from './types'
+import { api, ApiError, subscribeAccount } from './api'
+import type { AccountEventHandlers, LeagueSnapshot, Session } from './types'
 import { useDraft } from './useDraft'
 
 vi.mock('./api', async (importOriginal) => {
@@ -10,7 +10,7 @@ vi.mock('./api', async (importOriginal) => {
   return {
     ...actual,
     api: Object.fromEntries(Object.keys(actual.api).map((key) => [key, vi.fn()])),
-    subscribeLeague: vi.fn(),
+    subscribeAccount: vi.fn(),
   }
 })
 
@@ -82,7 +82,7 @@ function room(id = 7, revision = 20): LeagueSnapshot {
 
 let renderer: ReactTestRenderer | null = null
 let current: ReturnType<typeof useDraft>
-let streams: { handlers: LeagueEventHandlers; stop: ReturnType<typeof vi.fn> }[]
+let streams: { handlers: AccountEventHandlers; stop: ReturnType<typeof vi.fn> }[]
 
 function Harness() {
   current = useDraft()
@@ -95,7 +95,7 @@ async function mount() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   streams = []
   vi.mocked(api.session).mockResolvedValue(session)
@@ -104,7 +104,7 @@ beforeEach(() => {
   vi.mocked(api.leagues).mockResolvedValue([room().league, room(8).league])
   vi.mocked(api.snapshot).mockImplementation(async (id) => room(id))
   vi.mocked(api.logout).mockResolvedValue(undefined)
-  vi.mocked(subscribeLeague).mockImplementation((_id, handlers) => {
+  vi.mocked(subscribeAccount).mockImplementation((handlers) => {
     const stop = vi.fn()
     streams.push({ handlers, stop })
     handlers.onInvalidate()
@@ -140,16 +140,17 @@ describe('draft request ownership and event ordering', () => {
     expect(current.leagues.find((league) => league.id === 7)?.name).toBe('League 7, revision 22')
   })
 
-  it('ignores old stream events immediately when switching leagues', async () => {
+  it('keeps the account stream when switching leagues and refreshes the new selection', async () => {
     await mount()
     const old = streams[0]
     await act(async () => {
       current.selectLeague(8)
-      // These arrive before React has run the previous effect's cleanup.
+      // The same stream remains authoritative across selection changes.
       old.handlers.onInvalidate()
     })
 
-    expect(old.stop).toHaveBeenCalled()
+    expect(old.stop).not.toHaveBeenCalled()
+    expect(streams).toHaveLength(1)
     expect(current.mode).toBe('live')
     expect(current.leagueId).toBe(8)
     expect(current.snapshot?.league_id).toBe(8)
@@ -186,16 +187,24 @@ describe('draft request ownership and event ordering', () => {
     expect(current.error).toBe('')
   })
 
-  it('returns connection failures to the sign-in UI and clears private state', async () => {
+  it('keeps an authenticated stream and retries failed initial reads', async () => {
+    vi.useFakeTimers()
     await mount()
     vi.mocked(api.draftables).mockRejectedValueOnce(new TypeError('backend offline'))
     await act(async () => {
-      await expect(current.connect(session)).rejects.toThrow('backend offline')
+      await current.connect(session)
     })
 
-    expect(current.mode).toBe('disconnected')
+    expect(current.mode).toBe('live')
+    expect(current.session).toEqual(session)
     expect(current.snapshot).toBeNull()
     expect(current.busy).toBe(false)
+    expect(streams.at(-1)!.stop).not.toHaveBeenCalled()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(current.snapshot?.league_id).toBe(7)
+    expect(current.error).toBe('')
   })
 
   it('shows backend failure without fictional data', async () => {
@@ -235,11 +244,7 @@ describe('draft request ownership and event ordering', () => {
       current.selectLeague(8)
     })
     const old = streams[streams.length - 1]
-    vi.mocked(api.leagues).mockResolvedValueOnce([
-      room(7).league,
-      room(8, 1).league,
-      room(9).league,
-    ])
+    vi.mocked(api.leagues).mockResolvedValue([room(7).league, room(8, 1).league, room(9).league])
     vi.mocked(api.users).mockResolvedValueOnce([{ id: 99, display_name: 'New fixture manager' }])
     vi.mocked(api.draftables).mockResolvedValueOnce([
       {
@@ -270,7 +275,7 @@ describe('draft request ownership and event ordering', () => {
 
   it('selects a replacement fixture after SQL removes the selected league', async () => {
     await mount()
-    vi.mocked(api.leagues).mockResolvedValueOnce([room(10, 0).league])
+    vi.mocked(api.leagues).mockResolvedValue([room(10, 0).league])
     await act(async () => {
       await current.refreshData()
     })
@@ -315,6 +320,7 @@ describe('draft request ownership and event ordering', () => {
   })
 
   it('treats a confirmed creation as successful when only the list refresh fails', async () => {
+    vi.useFakeTimers()
     await mount()
     vi.mocked(api.createLeague).mockResolvedValueOnce({ result: 9 })
     vi.mocked(api.leagues).mockRejectedValueOnce(new TypeError('list unavailable'))
@@ -324,9 +330,17 @@ describe('draft request ownership and event ordering', () => {
 
     expect(api.createLeague).toHaveBeenCalledOnce()
     expect(current.leagueId).toBe(9)
+    expect(current.snapshot).toBeNull()
+    expect(current.notice).toContain('Your league was created.')
+    expect(current.error).toContain('Could not reach the server')
+    vi.mocked(api.leagues).mockResolvedValue([room().league, room(9).league])
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
     expect(current.snapshot?.league_id).toBe(9)
     expect(current.leagues.some((league) => league.id === 9)).toBe(true)
-    expect(current.error).toContain('Your league was created.')
+    expect(api.createLeague).toHaveBeenCalledOnce()
+    expect(current.error).toBe('')
   })
 
   it('never applies a created league after the user signs out', async () => {
@@ -394,16 +408,19 @@ describe('draft request ownership and event ordering', () => {
   })
 })
 
-
 describe('snapshot refresh failures', () => {
   it('retries a failed read without another event and accepts equal-revision newer time', async () => {
     vi.useFakeTimers()
     await mount()
     vi.mocked(api.snapshot).mockRejectedValueOnce(new TypeError('offline'))
-    await act(async () => { streams[0].handlers.onInvalidate() })
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
     const next = { ...room(), server_now: '2026-01-01T00:00:10Z' }
     vi.mocked(api.snapshot).mockResolvedValueOnce(next)
-    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
     expect(current.snapshot?.server_now).toBe(next.server_now)
     expect(current.error).toBe('')
   })
@@ -411,9 +428,12 @@ describe('snapshot refresh failures', () => {
   it.each([401, 404])('reacts to HTTP %s instead of a proactive stream message', async (status) => {
     await mount()
     vi.mocked(api.snapshot).mockRejectedValueOnce(new ApiError(status, 'denied'))
-    await act(async () => { streams[0].handlers.onInvalidate() })
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
     expect(current.snapshot).toBeNull()
-    expect(streams[0].stop).toHaveBeenCalled()
+    if (status === 401) expect(streams[0].stop).toHaveBeenCalled()
+    else expect(streams[0].stop).not.toHaveBeenCalled()
     expect(current.mode).toBe(status === 401 ? 'disconnected' : 'live')
   })
 
@@ -421,11 +441,222 @@ describe('snapshot refresh failures', () => {
     vi.useFakeTimers()
     await mount()
     vi.mocked(api.snapshot).mockRejectedValueOnce(new TypeError('offline'))
-    await act(async () => { streams[0].handlers.onInvalidate() })
-    await act(async () => { current.selectLeague(8) })
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    await act(async () => {
+      current.selectLeague(8)
+    })
     const calls = vi.mocked(api.snapshot).mock.calls.length
-    await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000)
+    })
     expect(api.snapshot).toHaveBeenCalledTimes(calls)
     expect(current.snapshot?.league_id).toBe(8)
+  })
+})
+
+describe('account membership discovery and recovery', () => {
+  it('discovers the first league from an empty account and follows draft turns', async () => {
+    vi.mocked(api.leagues).mockResolvedValue([])
+    await mount()
+    expect(current.leagues).toEqual([])
+    expect(current.leagueId).toBeNull()
+    expect(streams).toHaveLength(1)
+    expect(api.snapshot).not.toHaveBeenCalled()
+
+    vi.mocked(api.leagues).mockResolvedValue([room().league])
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    expect(current.leagueId).toBe(7)
+    expect(current.snapshot?.league_id).toBe(7)
+    expect(current.notice).toContain('You now have access to')
+    expect(streams).toHaveLength(1)
+
+    const started = room(7, 21)
+    started.state = { ...started.state, status: 'drafting', next_pick_number: 1, next_team_id: 12 }
+    vi.mocked(api.snapshot).mockResolvedValueOnce(started)
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    expect(current.snapshot?.state.next_team_id).toBe(12)
+    const picked = room(7, 22)
+    picked.state = { ...started.state, revision: 22, next_pick_number: 2, next_team_id: 14 }
+    vi.mocked(api.snapshot).mockResolvedValueOnce(picked)
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    expect(current.snapshot?.state.next_pick_number).toBe(2)
+    expect(current.snapshot?.state.next_team_id).toBe(14)
+  })
+
+  it('notifies about added access without replacing an accessible selection', async () => {
+    await mount()
+    await act(async () => {
+      await current.selectLeague(8)
+    })
+    vi.mocked(api.leagues).mockResolvedValue([room().league, room(8).league, room(9).league])
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    expect(current.leagueId).toBe(8)
+    expect(current.notice).toContain(room(9).league.name)
+    expect(streams).toHaveLength(1)
+  })
+
+  it('selects remaining access, clears removed private state, and discovers reassignment', async () => {
+    await mount()
+    vi.mocked(api.leagues).mockResolvedValue([room(8).league])
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    expect(current.leagueId).toBe(8)
+    expect(current.snapshot?.league_id).toBe(8)
+    vi.mocked(api.leagues).mockResolvedValue([])
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    expect(current.leagueId).toBeNull()
+    expect(current.snapshot).toBeNull()
+    expect(current.leagues).toEqual([])
+    expect(streams[0].stop).not.toHaveBeenCalled()
+    vi.mocked(api.leagues).mockResolvedValue([room(10).league])
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    expect(current.leagueId).toBe(10)
+    expect(current.snapshot?.league_id).toBe(10)
+    expect(streams).toHaveLength(1)
+  })
+
+  it('coalesces a burst during reads into one extra list and snapshot pass', async () => {
+    await mount()
+    const pendingList = deferred<ReturnType<typeof room>['league'][]>()
+    vi.mocked(api.leagues).mockReturnValueOnce(pendingList.promise)
+    const listCalls = vi.mocked(api.leagues).mock.calls.length
+    const snapshotCalls = vi.mocked(api.snapshot).mock.calls.length
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+      streams[0].handlers.onInvalidate()
+      streams[0].handlers.onInvalidate()
+    })
+    expect(api.leagues).toHaveBeenCalledTimes(listCalls + 1)
+    expect(api.snapshot).toHaveBeenCalledTimes(snapshotCalls)
+    await act(async () => {
+      pendingList.resolve([room().league])
+    })
+    expect(api.leagues).toHaveBeenCalledTimes(listCalls + 2)
+    expect(api.snapshot).toHaveBeenCalledTimes(snapshotCalls + 2)
+  })
+
+  it('does not let a list begun before creation overwrite the newly selected league', async () => {
+    await mount()
+    const oldList = deferred<ReturnType<typeof room>['league'][]>()
+    vi.mocked(api.leagues).mockReturnValueOnce(oldList.promise)
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    vi.mocked(api.createLeague).mockResolvedValueOnce({ result: 9 })
+    vi.mocked(api.leagues).mockResolvedValue([room().league, room(9).league])
+    let creating!: Promise<boolean>
+    await act(async () => {
+      creating = current.createLeague('New league', 6, 60)
+    })
+    expect(current.leagueId).toBe(9)
+    await act(async () => {
+      oldList.resolve([room().league])
+      expect(await creating).toBe(true)
+    })
+    expect(current.leagueId).toBe(9)
+    expect(current.snapshot?.league_id).toBe(9)
+    expect(streams).toHaveLength(1)
+  })
+
+  it('rejects old snapshots even after selecting away and back to the same league', async () => {
+    await mount()
+    const oldSnapshot = deferred<LeagueSnapshot>()
+    const freshSnapshot = deferred<LeagueSnapshot>()
+    vi.mocked(api.snapshot)
+      .mockReturnValueOnce(oldSnapshot.promise)
+      .mockReturnValueOnce(freshSnapshot.promise)
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    await act(async () => {
+      void current.selectLeague(8)
+      void current.selectLeague(7)
+    })
+    await act(async () => {
+      oldSnapshot.resolve(room(7, 99))
+    })
+    expect(current.snapshot).toBeNull()
+    await act(async () => {
+      freshSnapshot.resolve(room(7, 21))
+    })
+    expect(current.snapshot?.revision).toBe(21)
+    expect(streams).toHaveLength(1)
+  })
+
+  it('ignores an old account list after switching accounts', async () => {
+    await mount()
+    const oldList = deferred<ReturnType<typeof room>['league'][]>()
+    vi.mocked(api.leagues).mockReturnValueOnce(oldList.promise)
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    vi.mocked(api.leagues).mockResolvedValue([])
+    const other = { ...session, user: { id: 43, display_name: 'Other manager' } }
+    await act(async () => {
+      await current.connect(other)
+    })
+    await act(async () => {
+      oldList.resolve([room().league])
+    })
+    expect(current.session?.user.id).toBe(43)
+    expect(current.leagues).toEqual([])
+    expect(current.snapshot).toBeNull()
+    expect(streams[0].stop).toHaveBeenCalled()
+    expect(streams[1].stop).not.toHaveBeenCalled()
+  })
+
+  it('recovers a missed membership change after a failed list read without another event', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api.leagues).mockResolvedValue([])
+    await mount()
+    vi.mocked(api.leagues).mockRejectedValueOnce(new ApiError(503, 'database_unavailable'))
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    vi.mocked(api.leagues).mockResolvedValue([room().league])
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(current.leagueId).toBe(7)
+    expect(current.snapshot?.league_id).toBe(7)
+    expect(current.notice).toContain('You now have access')
+    expect(current.error).toBe('')
+  })
+
+  it('expires a quiet offline session and cancels pending refresh retries', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api.session).mockResolvedValue({ ...session, expires_at: Date.now() / 1000 + 2 })
+    await mount()
+    vi.mocked(api.leagues).mockRejectedValue(new TypeError('offline'))
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(current.mode).toBe('disconnected')
+    expect(current.snapshot).toBeNull()
+    expect(current.leagues).toEqual([])
+    expect(streams[0].stop).toHaveBeenCalled()
+    const reads = vi.mocked(api.leagues).mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+    expect(api.leagues).toHaveBeenCalledTimes(reads)
   })
 })

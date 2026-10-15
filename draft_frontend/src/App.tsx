@@ -309,7 +309,7 @@ export default function App() {
   useEffect(() => {
     setSelected(null)
     setConfirmAction(null)
-  }, [draft.leagueId, mode])
+  }, [draft.leagueId, mode, session?.user.id])
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
   const myTeam = snapshot?.teams.find((team) => team.manager_user_id === session?.user.id)
   const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
@@ -438,11 +438,7 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <button
-          className="new-league"
-          disabled={draft.busy}
-          onClick={() => setCreate(true)}
-        >
+        <button className="new-league" disabled={draft.busy} onClick={() => setCreate(true)}>
           <Plus size={16} />
           Create a league
         </button>
@@ -486,11 +482,7 @@ export default function App() {
               ) : (
                 <>
                   <WifiOff size={13} />
-                  {draft.leagueId === null
-                    ? 'Signed in'
-                    : draft.connection === 'reconnecting'
-                      ? 'Reconnecting'
-                      : 'Connecting'}
+                  {draft.connection === 'reconnecting' ? 'Reconnecting' : 'Connecting'}
                 </>
               )}
             </span>
@@ -554,6 +546,18 @@ export default function App() {
               <LogOut size={17} />
             </button>
           </div>
+          {draft.notice && (
+            <div className="error-banner notice-banner" role="status">
+              <span>{draft.notice}</span>
+              <button
+                className="icon-button"
+                aria-label="Dismiss notice"
+                onClick={() => draft.setNotice('')}
+              >
+                <X size={18} />
+              </button>
+            </div>
+          )}
           {draft.error && (
             <div className="error-banner" role="alert">
               <span>{draft.error}</span>

@@ -6,13 +6,10 @@ from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from starlette.requests import Request
 
 from draft_backend import app as module
 from draft_backend.config import Settings
-from draft_backend.events import EventHub
 
 
 @pytest.fixture
@@ -29,15 +26,7 @@ def application(monkeypatch):
         image=AsyncMock(return_value=None),
     )
 
-    class LocalHub(EventHub):
-        async def start(self):
-            self.connected.set()
-
-        async def close(self):
-            pass
-
     monkeypatch.setattr(module, "Database", lambda _: db)
-    monkeypatch.setattr(module, "EventHub", LocalHub)
     settings = Settings(
         database_url="postgresql://unused",
         session_secret="x" * 40,
@@ -50,7 +39,7 @@ def application(monkeypatch):
     return module.create_app(settings), db
 
 
-def test_readiness_requires_database_and_notifications_without_authentication(application):
+def test_readiness_requires_database_without_a_shared_listener_or_authentication(application):
     app, db = application
     with TestClient(app) as client:
         response = client.get("/ready")
@@ -58,15 +47,8 @@ def test_readiness_requires_database_and_notifications_without_authentication(ap
         assert response.json() == {"ready": True}
         assert response.headers["cache-control"] == "no-store"
         db.ready.assert_awaited_once()
-        app.state.events.connected.clear()
-        response = client.get("/ready")
-        assert response.status_code == 503
-        assert response.json() == {"detail": "not_ready"}
-        assert client.get("/healthz").json() == {
-            "status": "ok", "notifications_connected": False,
-        }
-        app.state.events.connected.set()
-        assert client.get("/ready").status_code == 200
+        assert client.get("/healthz").json() == {"status": "ok"}
+        assert not hasattr(app.state, "events")
 
 
 def test_readiness_hides_database_error_details_and_recovers(application):
@@ -181,46 +163,55 @@ def test_startup_refuses_test_login_on_an_unmarked_database(application):
     db.close.assert_awaited_once()
 
 
-async def test_sse_invalidations_keepalive_and_cleanup(application):
+def test_account_events_authenticate_without_requiring_league_access(application, monkeypatch):
     app, db = application
-    hub = app.state.events = EventHub("unused", "test_channel")
-    app.state.db = db
-    db.read.return_value = [{"id": 8}]
-    request = Request({"type": "http", "app": app, "session": {"expires_at": 0}})
-    endpoint = next(
-        r.endpoint for r in app.routes
-        if getattr(r, "path", None) == "/api/leagues/{league_id}/events"
-    )
-    response = await endpoint(request, 8, 1)
-    chunks = response.body_iterator
-    assert await anext(chunks) == "retry: 2000\n\n"
-    assert await anext(chunks) == "event: invalidate\ndata: null\n\n"
-    assert response.headers["x-accel-buffering"] == "no"
-    hub.invalidate("8")
-    assert "event: invalidate" in await anext(chunks)
-    hub.invalidate_all()
-    assert "event: invalidate" in await anext(chunks)
-    db.read.return_value = []
-    assert await anext(chunks) == ": keep-alive\n\n"
-    db.read.assert_awaited_once()
-    await chunks.aclose()
-    assert not hub.subscribers
-    with pytest.raises(HTTPException) as error:
-        await endpoint(request, 8, 1)
-    assert error.value.status_code == 404
-    assert not hub.subscribers
+    connect = AsyncMock(side_effect=psycopg.OperationalError("private database credentials"))
+    monkeypatch.setattr(psycopg.AsyncConnection, "connect", connect)
+    with TestClient(app) as client:
+        assert client.get("/api/events").status_code == 401
+        connect.assert_not_awaited()
+        client.post("/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"})
+        assert client.get("/api/leagues").json() == []
+        db.read.reset_mock()
+        response = client.get("/api/events?user_id=999&channel=dl_user_999")
+        assert response.status_code == 503
+        assert response.json() == {"detail": "database_unavailable"}
+        connect.assert_awaited_once()
+        db.read.assert_not_awaited()
+        assert client.get("/api/leagues/8/events").status_code == 404
 
 
-async def test_hub_routes_and_bounds_pending_invalidations():
-    hub = EventHub("unused", "test_channel")
-    first, other = hub.subscribe("a"), hub.subscribe("b")
-    hub.invalidate("a")
-    hub.invalidate("a")
-    assert first.qsize() == 1
-    assert other.empty()
-    await first.get()
-    hub.invalidate_all()
-    assert first.qsize() == other.qsize() == 1
+def test_stream_capacity_returns_retryable_failure_without_using_the_pool(application):
+    app, db = application
+    with TestClient(app) as client:
+        client.post("/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"})
+        app.state.event_slots = asyncio.Semaphore(0)
+        response = client.get("/api/events")
+        assert response.status_code == 503
+        assert response.json() == {"detail": "event_stream_capacity"}
+        assert response.headers["retry-after"] == "2"
+        assert client.get("/ready").status_code == 200
+        db.read.assert_not_awaited()
+
+
+def test_event_channel_comes_only_from_authenticated_account(application, monkeypatch):
+    app, db = application
+    conn = SimpleNamespace(execute=AsyncMock(), close=AsyncMock())
+    monkeypatch.setattr(psycopg.AsyncConnection, "connect", AsyncMock(return_value=conn))
+
+    class FiniteResponse(module.AccountEventResponse):
+        async def _notifications(self, conn):
+            yield "event: invalidate\ndata: null\n\n"
+
+    monkeypatch.setattr(module, "AccountEventResponse", FiniteResponse)
+    with TestClient(app) as client:
+        client.post("/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"})
+        response = client.get("/api/events?user_id=999&channel=dl_user_999&league_id=8")
+        assert response.status_code == 200
+        assert response.text == "event: invalidate\ndata: null\n\n"
+        assert conn.execute.await_args.args[0].as_string() == 'LISTEN "dl_user_1"'
+        conn.close.assert_awaited_once()
+        db.read.assert_not_awaited()
 
 
 @pytest.mark.parametrize("function", ["add_team", "update_team"])

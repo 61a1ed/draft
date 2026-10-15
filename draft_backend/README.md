@@ -140,14 +140,15 @@ All `/api` routes require a session. Read results come directly from PostgreSQL:
 | `GET /images/{hash}` / `HEAD /images/{hash}` | Public PNG image; no session required |
 | `GET /api/leagues` | Array of leagues visible to the caller |
 | `GET /api/leagues/{id}` | One `dl.league_snapshot` row, including actions |
-| `GET /api/leagues/{id}/events` | Authorized SSE stream |
-| `GET /healthz` | Process status and notification-connection status; public |
-| `GET /ready` | Public readiness check; 200 only with a working DB query and notification connection, otherwise 503 |
+| `GET /api/events` | Account SSE stream, including accounts with no leagues |
+| `GET /healthz` | Process status; public |
+| `GET /ready` | Public readiness check; 200 with a working pooled DB query, otherwise 503 |
 
 `/ready` bounds database acquisition and its `SELECT 1` query to one second and
 returns only a generic `not_ready` error on failure. Deployment probes should
 allow more than one second per request. `/healthz` remains a process-status
-endpoint and returns 200 even when its notification connection is disconnected.
+endpoint. There is no worker-wide notification listener to probe; each browser
+stream establishes its own listener and reconnects independently on failure.
 
 Each write is `POST /api/rpc/<function>` with a JSON object using the actual SQL
 argument names. Unknown fields are rejected. There is no arbitrary-SQL endpoint.
@@ -295,31 +296,58 @@ repricing. The seed catalog uses costs 0 through 29.
 
 ## Server-sent events
 
-The stream sends only `invalidate` events; their data is ignored. Every event
-starts an ordinary snapshot GET. There is no debounce or single-request lock:
-reads may overlap, and clients discard responses older than the displayed
-revision (or an older `server_now` at the same revision).
+Every signed-in tab opens one `GET /api/events` stream, even with zero leagues.
+Selecting a league does not reopen it. The authenticated account ID determines
+the safely quoted PostgreSQL channel (`dl_user_42`, for example); the browser
+cannot choose another account's channel. Each stream runs in an async handler
+with one dedicated autocommit connection outside the query pool. It completes
+`LISTEN` before sending an initial generic `invalidate`, forwards notifications
+as the same event, and sends idle keep-alive comments every 15 seconds.
 
-The server subscribes before checking initial access and sends an invalidation
-when the stream opens, including after browser reconnection. One PostgreSQL
-LISTEN connection per worker routes notification payloads as opaque topic keys.
-The SQL trigger sends only the league ID as text. Each subscriber has one pending
-wake-up slot; a LISTEN reconnection invalidates all active subscriptions.
+SQL determines recipients. League creation and changes notify the commissioner
+and current managers. Team changes also notify former managers, including those
+who just lost their last team. Notifications have empty payloads and are delivered
+only after commit. The triggers cover direct SQL edits as well as the public SQL
+functions used by HTTP. Direct administrative edits must still preserve draft
+invariants and increment the league revision in the same transaction.
 
-The frontend retries failed snapshot reads after two seconds for network/server
-errors. Stream errors also trigger an HTTP read, because native EventSource does
-not expose HTTP authorization failures. Snapshot responses of 401 or 404 close
-the subscription and clear the affected state. No automatic writes are retried.
+An invalidation refreshes the accessible league list and selected snapshot.
+Refreshes are serialized; an event during a read schedules another pass. The
+frontend preserves an accessible selection, otherwise selects an available
+league or clears private league state. Newly accessible leagues produce an
+in-app notice. Revision/server-time ordering and account/selection guards discard
+stale responses. Transient read and stream-opening failures retry with bounded
+backoff. Stream errors also prompt an HTTP read to detect expired sessions.
+Mutations are never replayed automatically.
 
-Access and session validity are checked on HTTP requests and when opening a
-stream, not periodically on existing streams. Idle keep-alive comments every
-15 seconds only maintain the connection; they do not query the database or
-trigger client reads. There are no SSE snapshots, event IDs, revision payloads,
-or proactive sign-out/access-revoked messages.
+Disconnect, cancellation, fixed session expiry, and database failure close the
+dedicated connection, which removes its subscription. A database failure ends
+that stream; its replacement sends a fresh initial invalidation after `LISTEN`.
+Notifications are transient wake-up signals, with no event IDs or durable replay.
+Changes during an outage are recovered through these ordinary HTTP reads.
 
-The notification payload changed from JSON to a plain league ID. Rebuild an
-existing disposable database (or update its `dl.notify_league` function) before
-running the new listener against it.
+Each open tab consumes **one persistent PostgreSQL connection**, in addition to
+normal query connections. `SSE_MAX_CONNECTIONS` limits streams per worker (default
+30); excess stream requests receive 503 and retry. `DB_POOL_SIZE` still bounds
+ordinary query connections (default 10). Budget all workers and overlapping
+releases: `workers * (SSE_MAX_CONNECTIONS + DB_POOL_SIZE)`, plus administrative,
+other-service, and PostgreSQL reserved connections. Lower the stream limit when
+that total would consume the database's available connection budget. A single
+worker's defaults allow 30 streams plus 10 query connections; two fully loaded
+releases would need 80 before headroom. Neither provisioning nor startup raises
+PostgreSQL connection limits. Use a direct or session-preserving PostgreSQL
+connection, not a transaction-pooling endpoint, for `LISTEN`.
+
+This preproduction schema change has no migration runner. Upgrade disposable
+local databases by stopping the old development run and starting
+`uv run python scripts/dev.py --pg-bin <binaries>` without `--data-dir`; this
+provisions the new schema and preserves the old cluster for inspection. Resuming
+an old cluster or deploying application code alone does not update its triggers.
+For an existing deployment, provision a fresh database/cluster using the normal
+bootstrap, import the catalog, and point the new release at it. This does not
+transfer existing leagues or accounts; retain the old database if they are needed.
+Do not run `schema.sql` over a populated schema or delete an existing database
+as an implicit upgrade step.
 
 The stream works over HTTP/1.1. Disable buffering for this route in any reverse
 proxy; the response includes `X-Accel-Buffering: no`. Idle timeouts should exceed

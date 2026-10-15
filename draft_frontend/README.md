@@ -11,7 +11,7 @@ cd E:\bz\draft_backend
 uv run python scripts/dev.py --pg-bin 'C:\postgresql\bin'
 ```
 
-Each run creates a fresh database under `.dev-runs`, imports the Pokémon catalog,
+Each run creates a fresh database under `.dev-runs`, imports the PokÃ©mon catalog,
 and seeds test users and six SQL scenarios. Ctrl+C stops all owned processes but
 keeps data and logs. Use the printed `--data-dir` command to resume a prior run.
 `--database-url-env NAME` connects to an existing prepared database without setup.
@@ -34,7 +34,7 @@ npm run dev
 Open **http://127.0.0.1:5173** and sign in. The frontend requires the backend;
 missing authentication shows Sign in, and connection failures show Retry.
 Catalog images are served by the backend through `/images`, with no copied
-Pokémon image library in `public/`. Watchlists are stored locally per user.
+PokÃ©mon image library in `public/`. Watchlists are stored locally per user.
 
 ## Connect the backend
 
@@ -83,8 +83,13 @@ frontend development.
 - Pick confirmation showing the target team and resulting budget; optional
   commissioner point waiver; undo with revision protection.
 - Team rosters, charged pick prices, and history including undone selections.
-- SSE invalidations with HTTP snapshot reads, automatic reconnect, monotonic revisions,
-  session expiry/access revocation handling, and stream cleanup on account changes.
+- One account SSE stream at `/api/events` per signed-in tab, including accounts
+  with no leagues. Assignments appear automatically with a notice; selection
+  changes keep the stream open, and removed access selects another league or
+  clears the private league state.
+- Serialized, coalesced league-list and selected-snapshot refreshes, monotonic
+  revisions, explicit reconnect and read retries with backoff capped at 30 seconds,
+  session expiry handling, and stream cleanup on account changes.
 - Responsive navigation, keyboard-accessible native dialogs, labeled forms,
   and reduced-motion support.
 
@@ -93,6 +98,13 @@ and revisions. Mutations are not automatically retried. On conflicts or unknown
 outcomes, the app refreshes the snapshot so the user can review before retrying.
 The countdown uses the snapshot's server time; expiry is informational, matching
 the backend (there is no automatic pick or skip).
+
+Each newly established listener sends an initial invalidation. Notifications are
+transient wake-up signals: a reconnect reloads the current league list and snapshot,
+including changes missed while offline. Every open tab uses its own persistent
+PostgreSQL connection in addition to the server's normal query connections. Keep
+database capacity available for normal API traffic; the frontend does not change
+database connection limits. Closing a tab or signing out closes its stream.
 
 Catalog refresh is explicit because administrative repricing has no backend
 event. Existing roster/history prices always use the amount originally charged.

@@ -27,6 +27,7 @@ class Settings:
     pool_size: int = 10
     transaction_retries: int = 4
     sse_heartbeat_seconds: float = 15
+    sse_max_connections: int = 30
 
     def __post_init__(self):
         if not self.database_url:
@@ -83,6 +84,7 @@ class Settings:
                 self.session_ttl_seconds,
                 self.pool_size,
                 self.sse_heartbeat_seconds,
+                self.sse_max_connections,
             )
             <= 0
         ):
@@ -109,4 +111,5 @@ class Settings:
             oidc_callback_path=os.getenv("OIDC_CALLBACK_PATH", "/auth/callback"),
             session_ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", "86400")),
             pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
+            sse_max_connections=int(os.getenv("SSE_MAX_CONNECTIONS", "30")),
         )

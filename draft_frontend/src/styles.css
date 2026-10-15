@@ -480,6 +480,11 @@ main {
   font-size: 12px;
   margin: 15px 0;
 }
+.notice-banner {
+  background: #f0f5ff;
+  border-color: #cddcf6;
+  color: #3c5480;
+}
 .page-heading {
   display: flex;
   align-items: center;

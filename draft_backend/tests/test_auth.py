@@ -293,3 +293,21 @@ def test_settings_owns_test_login_and_retry_validation():
         Settings(**settings, transaction_retries=-1)
     with pytest.raises(ValueError, match="APP_ENV=test"):
         Settings(**{**settings, "app_env": "development"})
+
+
+def test_stream_capacity_is_positive_and_configurable(monkeypatch):
+    settings = dict(
+        database_url="unused", session_secret="x" * 32,
+        public_base_url="https://draft.example", app_env="test", test_login_enabled=True,
+    )
+    assert Settings(**settings).sse_max_connections == 30
+    for invalid in [0, -1]:
+        with pytest.raises(ValueError, match="positive"):
+            Settings(**settings, sse_max_connections=invalid)
+    for name, value in {
+        "DATABASE_URL": "unused", "SESSION_SECRET": "x" * 32, "APP_ENV": "test",
+        "TEST_LOGIN_ENABLED": "true", "OIDC_ISSUER": "", "OIDC_CLIENT_ID": "",
+        "OIDC_CLIENT_SECRET": "", "SSE_MAX_CONNECTIONS": "7",
+    }.items():
+        monkeypatch.setenv(name, value)
+    assert Settings.from_env().sse_max_connections == 7

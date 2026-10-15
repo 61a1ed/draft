@@ -4,7 +4,7 @@ import type {
   Draftable,
   DraftActionInput,
   League,
-  LeagueEventHandlers,
+  AccountEventHandlers,
   LeagueSnapshot,
   RpcResult,
   Session,
@@ -27,6 +27,8 @@ const errorMessages: Record<string, string> = {
   order_must_contain_every_team_once:
     'The draft order must include every team exactly once, with at least two teams.',
   csrf_failed: 'Your sign-in details have changed. Refresh the page before trying again.',
+  session_changed:
+    'Your sign-in details have changed. Review your current account before trying again.',
   origin_not_allowed: 'The frontend address does not match the backend’s PUBLIC_BASE_URL setting.',
   invalid_reference: 'One of the selected items no longer exists. Refresh and try again.',
   invalid_value: 'Check the names, numbers, and required fields before trying again.',
@@ -73,19 +75,21 @@ export function errorMessage(error: unknown): string {
 
 // Keep the token in memory. The signed session itself stays in its HttpOnly cookie.
 let csrfToken: string | null = null
+let sessionGeneration = 0
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const generation = sessionGeneration
   const response = await fetch(path, { ...options, credentials: 'same-origin' })
   if (response.status === 204) return undefined as T
   let payload: unknown
   try {
     payload = await response.json()
   } catch {
-    if (response.status === 401) csrfToken = null
+    if (response.status === 401 && generation === sessionGeneration) csrfToken = null
     throw new ApiError(response.status, 'invalid_response')
   }
   if (!response.ok) {
-    if (response.status === 401) csrfToken = null
+    if (response.status === 401 && generation === sessionGeneration) csrfToken = null
     const detail =
       typeof payload === 'object' && payload !== null && 'detail' in payload
         ? payload.detail
@@ -102,9 +106,39 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 async function session(signal?: AbortSignal): Promise<Session> {
-  const value = await request<Session>('/auth/me', { signal })
-  csrfToken = value.csrf_token
-  return value
+  const generation = ++sessionGeneration
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const value = await request<Session>('/auth/me', { signal })
+      if (signal?.aborted) throw signal.reason
+      // Do not resume an old implicit login lookup into a write using the newer account.
+      if (generation !== sessionGeneration) throw new ApiError(409, 'session_changed')
+      csrfToken = value.csrf_token
+      return value
+    } catch (cause) {
+      if (
+        signal?.aborted ||
+        generation !== sessionGeneration ||
+        attempt >= 2 ||
+        (cause instanceof ApiError && cause.status < 500 && ![408, 429].includes(cause.status))
+      )
+        throw cause
+      await new Promise<void>((resolve, reject) => {
+        const cancel = () => {
+          clearTimeout(timer)
+          reject(signal?.reason)
+        }
+        const timer = setTimeout(
+          () => {
+            signal?.removeEventListener('abort', cancel)
+            resolve()
+          },
+          1000 * 2 ** attempt,
+        )
+        signal?.addEventListener('abort', cancel, { once: true })
+      })
+    }
+  }
 }
 
 async function rpc<T>(name: string, body: object): Promise<RpcResult<T>> {
@@ -120,21 +154,23 @@ async function rpc<T>(name: string, body: object): Promise<RpcResult<T>> {
 export const api = {
   session,
   async testLogin(username: string): Promise<Session> {
+    const generation = ++sessionGeneration
     const value = await request<Session>('/auth/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Test-Login': '1' },
       body: JSON.stringify({ username }),
     })
-    csrfToken = value.csrf_token
+    if (generation === sessionGeneration) csrfToken = value.csrf_token
     return value
   },
   async logout(): Promise<void> {
     if (!csrfToken) await session()
+    const generation = ++sessionGeneration
     await request<void>('/auth/logout', {
       method: 'POST',
       headers: { 'X-CSRF-Token': csrfToken! },
     })
-    csrfToken = null
+    if (generation === sessionGeneration) csrfToken = null
   },
   users: (signal?: AbortSignal) => request<User[]>('/api/users', { signal }),
   draftables: (signal?: AbortSignal) => request<Draftable[]>('/api/draftables', { signal }),
@@ -150,28 +186,54 @@ export const api = {
   draftAction: (input: DraftActionInput) => rpc<number | null>('draft_action', input),
 }
 
-/** Close on logout, account change, or league change. Native EventSource reconnects itself. */
-export function subscribeLeague(id: number, handlers: LeagueEventHandlers): () => void {
-  const source = new EventSource(`/api/leagues/${id}/events`)
+/** One stream per signed-in browser tab. Explicit retries also recover failed HTTP opens. */
+export function subscribeAccount(handlers: AccountEventHandlers): () => void {
+  let source: EventSource | null = null
   let closed = false
+  let retry: ReturnType<typeof setTimeout> | undefined
+  let failures = 0
   const close = () => {
     if (closed) return
     closed = true
-    source.close()
+    clearTimeout(retry)
+    source?.close()
+    source = null
     handlers.onStatus?.('closed')
   }
-  handlers.onStatus?.('connecting')
-  source.addEventListener('open', () => {
-    if (!closed) handlers.onStatus?.('connected')
-  })
-  source.addEventListener('invalidate', () => {
-    if (!closed) handlers.onInvalidate()
-  })
-  source.addEventListener('error', () => {
+  const reconnect = () => {
     if (closed) return
-    handlers.onStatus?.(source.readyState === EventSource.CLOSED ? 'closed' : 'reconnecting')
+    source?.close()
+    source = null
+    handlers.onStatus?.('reconnecting')
     // HTTP can explain an authorization failure that EventSource does not expose.
     handlers.onInvalidate()
-  })
+    if (!closed) {
+      retry = setTimeout(open, Math.min(1000 * 2 ** Math.min(failures++, 5), 30_000))
+    }
+  }
+  const open = () => {
+    if (closed) return
+    handlers.onStatus?.(failures ? 'reconnecting' : 'connecting')
+    try {
+      const next = new EventSource('/api/events')
+      source = next
+      const valid = () => !closed && source === next
+      next.addEventListener('open', () => {
+        if (valid()) handlers.onStatus?.('connected')
+      })
+      next.addEventListener('invalidate', () => {
+        if (!valid()) return
+        // An initial invalidation proves LISTEN is established, not just the HTTP headers.
+        failures = 0
+        handlers.onInvalidate()
+      })
+      next.addEventListener('error', () => {
+        if (valid()) reconnect()
+      })
+    } catch {
+      reconnect()
+    }
+  }
+  open()
   return close
 }

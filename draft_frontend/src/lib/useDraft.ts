@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, ApiError, errorMessage, subscribeLeague } from './api'
+import { api, ApiError, errorMessage, subscribeAccount } from './api'
 import type { ConnectionStatus, Draftable, League, LeagueSnapshot, Session, User } from './types'
 
 export function useDraft() {
@@ -12,13 +12,19 @@ export function useDraft() {
   const [snapshot, setSnapshot] = useState<LeagueSnapshot | null>(null)
   const [connection, setConnection] = useState<ConnectionStatus>('closed')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [streamEpoch, setStreamEpoch] = useState(0)
   const generation = useRef(0)
+  const selectionGeneration = useRef(0)
   const mounted = useRef(true)
   const currentMode = useRef(mode)
   const currentLeague = useRef<number | null>(null)
   const currentSnapshot = useRef<LeagueSnapshot | null>(null)
+  const currentLeagues = useRef<League[]>([])
+  const referenceDataReady = useRef(false)
+  const leagueListReady = useRef(false)
+  const refreshAccount = useRef<(() => Promise<void>) | null>(null)
   const stopStream = useRef<(() => void) | null>(null)
   const cancelConnect = useRef<AbortController | null>(null)
   const mutationLock = useRef<symbol | null>(null)
@@ -36,6 +42,7 @@ export function useDraft() {
     stopStream.current?.()
     stopStream.current = null
     mutationLock.current = null
+    refreshAccount.current = null
     setBusy(false)
     setConnection('closed')
     return token
@@ -46,6 +53,7 @@ export function useDraft() {
     currentMode.current = 'disconnected'
     currentLeague.current = null
     currentSnapshot.current = null
+    currentLeagues.current = []
     setMode('disconnected')
     setSession(null)
     setCatalog([])
@@ -54,6 +62,7 @@ export function useDraft() {
     setLeagueId(null)
     setSnapshot(null)
     setError('')
+    setNotice('')
   }, [invalidate])
 
   const connect = useCallback(
@@ -62,30 +71,30 @@ export function useDraft() {
       const abort = new AbortController()
       cancelConnect.current = abort
       currentMode.current = 'loading'
+      currentLeague.current = null
+      currentSnapshot.current = null
+      currentLeagues.current = []
+      referenceDataReady.current = false
+      leagueListReady.current = false
+      setMode('loading')
+      setSession(null)
+      setSnapshot(null)
+      setLeagueId(null)
+      setLeagues([])
+      setCatalog([])
+      setUsers([])
+      setNotice('')
       setBusy(true)
       try {
         const current = authenticated ?? (await api.session(abort.signal))
         if (!isCurrent(token)) return
-        const [items, leagueList, userList] = await Promise.all([
-          api.draftables(abort.signal),
-          api.leagues(abort.signal),
-          api.users(abort.signal),
-        ])
-        if (!isCurrent(token)) return
         currentMode.current = 'live'
-        currentLeague.current =
-          leagueList.find((league) => league.id === preferredLeague)?.id ??
-          leagueList[0]?.id ??
-          null
-        currentSnapshot.current = null
+        currentLeague.current = preferredLeague ?? null
         setSession(current)
-        setCatalog(items)
-        setLeagues(leagueList)
-        setUsers(userList)
-        setSnapshot(null)
         setLeagueId(currentLeague.current)
         setMode('live')
         setError('')
+        setNotice('')
         // Reconnecting the same account and league still needs a new event stream.
         setStreamEpoch((value) => value + 1)
       } catch (cause) {
@@ -118,10 +127,11 @@ export function useDraft() {
   }, [connect])
 
   const acceptSnapshot = useCallback(
-    (next: LeagueSnapshot, token: number, id: number) => {
+    (next: LeagueSnapshot, token: number, id: number, selection: number) => {
       if (
         !isCurrent(token) ||
         currentMode.current !== 'live' ||
+        selectionGeneration.current !== selection ||
         currentLeague.current !== id ||
         next.league_id !== id
       )
@@ -136,11 +146,10 @@ export function useDraft() {
         return
       currentSnapshot.current = next
       setSnapshot(next)
-      setLeagues((previous) =>
-        previous.some((item) => item.id === id)
-          ? previous.map((item) => (item.id === id ? next.league : item))
-          : [...previous, next.league],
+      currentLeagues.current = currentLeagues.current.map((item) =>
+        item.id === id && item.revision <= next.revision ? next.league : item,
       )
+      setLeagues(currentLeagues.current)
     },
     [isCurrent],
   )
@@ -151,96 +160,166 @@ export function useDraft() {
   }, [enterGuest])
 
   useEffect(() => {
-    if (mode !== 'live' || currentMode.current !== 'live' || leagueId === null) return
+    if (mode !== 'live' || currentMode.current !== 'live' || !session) return
     const token = generation.current
     const abort = new AbortController()
     let active = true
     const valid = () => active && isCurrent(token)
-    const revoked = () => {
-      if (!valid()) return
-      invalidate()
-      currentLeague.current = null
-      currentSnapshot.current = null
-      setSnapshot(null)
-      setLeagueId(null)
-      setLeagues((previous) => previous.filter((item) => item.id !== leagueId))
-      setError('You no longer have access to that league.')
-    }
     let retry: ReturnType<typeof setTimeout> | undefined
+    let expiry: ReturnType<typeof setTimeout> | undefined
     let refreshError = ''
-    const refresh = async () => {
-      if (!valid()) return
+    let failures = 0
+    let pending = false
+    let running: Promise<void> | null = null
+    const choose = (id: number | null) => {
+      if (currentLeague.current === id) return
+      selectionGeneration.current++
+      currentLeague.current = id
+      currentSnapshot.current = null
+      setLeagueId(id)
+      setSnapshot(null)
+    }
+    const scheduleRetry = () => {
       clearTimeout(retry)
-      try {
-        const next = await api.snapshot(leagueId, abort.signal)
-        if (valid()) {
-          acceptSnapshot(next, token, leagueId)
-          setError((previous) => (previous === refreshError ? '' : previous))
-        }
-      } catch (cause) {
-        if (!valid() || abort.signal.aborted) return
-        if (cause instanceof ApiError && cause.status === 401) expireSession()
-        else if (cause instanceof ApiError && cause.status === 404) revoked()
-        else {
-          refreshError = errorMessage(cause)
-          setError(refreshError)
-          if (!(cause instanceof ApiError) || cause.status >= 500) {
-            clearTimeout(retry)
-            retry = setTimeout(() => void refresh(), 2000)
+      retry = setTimeout(
+        () => void refresh(),
+        Math.min(1000 * 2 ** Math.min(failures++, 5), 30_000),
+      )
+    }
+    const drain = async () => {
+      while (pending && valid()) {
+        pending = false
+        clearTimeout(retry)
+        let id: number | null = null
+        let selection = selectionGeneration.current
+        try {
+          const [list, reference] = await Promise.all([
+            api.leagues(abort.signal),
+            referenceDataReady.current
+              ? null
+              : Promise.all([api.draftables(abort.signal), api.users(abort.signal)]),
+          ])
+          if (!valid()) return
+          // A list begun before a selection (including a just-created league) may
+          // omit it. Let the queued pass decide access using a fresh transaction.
+          if (selection !== selectionGeneration.current) {
+            pending = true
+            continue
+          }
+          if (reference) {
+            setCatalog(reference[0])
+            setUsers(reference[1])
+            referenceDataReady.current = true
+          }
+          const previous = currentLeagues.current
+          const added = list.filter((item) => !previous.some((old) => old.id === item.id))
+          currentLeagues.current = list.map((item) => {
+            const newer = previous.find((old) => old.id === item.id && old.revision > item.revision)
+            return newer ?? item
+          })
+          setLeagues(currentLeagues.current)
+          if (leagueListReady.current && added.length) {
+            setNotice(
+              added.length === 1
+                ? `You now have access to ${added[0].name}.`
+                : `You now have access to ${added.length} new leagues.`,
+            )
+          }
+          leagueListReady.current = true
+          if (!list.some((item) => item.id === currentLeague.current)) {
+            choose(list[0]?.id ?? null)
+          }
+          id = currentLeague.current
+          selection = selectionGeneration.current
+          if (id !== null) {
+            const next = await api.snapshot(id, abort.signal)
+            if (valid()) acceptSnapshot(next, token, id, selection)
+          }
+          if (!valid()) return
+          failures = 0
+          setError((previousError) => (previousError === refreshError ? '' : previousError))
+        } catch (cause) {
+          if (!valid() || abort.signal.aborted) return
+          if (cause instanceof ApiError && cause.status === 401) {
+            expireSession()
+            return
+          }
+          if (selection !== selectionGeneration.current) continue
+          if (cause instanceof ApiError && cause.status === 404 && id !== null) {
+            // Membership can change between the list and snapshot transactions.
+            currentLeagues.current = currentLeagues.current.filter((item) => item.id !== id)
+            setLeagues(currentLeagues.current)
+            choose(currentLeagues.current[0]?.id ?? null)
+            setNotice('Your league access changed. The available leagues have been updated.')
+            scheduleRetry()
+          } else {
+            refreshError = errorMessage(cause)
+            setError(refreshError)
+            if (
+              !(cause instanceof ApiError) ||
+              cause.status >= 500 ||
+              cause.status === 408 ||
+              cause.status === 429
+            ) {
+              scheduleRetry()
+            }
           }
         }
       }
     }
-    const stop = subscribeLeague(leagueId, {
-      onInvalidate: () => {
-        if (valid()) void refresh()
-      },
+    const refresh = (): Promise<void> => {
+      if (!valid()) return Promise.resolve()
+      pending = true
+      clearTimeout(retry)
+      // A burst during a read becomes one additional pass. No concurrent list/snapshot reads.
+      if (!running) {
+        running = drain().finally(() => {
+          running = null
+          if (pending && valid()) void refresh()
+        })
+      }
+      return running
+    }
+    refreshAccount.current = refresh
+    const stop = subscribeAccount({
+      onInvalidate: () => void refresh(),
       onStatus: (status) => {
         if (valid()) setConnection(status)
       },
     })
+    const checkExpiry = () => {
+      if (!valid()) return
+      const remaining = session.expires_at * 1000 - Date.now()
+      if (remaining <= 0) expireSession()
+      else expiry = setTimeout(checkExpiry, Math.min(remaining, 2_147_483_647))
+    }
+    checkExpiry()
     const cleanup = () => {
       active = false
       clearTimeout(retry)
+      clearTimeout(expiry)
       abort.abort()
       stop()
+      if (refreshAccount.current === refresh) refreshAccount.current = null
     }
     stopStream.current = cleanup
     return () => {
       cleanup()
       if (stopStream.current === cleanup) stopStream.current = null
     }
-  }, [
-    mode,
-    leagueId,
-    session?.user.id,
-    streamEpoch,
-    acceptSnapshot,
-    expireSession,
-    invalidate,
-    isCurrent,
-  ])
+  }, [mode, session, streamEpoch, acceptSnapshot, expireSession, isCurrent])
 
   const selectLeague = (id: number) => {
-    if (currentMode.current !== 'live') return
-    invalidate()
+    if (currentMode.current !== 'live' || currentLeague.current === id) return
+    selectionGeneration.current++
+    mutationLock.current = null
+    setBusy(false)
     currentLeague.current = id
     currentSnapshot.current = null
     setSnapshot(null)
     setError('')
     setLeagueId(id)
-    setStreamEpoch((value) => value + 1)
-  }
-
-  const refreshLeagueList = async (token: number) => {
-    const list = await api.leagues()
-    if (!isCurrent(token)) return
-    setLeagues((previous) =>
-      list.map((item) => {
-        const newer = previous.find((old) => old.id === item.id && old.revision > item.revision)
-        return newer ?? item
-      }),
-    )
+    return refreshAccount.current?.()
   }
 
   const mutate = async (operation: () => Promise<unknown>) => {
@@ -250,24 +329,17 @@ export function useDraft() {
     setBusy(true)
     setError('')
     const token = generation.current
-    const id = currentLeague.current
+    const selection = selectionGeneration.current
     try {
       await operation()
-      if (isCurrent(token) && id !== null) acceptSnapshot(await api.snapshot(id), token, id)
+      if (isCurrent(token)) await refreshAccount.current?.()
     } catch (cause) {
       if (!isCurrent(token)) return
       if (cause instanceof ApiError && cause.status === 401) expireSession()
-      else {
+      else if (selectionGeneration.current === selection) {
         setError(errorMessage(cause))
         // Refresh even after an unknown outcome. Never replay a write automatically.
-        if (id !== null) {
-          try {
-            acceptSnapshot(await api.snapshot(id), token, id)
-          } catch (refreshError) {
-            if (isCurrent(token) && refreshError instanceof ApiError && refreshError.status === 401)
-              expireSession()
-          }
-        }
+        await refreshAccount.current?.()
       }
     } finally {
       if (mutationLock.current === owner) {
@@ -319,6 +391,7 @@ export function useDraft() {
     currentMode.current = 'loading'
     currentLeague.current = null
     currentSnapshot.current = null
+    currentLeagues.current = []
     setMode('loading')
     setBusy(true)
     setSession(null)
@@ -327,6 +400,7 @@ export function useDraft() {
     setLeagues([])
     setCatalog([])
     setUsers([])
+    setNotice('')
     try {
       await api.logout()
       if (isCurrent(token)) enterGuest()
@@ -348,6 +422,7 @@ export function useDraft() {
     setBusy(true)
     setError('')
     const token = generation.current
+    const selection = selectionGeneration.current
     try {
       const result = await api.createLeague({
         p_name: name,
@@ -356,26 +431,16 @@ export function useDraft() {
       })
       if (!isCurrent(token)) return false
       // A confirmed creation remains a success even when the subsequent list read fails.
-      let refreshError = ''
-      try {
-        await refreshLeagueList(token)
-      } catch (cause) {
-        refreshError = `Your league was created. ${errorMessage(cause)}`
-      }
-      if (!isCurrent(token)) return false
-      selectLeague(result.result)
-      if (refreshError) setError(refreshError)
-      return true
+      setNotice('Your league was created.')
+      if (selectionGeneration.current === selection) await selectLeague(result.result)
+      else await refreshAccount.current?.()
+      return isCurrent(token)
     } catch (cause) {
       if (!isCurrent(token)) return false
       if (cause instanceof ApiError && cause.status === 401) expireSession()
-      else {
+      else if (selectionGeneration.current === selection) {
         setError(`${errorMessage(cause)} Check the league list before trying again.`)
-        try {
-          await refreshLeagueList(token)
-        } catch {
-          /* original error retained */
-        }
+        await refreshAccount.current?.()
       }
       return false
     } finally {
@@ -397,6 +462,8 @@ export function useDraft() {
     connection,
     error,
     setError,
+    notice,
+    setNotice,
     busy,
     connect,
     selectLeague,

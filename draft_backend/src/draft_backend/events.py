@@ -1,90 +1,111 @@
-"""One LISTEN connection per worker; coalesced invalidations, no event log."""
+"""One dedicated PostgreSQL listener per browser stream; notifications are wake-ups."""
 
 import asyncio
 import json
 import logging
-from collections import defaultdict
-from contextlib import suppress
+import time
+from contextlib import aclosing
 
+import anyio
 import psycopg
+from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
+from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
 
 
-class EventHub:
-    def __init__(self, database_url: str, channel: str):
-        self.database_url = database_url
-        self.channel = channel
-        self.subscribers = defaultdict(set)
-        self.connected = asyncio.Event()
-        self.task = None
-
-    async def start(self):
-        self.task = asyncio.create_task(self._listen(), name="postgres-listen")
-        try:
-            await asyncio.wait_for(self.connected.wait(), timeout=20)
-        except BaseException:
-            await self.close()
-            raise
-
-    async def close(self):
-        if self.task:
-            self.task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self.task
-
-    def subscribe(self, topic: int):
-        queue = asyncio.Queue(maxsize=1)
-        self.subscribers[topic].add(queue)
-        return queue
-
-    def unsubscribe(self, topic: int, queue):
-        queues = self.subscribers.get(topic)
-        if queues is not None:
-            queues.discard(queue)
-            if not queues:
-                del self.subscribers[topic]
-
-    @staticmethod
-    def _offer(queue):
-        if not queue.full():
-            queue.put_nowait(None)
-
-    def invalidate(self, topic):
-        for queue in tuple(self.subscribers.get(topic, ())):
-            self._offer(queue)
-
-    def invalidate_all(self):
-        for queues in tuple(self.subscribers.values()):
-            for queue in tuple(queues):
-                self._offer(queue)
-
-    async def _listen(self):
-        while True:
-            try:
-                async with await psycopg.AsyncConnection.connect(
-                    self.database_url,
-                    autocommit=True,
-                    connect_timeout=10,
-                    keepalives_idle=15,
-                    keepalives_interval=5,
-                    keepalives_count=3,
-                ) as conn:
-                    await conn.execute(
-                        psycopg.sql.SQL("LISTEN {}").format(psycopg.sql.Identifier(self.channel))
-                    )
-                    self.connected.set()
-                    self.invalidate_all()  # Any disconnected interval requires a snapshot.
-                    async for notice in conn.notifies():
-                        self.invalidate(notice.payload)
-            except (psycopg.Error, OSError):
-                # No DSN, credentials, or raw provider error in logs.
-                log.warning("Draft notification connection lost; reconnecting")
-            finally:
-                self.connected.clear()
-            await asyncio.sleep(1)
-
-
 def event(kind, payload=None):
     return f"event: {kind}\ndata: {json.dumps(jsonable_encoder(payload))}\n\n"
+
+
+class AccountEventResponse(StreamingResponse):
+    """Own the connection for the complete response, including failed socket sends.
+
+    Opening inside stream_response also lets Starlette cancel connection setup on
+    disconnect. There are no pooled listeners or account-to-subscriber mappings.
+    """
+
+    def __init__(self, settings, user_id: int, expires_at: int, slots: asyncio.Semaphore):
+        super().__init__(
+            content=(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+        )
+        self.settings = settings
+        self.user_id = user_id
+        self.expires_at = expires_at
+        self.slots = slots
+
+    async def _notifications(self, conn):
+        # LISTEN is already committed, so setup races are covered by this refresh.
+        yield event("invalidate")
+        try:
+            while True:
+                async with aclosing(
+                    conn.notifies(timeout=self.settings.sse_heartbeat_seconds)
+                ) as notices:
+                    async for _ in notices:
+                        yield event("invalidate")
+                yield ": keep-alive\n\n"
+        except (psycopg.Error, OSError):
+            # Closing forces a fresh listener and snapshot after any missed interval.
+            # Do not include provider errors, connection strings, or credentials.
+            log.warning("Account notification connection lost; ending stream")
+
+    async def stream_response(self, send):
+        # Admission is immediate: reserve query capacity rather than letting idle
+        # streams occupy every PostgreSQL connection. The semaphore is per worker.
+        if self.slots.locked():
+            raise HTTPException(503, "event_stream_capacity", headers={"Retry-After": "2"})
+        await self.slots.acquire()
+        conn = None
+        notifications = None
+        started = False
+        expired = False
+        try:
+            try:
+                # Absolute session expiry also bounds connection setup and slow sends.
+                async with asyncio.timeout(max(0, self.expires_at - time.time())):
+                    try:
+                        conn = await psycopg.AsyncConnection.connect(
+                            self.settings.database_url,
+                            autocommit=True,
+                            connect_timeout=10,
+                            application_name="draft-events",
+                            keepalives_idle=15,
+                            keepalives_interval=5,
+                            keepalives_count=3,
+                        )
+                        # The ID comes only from the authenticated session; never a URL
+                        # or request parameter. Still quote the channel as an identifier.
+                        await conn.execute(
+                            psycopg.sql.SQL("LISTEN {}").format(
+                                psycopg.sql.Identifier(f"dl_user_{self.user_id}")
+                            )
+                        )
+                    except (psycopg.Error, OSError):
+                        raise HTTPException(503, "database_unavailable") from None
+                    notifications = self._notifications(conn)
+                    self.body_iterator = notifications
+                    started = True
+                    await super().stream_response(send)
+            except TimeoutError:
+                if not started:
+                    raise HTTPException(401, "sign_in_required") from None
+                expired = True
+        finally:
+            # Starlette may cancel this task repeatedly after a browser disconnect.
+            # Close the iterator (and its notifies generator) before the connection.
+            with anyio.CancelScope(shield=True):
+                try:
+                    if notifications is not None:
+                        await notifications.aclose()
+                finally:
+                    try:
+                        if conn is not None:
+                            await conn.close()
+                    finally:
+                        self.slots.release()
+        if expired:
+            await send({"type": "http.response.body", "body": b"", "more_body": False})

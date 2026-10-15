@@ -5,6 +5,15 @@ one Ubuntu 24.04 x86-64 Lightsail instance, install PostgreSQL 16 and Caddy, and
 serve the React frontend and Python backend. DNS is manual. Application updates
 keep the old release serving until the candidate is ready.
 
+Each signed-in browser tab now holds its own PostgreSQL notification connection.
+The default per-worker limits are 30 streams (`SSE_MAX_CONNECTIONS`) plus 10
+ordinary query connections (`DB_POOL_SIZE`). Budget both releases during a rollout,
+all workers, and administrative/reserved connections before changing these limits.
+The deployment does not raise PostgreSQL's connection limit. `/ready` checks the
+query pool; stream failures reconnect independently. See the backend's
+[stream operations and preproduction database upgrade procedure](../draft_backend/README.md#server-sent-events)
+before deploying this schema change to an existing database.
+
 `manage.py` supplies the configured names, paths and credentials to each step.
 It does not choose which cloud resources to create next or reconcile a partially
 completed installation. `state.json` records resource identities and connection

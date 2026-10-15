@@ -102,8 +102,11 @@ SET name = 'My updated draft', revision = revision + 1
 WHERE id = (SELECT league_id FROM dl_test.scenario WHERE slug = 'live');
 ```
 
-Catalog edits and new/deleted league lists have no global event: click **Refresh all
-data** after those changes. Timers are anchored when fixtures load and keep running;
+League and membership changes notify affected accounts, including managers losing
+access and signed-in managers who previously had no leagues. Open tabs refresh
+their accessible leagues and selected snapshot automatically. Catalog edits have
+no notification: click **Refresh all data** after those changes.
+Timers are anchored when fixtures load and keep running;
 rerun a fixture to restart its timer. Timer expiry never auto-picks or skips.
 
 ### Choosing isolation

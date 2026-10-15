@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from psycopg_pool import PoolTimeout
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.sessions import SessionMiddleware
@@ -14,7 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import install_auth, require_user, session_valid
 from .config import Settings
 from .db import Database
-from .events import EventHub, event
+from .events import AccountEventResponse
 
 ID = Annotated[int, Field(strict=True, gt=0, le=2147483647)]
 Revision = Annotated[int, Field(strict=True, ge=0, le=2147483647)]
@@ -127,16 +127,12 @@ def create_app(settings: Settings | None = None):
         db = app.state.db = Database(settings)
         # Successful immutable image reads live until this worker restarts.
         app.state.images = {}
-        hub = app.state.events = EventHub(settings.database_url, "dl_changed")
+        app.state.event_slots = asyncio.Semaphore(settings.sse_max_connections)
         await db.open()
         try:
             if settings.test_login_enabled and not await db.is_test_database():
                 raise RuntimeError("Test login requires a database provisioned with test users")
-            await hub.start()
-            try:
-                yield
-            finally:
-                await hub.close()
+            yield
         finally:
             await db.close()
 
@@ -184,15 +180,13 @@ def create_app(settings: Settings | None = None):
 
     @app.get("/healthz")
     async def health():
-        return {"status": "ok", "notifications_connected": app.state.events.connected.is_set()}
+        return {"status": "ok"}
 
     @app.get("/ready")
     async def ready():
         try:
             async with asyncio.timeout(1):
                 await app.state.db.ready()
-            if not app.state.events.connected.is_set():
-                raise HTTPException(503, "not_ready")
         except (psycopg.Error, PoolTimeout, TimeoutError):
             raise HTTPException(503, "not_ready") from None
         return {"ready": True}
@@ -289,42 +283,10 @@ def create_app(settings: Settings | None = None):
     async def draft_action(body: DraftAction, user: User):
         return await rpc(user, "draft_action", body)
 
-    @app.get("/api/leagues/{league_id}/events", tags=["events"])
-    async def events(request: Request, league_id: int, user: User):
-        hub = app.state.events
-        # Subscribe before checking access so changes during setup remain pending.
-        topic = str(league_id)
-        queue = hub.subscribe(topic)
-        try:
-            rows = await app.state.db.read(
-                user, "SELECT id FROM dl.league WHERE id = %s", (league_id,)
-            )
-            if not rows:
-                raise HTTPException(404, "league_not_found")
-        except BaseException:
-            hub.unsubscribe(topic, queue)
-            raise
-
-        async def stream():
-            try:
-                yield "retry: 2000\n\n"
-                yield event("invalidate")
-                while True:
-                    try:
-                        await asyncio.wait_for(
-                            queue.get(), timeout=settings.sse_heartbeat_seconds
-                        )
-                    except TimeoutError:
-                        yield ": keep-alive\n\n"
-                    else:
-                        yield event("invalidate")
-            finally:
-                hub.unsubscribe(topic, queue)
-
-        return StreamingResponse(
-            stream(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    @app.get("/api/events", tags=["events"])
+    async def events(request: Request, user: User):
+        return AccountEventResponse(
+            settings, user, request.session["expires_at"], app.state.event_slots,
         )
 
     return app
