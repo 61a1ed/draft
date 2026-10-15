@@ -55,7 +55,7 @@ PowerShell terminal with its generated environment and the frontend public URL:
 ```powershell
 cd E:\bz\draft_backend
 $env:PUBLIC_BASE_URL = 'http://127.0.0.1:5173'
-uv run --env-file .testdb/.env draft-server
+uv run --env-file .dev-runs/<run>/database/.env draft-server
 ```
 
 See the backend README for provisioning a fresh test database. This frontend
