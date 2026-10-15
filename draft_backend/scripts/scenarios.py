@@ -8,13 +8,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import psycopg
-from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
 
 if __package__:
-    from .testdb import PROJECT, load_marker
+    from .bootstrap import PROJECT
+    from .postgres import read_environment
 else:
-    from testdb import PROJECT, load_marker
+    from bootstrap import PROJECT
+    from postgres import read_environment
 
 SCENARIO_DIR = PROJECT / "sql" / "scenarios"
 SCENARIOS = {
@@ -34,30 +35,9 @@ class ScenarioDatabase:
 
 
 def prepare(root: Path) -> ScenarioDatabase:
-    """Validate a managed cluster and load its credentials without displaying them."""
-    marker = load_marker(root)
+    """Load the explicitly selected local database credentials."""
     root = root.resolve()
-    path = root / "admin.env"
-    if path.is_symlink():
-        raise RuntimeError("Refusing a symbolic-link administrator environment file")
-    values = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        key, separator, value = line.partition("=")
-        if separator:
-            values[key] = value
-    dsn = values.get("ADMIN_DATABASE_URL", "")
-    try:
-        connection = conninfo_to_dict(dsn)
-    except psycopg.Error:
-        raise RuntimeError("Invalid administrator connection in the marked cluster") from None
-    if (
-        connection.get("host") != "127.0.0.1"
-        or connection.get("port") != str(marker["port"])
-        or connection.get("dbname") != marker["database"]
-        or connection.get("user") != "postgres"
-    ):
-        raise RuntimeError("Administrator connection does not match the marked local cluster")
-    return ScenarioDatabase(root, dsn)
+    return ScenarioDatabase(root, read_environment(root / "admin.env")["ADMIN_DATABASE_URL"])
 
 
 def apply(
@@ -124,7 +104,8 @@ def main() -> None:
     except (psycopg.Error, OSError, RuntimeError, ValueError) as exc:
         detail = (
             f"database operation failed (SQLSTATE {exc.sqlstate or 'connection error'})"
-            if isinstance(exc, psycopg.Error) else str(exc)
+            if isinstance(exc, psycopg.Error)
+            else str(exc)
         )
         print(f"Scenario load failed: {detail}", file=sys.stderr)
         raise SystemExit(1) from None

@@ -93,9 +93,9 @@ def install_auth(app: FastAPI) -> None:
             client_kwargs={"scope": "openid profile", "timeout": 15.0},
         )
     app.state.oauth = oauth
-    router = APIRouter(prefix="/auth", tags=["authentication"])
+    router = APIRouter(tags=["authentication"])
 
-    @router.get("/login")
+    @router.get("/auth/login")
     async def oidc_login(request: Request):
         client = request.app.state.oauth.create_client("oidc")
         if client is None:
@@ -104,7 +104,7 @@ def install_auth(app: FastAPI) -> None:
         for key in list(request.session):
             if key.startswith("_state_oidc_"):
                 del request.session[key]
-        callback = settings.public_base_url.rstrip("/") + "/auth/callback"
+        callback = settings.public_base_url.rstrip("/") + settings.oidc_callback_path
         try:
             response = await client.authorize_redirect(request, callback)
         except (httpx.RequestError, httpx.HTTPStatusError):
@@ -112,7 +112,7 @@ def install_auth(app: FastAPI) -> None:
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    @router.get("/callback")
+    @router.get(settings.oidc_callback_path)
     async def oidc_callback(request: Request):
         client = request.app.state.oauth.create_client("oidc")
         if client is None:
@@ -144,7 +144,7 @@ def install_auth(app: FastAPI) -> None:
         _login(request, user)
         return _oidc_redirect(settings)
 
-    @router.get("/me")
+    @router.get("/auth/me")
     async def me(request: Request, user_id: int = Depends(require_user)):
         user = await request.app.state.db.user(user_id)
         if user is None:
@@ -152,13 +152,13 @@ def install_auth(app: FastAPI) -> None:
             raise HTTPException(401, "sign_in_required")
         return _session_response(request, user)
 
-    @router.post("/logout", status_code=204)
+    @router.post("/auth/logout", status_code=204)
     async def logout(request: Request, _: int = Depends(require_user)):
         request.session.clear()
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     if settings.test_login_enabled:
-        @router.post("/test")
+        @router.post("/auth/test")
         async def test_login(request: Request, body: TestLogin):
             # Require a non-simple browser request to prevent login CSRF even
             # before a session exists. Do not enable permissive CORS here.

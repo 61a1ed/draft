@@ -14,12 +14,13 @@ from draft_backend import auth
 from draft_backend.config import Settings
 
 
-def make_app(*, test_login=True):
+def make_app(*, test_login=True, callback_path="/auth/callback"):
     app = FastAPI()
     app.state.settings = SimpleNamespace(
         oidc_issuer="https://id.example",
         oidc_client_id=None,
         oidc_client_secret=None,
+        oidc_callback_path=callback_path,
         public_base_url="https://draft.example",
         test_login_enabled=test_login,
         app_env="test",
@@ -179,6 +180,65 @@ def test_oidc_login_redirects_to_provider_with_configured_callback():
         assert response.headers["location"] == "https://id.example/"
         assert response.headers["cache-control"] == "no-store"
     assert provider.authorize_redirect.await_args.args[1] == ("https://draft.example/auth/callback")
+
+
+def test_custom_oidc_callback_is_both_redirect_uri_and_callback_route():
+    from starlette.responses import RedirectResponse
+
+    app = make_app(callback_path="/g")
+    provider = SimpleNamespace(
+        authorize_redirect=AsyncMock(return_value=RedirectResponse("https://id.example/")),
+        authorize_access_token=AsyncMock(return_value={
+            "id_token": "verified",
+            "userinfo": {"iss": "https://id.example", "sub": "alice", "name": "Alice"},
+        }),
+    )
+    app.state.oauth = SimpleNamespace(create_client=lambda _: provider)
+    with TestClient(app) as client:
+        assert client.get("/auth/login", follow_redirects=False).status_code == 307
+        assert provider.authorize_redirect.await_args.args[1] == "https://draft.example/g"
+        assert client.get("/auth/callback", follow_redirects=False).status_code == 404
+        response = client.get("/g?code=example&state=example", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == "https://draft.example/"
+        assert client.get("/auth/me").json()["user"] == {"id": 7, "display_name": "Alice"}
+    app.state.db.register_identity.assert_awaited_once_with("https://id.example", "alice", "Alice")
+
+
+@pytest.mark.parametrize("path", ["/auth/callback", "/g", "/oauth/callback-v2"])
+def test_oidc_callback_path_accepts_static_root_relative_paths(path):
+    settings = Settings(
+        database_url="unused", session_secret="x" * 32,
+        public_base_url="https://draft.example", app_env="test", test_login_enabled=True,
+        oidc_callback_path=path,
+    )
+    assert settings.oidc_callback_path == path
+
+
+@pytest.mark.parametrize("path", [
+    "", "/", "g", "//evil.example/g", "https://evil.example/g", "/g?x=1", "/g#fragment",
+    "/g/../auth/login", "/g/./callback", "/g/%2fcallback", "/g/{code}", "/g\\callback",
+    "/g\n", "/g/", "/auth", "/auth/login", "/auth/logout", "/auth/me", "/auth/test",
+    "/api", "/api/rpc/create_league", "/images/a", "/assets/app.js", "/ready", "/healthz",
+    "/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json",
+])
+def test_oidc_callback_path_rejects_ambiguous_or_conflicting_routes(path):
+    with pytest.raises(ValueError, match="OIDC_CALLBACK_PATH"):
+        Settings(
+            database_url="unused", session_secret="x" * 32,
+            public_base_url="https://draft.example", app_env="test", test_login_enabled=True,
+            oidc_callback_path=path,
+        )
+
+
+def test_oidc_callback_path_can_be_configured_from_environment(monkeypatch):
+    for name, value in {
+        "DATABASE_URL": "unused", "SESSION_SECRET": "x" * 32, "APP_ENV": "test",
+        "TEST_LOGIN_ENABLED": "true", "OIDC_ISSUER": "", "OIDC_CLIENT_ID": "",
+        "OIDC_CLIENT_SECRET": "", "OIDC_CALLBACK_PATH": "/g",
+    }.items():
+        monkeypatch.setenv(name, value)
+    assert Settings.from_env().oidc_callback_path == "/g"
 
 
 @pytest.mark.parametrize(

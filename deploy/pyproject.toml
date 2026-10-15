@@ -1,0 +1,20 @@
+[project]
+name = "draft-deploy"
+version = "0.1.0"
+description = "Operator-run Lightsail provisioning and application deployment"
+requires-python = ">=3.12"
+dependencies = ["boto3>=1.35,<2", "cryptography>=44,<47"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

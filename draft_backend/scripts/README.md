@@ -30,7 +30,9 @@ OIDC settings; for local HTTP use APP_ENV=development and COOKIE_SECURE=false).
 It does not automatically enable test login. Normal application actions can still
 write to the connected database; this is not a read-only application mode.
 
-Resume requires a marked local cluster and refuses one that is already running.
+Resume uses the saved connection settings beside `data/`. PostgreSQL refuses a
+data directory that is already running; the launcher never adopts that process.
+Supply `--pg-bin` on resume too, unless PostgreSQL is on PATH.
 `--db-port` defaults to 55440 for fresh databases and the saved port for resumed
 ones; an override affects this invocation only. `--api-port` and `--web-port`
 default to 8000 and 5173. Network mode rejects `--db-port` and `--pg-bin`.
@@ -67,7 +69,7 @@ uv run python scripts/scenarios.py --root .dev-runs/<run>/database apply --file 
 | `completed` | Finished two-round draft; Alice can undo to reopen it |
 
 The files contain ordinary SQL inserts/updates, with no Python fixture model and
-no HTTP replay. The runner loads credentials from the marked cluster, checks the
+no HTTP replay. The runner loads credentials from the selected cluster, checks the
 database test marker, selects `dl_owner`, creates the scenario registry if needed,
 and executes all selected files in one transaction. Fixture files, including
 custom `--file` inputs, must not contain
@@ -117,45 +119,36 @@ Current bootstrap creates fixed cluster-wide service roles and refuses existing
 ones, so a separate **cluster** is the supported fully isolated option today.
 Sharing one cluster across multiple databases would require a provisioning change
 to reuse known roles. The backend needs no scenario endpoints or routing state.
-Destroy/reinitialize the dedicated cluster when the schema itself changes; routine
+Create a fresh cluster when the schema itself changes; routine
 SQL fixture edits only need `scenarios.py apply`.
 
-Create, start, and seed a dedicated test cluster:
-
-```sh
-uv run python scripts/testdb.py --pg-bin /path/to/postgresql/bin --root .testdb init
-uv run --env-file .testdb/.env draft-server
-```
-
-The equivalent first command with the Windows binary distribution is:
+## Automated integration runs
 
 ```powershell
-uv run python scripts/testdb.py --pg-bin 'C:\postgresql\bin' --root .testdb init
+uv run python -m pytest --integration --pg-bin='C:\postgresql\bin' -m integration -q
 ```
 
-Use `--port 55433` when initializing another test cluster. Each command accepts
-`--root`; after initialization the binary location is read from the marker:
+Pytest creates and owns a fresh cluster on an available loopback port. Both
+connection URLs come from that cluster; no existing database URL is accepted.
+`--integration` without `-m integration` runs the ordinary tests as well.
+Omit `--pg-bin` if PostgreSQL is on PATH. No frontend dependencies are needed.
 
-```sh
-uv run python scripts/testdb.py --root .testdb status
-uv run python scripts/testdb.py --root .testdb stop
-uv run python scripts/testdb.py --root .testdb start
-uv run python scripts/testdb.py --root .testdb destroy
-```
+The cluster, credentials, and logs stay under `.test-runs/integration-*`, including
+on failure. Teardown stops owned processes but never deletes the directory. The
+summary prints its location. Resume with `dev.py --data-dir <run>/database/data
+--pg-bin <binaries>` to inspect it through the app, or use PostgreSQL tools.
+Delete old directories manually when they are no longer useful.
 
-`destroy` stops and permanently removes the entire marked directory. `init`
-refuses nonempty directories, and management commands refuse unmarked directories
-or a marker belonging to a different path. To reset, destroy and initialize again.
-The cluster listens only on `127.0.0.1` and requires SCRAM passwords. The root
-directory contains generated application credentials in `.env`, administrator
-credentials in `admin.env`, and server output in `postgres.log`. Keep these files
-private; POSIX directories/files are created with restrictive permissions. On
-Windows, place the root in a directory whose ACL limits access to your account.
+`scripts/postgres.py` is the single PostgreSQL lifecycle implementation used by
+pytest and `dev.py`; `scripts/processes.py` owns foreground processes and output.
+There is no `testdb.py` management CLI and no JSON filesystem ownership marker.
+Connection settings remain in `.env` and `admin.env` beside `data/`.
 
-The fixtures contain three users (`alice`, `bob`, `carol`, with issuer
-`urn:draft:test` and subjects `alice`, `bob`, `carol`) and 30 catalog players. No
-league is pre-created. `dl_test.marker` is installed only by the test seed SQL.
-Test login requires this marker as well as the application test-mode settings.
+Initialization installs schema and roles without sample data. Development then
+loads test users, Pokémon, and SQL scenarios. Tests load test users and the small
+synthetic catalog in `tests/catalog.sql`; they do not apply or test SQL scenarios.
+`sql/test_users.sql` installs `dl_test.marker`, which enables test login alongside
+the application test-mode settings. Production bootstrap never installs it.
 
 For a non-test installation, first create a new empty database using your normal
 PostgreSQL administrator tools. Set `ADMIN_DATABASE_URL` to that database's
@@ -211,6 +204,5 @@ together. `--dry-run` performs file/CSV validation without connecting to a datab
 
 The schema is installed directly on a fresh database; no migration runner is
 provided. For disposable development databases, initialize a fresh test cluster
-to exercise the new schema. To run import integration tests as well as the normal
-suite, supply `TEST_ADMIN_DATABASE_URL` and `TEST_DATABASE_URL` for the same marked
-test database. Never point test variables at production.
+to exercise the new schema. Run `pytest --integration` to include the import integration test; its connections
+come from the same runner-owned cluster as the other integration tests.

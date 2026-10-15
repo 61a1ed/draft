@@ -1,0 +1,8 @@
+/private/
+/.venv/
+/.pytest_cache/
+/.test-tmp*/
+/.ruff_cache/
+/.uv-cache/
+__pycache__/
+*.py[cod]

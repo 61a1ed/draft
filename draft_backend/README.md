@@ -19,50 +19,52 @@ for one-command resets, custom SQL, and isolation choices.
 the deployment permissions. Authentication inserts/updates users using a separate
 role.
 
-## Start a local test instance
+## Local development and integration tests
 
-Requirements: uv, Python 3.12+, and PostgreSQL 16+ binaries. The project pins
-Python 3.12 for development and includes `uv.lock`. PostgreSQL 18 is suitable.
-Run these commands from the extracted project directory:
+Requirements: uv, Python 3.12+, PostgreSQL 16+ binaries, and (for the frontend)
+Node.js. Run `uv sync --locked` here and `npm ci` in `draft_frontend`.
 
 ```powershell
-uv sync --locked
-uv run python scripts/testdb.py --pg-bin 'C:\postgresql\bin' --root .testdb init
-uv run --env-file .testdb/.env draft-server
+uv run python scripts/dev.py --pg-bin 'C:\postgresql\bin'
+# Database tests only; no Node.js, catalog files, or running servers required:
+uv run python -m pytest --integration --pg-bin='C:\postgresql\bin' -m integration -q
 ```
 
-Replace the binary path with the directory containing `initdb.exe`, `pg_ctl.exe`,
-and `postgres.exe`. On Linux/macOS, supply the corresponding binary directory
-and run as an ordinary OS user. No OS service or Docker is involved.
+Both use `scripts/postgres.py` for PostgreSQL and `scripts/processes.py` for
+owned process trees and logs. PostgreSQL runs on loopback without an OS service
+or Docker. On POSIX, run as an ordinary OS user.
 
-`init` starts a separate, loopback-only cluster on port 55432, installs the
-schema/roles, creates fixture users `alice`, `bob`, and `carol`, and seeds 30
-draftable players. It generates credentials and application settings in
-`.testdb/.env`. It does not modify another PostgreSQL installation.
+Every test invocation that selects integration tests creates a fresh cluster in
+`.test-runs/integration-*/database`, on an automatically chosen port. Its processes
+stop at teardown, even after failures. Database files and logs remain for inspection;
+the final test summary prints the run directory. Reclaim disk space manually when
+finished. There is no scripted database deletion or filesystem ownership marker.
+
+Development uses the Pokémon catalog; integration tests use the small synthetic
+catalog in `tests/catalog.sql`. Both explicitly load `sql/test_users.sql` for test
+users and the database test-login marker. Database initialization itself seeds neither.
+To inspect a retained test database through the app, use `dev.py --data-dir
+<run>/database/data --pg-bin <binaries>`; this resumes without reseeding.
 
 The API is at `http://127.0.0.1:8000`; documentation is at `/docs` and
 `/openapi.json`. `draft-server` explicitly uses HTTP/1.1 and a selector event
-loop, including on Windows. Use this entry point instead of relying on
-Uvicorn's default Windows loop. `HOST` and `PORT` override the listening address.
-
-Manage the test cluster independently of the HTTP server:
-
-```sh
-uv run python scripts/testdb.py --root .testdb status
-uv run python scripts/testdb.py --root .testdb stop
-uv run python scripts/testdb.py --root .testdb start
-uv run python scripts/testdb.py --root .testdb destroy
-```
-
-`destroy` permanently deletes the marked test directory, including its data and
-generated credentials. It refuses unrecognized directories. To reset, destroy
-and initialize again. More provisioning details are in `scripts/README.md`.
+loop, including on Windows. `HOST` and `PORT` override its listening address.
+When systemd supplies `RUNTIME_DIRECTORY`, the server instead listens at
+`$RUNTIME_DIRECTORY/http.sock`, trusts proxy headers on that restricted socket,
+and gives requests five seconds to finish during shutdown. The socket directory
+must restrict access to the application and reverse proxy accounts.
 
 ## Authentication
 
 Configure one OpenID Connect provider with `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and
 `OIDC_CLIENT_SECRET`. For Google, the issuer is `https://accounts.google.com`;
-create a Google OAuth **Web application** client and register exactly `<PUBLIC_BASE_URL>/auth/callback` as its redirect URI.
+create a Google OAuth **Web application** client and register exactly
+`<PUBLIC_BASE_URL><OIDC_CALLBACK_PATH>` as its redirect URI. `OIDC_CALLBACK_PATH`
+defaults to `/auth/callback`; set it to `/g` for a registered callback such as
+`https://slaprat.click/g`. This changes both the actual callback route and the
+redirect URI sent to the provider. Configure the reverse proxy to forward that
+exact path to the backend. The path must be a static root-relative path without
+query/fragment, encoded characters, or a collision with application endpoints.
 Copy `.env.example` to a private `.env`, supply the client credentials,
 `DATABASE_URL`, and a random session secret, then run:
 
@@ -83,7 +85,8 @@ This schema replaces `google_sub` with `issuer` and `subject`. Reinitialize
 existing disposable test clusters after updating. Existing non-disposable databases
 need a data migration preserving user IDs before running this version.
 Replace `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` with the `OIDC_` variables and
-update the provider's registered redirect URI to `<PUBLIC_BASE_URL>/auth/callback`.
+update the provider's registered redirect URI to
+`<PUBLIC_BASE_URL><OIDC_CALLBACK_PATH>` (normally `/auth/callback`).
 
 The callback sets an HttpOnly, SameSite=Lax signed session cookie and redirects
 to `PUBLIC_BASE_URL/`. Expected sign-in failures redirect there with an
@@ -139,6 +142,12 @@ All `/api` routes require a session. Read results come directly from PostgreSQL:
 | `GET /api/leagues/{id}` | One `dl.league_snapshot` row, including actions |
 | `GET /api/leagues/{id}/events` | Authorized SSE stream |
 | `GET /healthz` | Process status and notification-connection status; public |
+| `GET /ready` | Public readiness check; 200 only with a working DB query and notification connection, otherwise 503 |
+
+`/ready` bounds database acquisition and its `SELECT 1` query to one second and
+returns only a generic `not_ready` error on failure. Deployment probes should
+allow more than one second per request. `/healthz` remains a process-status
+endpoint and returns 200 even when its notification connection is disconnected.
 
 Each write is `POST /api/rpc/<function>` with a JSON object using the actual SQL
 argument names. Unknown fields are rejected. There is no arbitrary-SQL endpoint.
@@ -200,7 +209,7 @@ connection, then commits assets and catalog rows in one transaction. Repeating i
 updates entries by `(dex, form)`, preserving draftable IDs and recorded pick prices.
 Omitted entries and old assets are retained. Changing a dex/form creates a new entry.
 There is no delete/reconcile mode or admin HTTP interface. Production bootstrap
-does not insert the test catalog; the test initializer still supplies its 30 players.
+does not insert the test catalog; the integration fixture supplies its 30 players.
 
 The CSV carries species, form, points, and image paths; no Showdown IDs are imported.
 Only large images are exported from `min_pokemon`. The supplied source contains
@@ -343,31 +352,26 @@ Test fixtures and the test marker are never installed by production bootstrap.
 ## Checks
 
 ```sh
-uv run pytest -q
+uv run python -m pytest -q
 uv run ruff check .
 ```
 
-Native integration tests are opt-in and refuse databases lacking the test marker.
-With your local test cluster running, this cross-platform command loads its
-generated URL without displaying credentials:
+Integration tests are opt-in:
 
 ```sh
-uv run --env-file .testdb/.env python -c "import os,pytest; os.environ['TEST_DATABASE_URL']=os.environ['DATABASE_URL']; raise SystemExit(pytest.main(['-q']))"
+uv run python -m pytest --integration --pg-bin=/path/to/postgresql/bin -q
+# Select only integration tests, or narrow them further with -k:
+uv run python -m pytest --integration --pg-bin=/path/to/postgresql/bin -m integration -q
 ```
 
-The integration suite covers all RPCs, RLS and privilege denials, stale revisions,
-duplicate picks, a complete snake draft, undo/re-pick, and registration upsert.
-It adds uniquely named test data and can be repeated on the same fixture database.
+Omit `--pg-bin` when PostgreSQL is on PATH. No connection URL environment variables
+are used: pytest owns provisioning, connections, and teardown. Missing prerequisites
+fail an explicitly requested integration run instead of silently skipping it.
+Ordinary `pytest` skips integration tests. Test collection never starts PostgreSQL.
 
-Delivery verification for this revision: 78 backend tests passed against a separate
-native PostgreSQL 18.6 test cluster; Ruff passed. Scenario tests cover SQL-derived
-snapshots, scoped replacement with fresh IDs, preserved unrelated data, and atomic
-rollback. The frontend's 41 tests and production build passed. Live browser checks
-through the Vite proxy covered fixture sign-in, catalog images, a persisted pick,
-undo, SQL-only updates arriving through SSE, and scenario replacement followed by
-Refresh all data. The exploration database contains the approved 263-row catalog.
-OIDC login tests use a mocked provider; actual login requires your OAuth credentials.
-Existing Authlib/Starlette httpx deprecation warnings remain.
+The existing suite exercises in-process HTTP workflows against real PostgreSQL,
+SQL privileges, identity registration, budgets, and catalog import. It is not a
+browser end-to-end suite. OIDC provider exchanges are mocked in the unit tests.
 
 Reference documentation: [Google OIDC](https://developers.google.com/identity/openid-connect/openid-connect),
 [Authlib](https://docs.authlib.org/en/latest/client/starlette.html),

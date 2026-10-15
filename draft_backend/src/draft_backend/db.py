@@ -75,6 +75,11 @@ class Database:
     async def close(self) -> None:
         await self.pool.close()
 
+    async def ready(self) -> None:
+        """Exercise a pooled connection; the caller bounds acquisition and query time."""
+        async with self.pool.connection() as conn:
+            await conn.execute("SELECT 1")
+
     async def _execute(
         self, user_id: int, query: str, params: Any, *, write: bool
     ) -> list[dict[str, Any]]:

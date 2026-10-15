@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -21,6 +22,7 @@ class Settings:
     oidc_issuer: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
+    oidc_callback_path: str = "/auth/callback"
     session_ttl_seconds: int = 86400
     pool_size: int = 10
     transaction_retries: int = 4
@@ -64,6 +66,18 @@ class Settings:
                 or issuer.password
             ):
                 raise ValueError("OIDC_ISSUER must be an HTTPS issuer URL")
+        callback = self.oidc_callback_path
+        reserved = (
+            "/api", "/images", "/assets", "/ready", "/healthz", "/docs", "/redoc",
+            "/openapi.json", "/auth/login", "/auth/logout", "/auth/me", "/auth/test",
+        )
+        if (
+            not re.fullmatch(r"/[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*", callback)
+            or any(part in {".", ".."} for part in callback.split("/"))
+            or callback == "/auth"
+            or any(callback == path or callback.startswith(path + "/") for path in reserved)
+        ):
+            raise ValueError("OIDC_CALLBACK_PATH must be a non-conflicting root-relative path")
         if (
             min(
                 self.session_ttl_seconds,
@@ -92,6 +106,7 @@ class Settings:
             oidc_issuer=os.getenv("OIDC_ISSUER", ""),
             oidc_client_id=os.getenv("OIDC_CLIENT_ID", ""),
             oidc_client_secret=os.getenv("OIDC_CLIENT_SECRET", ""),
+            oidc_callback_path=os.getenv("OIDC_CALLBACK_PATH", "/auth/callback"),
             session_ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", "86400")),
             pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
         )

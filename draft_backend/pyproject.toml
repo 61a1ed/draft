@@ -26,7 +26,7 @@ draft-server = "draft_backend.__main__:main"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = ["integration: requires a running, seeded, isolated PostgreSQL test database"]
+markers = ["integration: uses a fresh runner-owned PostgreSQL cluster with --integration"]
 
 [tool.ruff]
 line-length = 100

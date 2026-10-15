@@ -131,7 +131,7 @@ def create_app(settings: Settings | None = None):
         await db.open()
         try:
             if settings.test_login_enabled and not await db.is_test_database():
-                raise RuntimeError("Test login requires a database created by scripts/testdb.py")
+                raise RuntimeError("Test login requires a database provisioned with test users")
             await hub.start()
             try:
                 yield
@@ -185,6 +185,17 @@ def create_app(settings: Settings | None = None):
     @app.get("/healthz")
     async def health():
         return {"status": "ok", "notifications_connected": app.state.events.connected.is_set()}
+
+    @app.get("/ready")
+    async def ready():
+        try:
+            async with asyncio.timeout(1):
+                await app.state.db.ready()
+            if not app.state.events.connected.is_set():
+                raise HTTPException(503, "not_ready")
+        except (psycopg.Error, PoolTimeout, TimeoutError):
+            raise HTTPException(503, "not_ready") from None
+        return {"ready": True}
 
     @app.get("/api/users", tags=["reads"])
     async def users(user: User):

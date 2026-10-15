@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/local/bin/uv run --locked --no-dev python -m draft_backend

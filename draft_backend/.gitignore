@@ -10,3 +10,4 @@ admin.env
 .test-tmp-*/
 dist/
 .dev-runs/
+.test-runs/

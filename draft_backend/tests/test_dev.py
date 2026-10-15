@@ -73,10 +73,9 @@ def test_network_mode_never_prepares_database(workspace, monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("Network mode must not manage or seed a database")
 
-    for name in ("init", "load_marker", "is_running"):
-        monkeypatch.setattr(dev.testdb, name, forbidden)
+    for name in ("init", "start"):
+        monkeypatch.setattr(dev.postgres, name, forbidden)
     monkeypatch.setattr(dev, "seed", forbidden)
-    monkeypatch.setattr(dev, "start_database", forbidden)
     seen = []
     monkeypatch.setattr(dev, "serve", lambda processes, values, args: seen.append(values))
     dev.run(dev.parse_args(["--database-url-env", "MY_DB"]))
@@ -87,14 +86,13 @@ def test_fresh_runs_unique_and_retained(workspace, monkeypatch):
     roots, starts, seeds = [], [], []
     monkeypatch.setattr(dev, "load_catalog", lambda *args: "catalog")
 
-    def initialize(root, binaries, port, *, start_server, run_command):
+    def initialize(root, binaries, port, processes):
         root.mkdir()
         (root / ".env").write_text("DATABASE_URL=local\n")
         roots.append(root)
-        start_server(binaries, root)
+        starts.append(root)
 
-    monkeypatch.setattr(dev.testdb, "init", initialize)
-    monkeypatch.setattr(dev, "start_database", lambda *args: starts.append(args))
+    monkeypatch.setattr(dev.postgres, "init", initialize)
     monkeypatch.setattr(dev, "seed", lambda *args: seeds.append(args))
     monkeypatch.setattr(dev, "serve", lambda *args: None)
     dev.run(dev.parse_args([]))
@@ -104,27 +102,19 @@ def test_fresh_runs_unique_and_retained(workspace, monkeypatch):
     assert len(starts) == len(seeds) == 2
 
 
-def test_resume_preserves_data_and_rejects_running(workspace, monkeypatch):
+def test_resume_preserves_data(workspace, monkeypatch):
     root = workspace / "saved"
     (root / "data").mkdir(parents=True)
     (root / "data/PG_VERSION").write_text("18")
-    (root / ".env").write_text("DATABASE_URL=postgresql://localhost/draft_test\n")
-    monkeypatch.setattr(
-        dev.testdb, "load_marker", lambda root: {"pg_bin": str(workspace), "port": 55441}
-    )
-    monkeypatch.setattr(dev.testdb, "is_running", lambda *args: False)
+    (root / ".env").write_text("DATABASE_URL=postgresql://localhost:55441/draft_test\n")
     monkeypatch.setattr(dev, "seed", lambda *args: pytest.fail("must not reseed"))
-    monkeypatch.setattr(dev.testdb, "init", lambda *args: pytest.fail("must not initialize"))
+    monkeypatch.setattr(dev.postgres, "init", lambda *args: pytest.fail("must not initialize"))
     starts = []
-    monkeypatch.setattr(dev, "start_database", lambda *args: starts.append(args))
+    monkeypatch.setattr(dev.postgres, "start", lambda *args: starts.append(args))
     monkeypatch.setattr(dev, "serve", lambda *args: None)
     args = dev.parse_args(["--data-dir", str(root / "data"), "--db-port", "55442"])
     dev.run(args)
     assert starts[0][-1] == 55442
-    monkeypatch.setattr(dev.testdb, "is_running", lambda *args: True)
-    with pytest.raises(RuntimeError, match="already running"):
-        dev.run(args)
-    assert len(starts) == 1
 
 
 def test_real_output_forwarding_and_cleanup(tmp_path, capsys):
@@ -171,10 +161,9 @@ def test_failure_cleans_up_owned_processes(workspace, monkeypatch):
 
 
 def test_setup_command_does_not_count_as_running_server(tmp_path, monkeypatch):
-    monkeypatch.setattr(dev.testdb, "binary", lambda *args: Path(sys.executable))
     processes = dev.Processes(tmp_path / "logs")
     try:
-        processes.run_command(tmp_path, "initdb", "-c", "print('setup done')")
+        processes.run_command("initdb", [sys.executable, "-c", "print('setup done')"])
         assert processes.children == []
     finally:
         processes.close()

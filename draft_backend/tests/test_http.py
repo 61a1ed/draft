@@ -1,8 +1,10 @@
 """Exercise the HTTP/session boundary and SSE resynchronization without a server."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import psycopg
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -18,6 +20,7 @@ def application(monkeypatch):
     db = SimpleNamespace(
         open=AsyncMock(),
         close=AsyncMock(),
+        ready=AsyncMock(),
         is_test_database=AsyncMock(return_value=True),
         test_user=AsyncMock(return_value={"id": 1, "display_name": "Alice"}),
         user=AsyncMock(return_value={"id": 1, "display_name": "Alice"}),
@@ -45,6 +48,54 @@ def application(monkeypatch):
         sse_heartbeat_seconds=0.01,
     )
     return module.create_app(settings), db
+
+
+def test_readiness_requires_database_and_notifications_without_authentication(application):
+    app, db = application
+    with TestClient(app) as client:
+        response = client.get("/ready")
+        assert response.status_code == 200
+        assert response.json() == {"ready": True}
+        assert response.headers["cache-control"] == "no-store"
+        db.ready.assert_awaited_once()
+        app.state.events.connected.clear()
+        response = client.get("/ready")
+        assert response.status_code == 503
+        assert response.json() == {"detail": "not_ready"}
+        assert client.get("/healthz").json() == {
+            "status": "ok", "notifications_connected": False,
+        }
+        app.state.events.connected.set()
+        assert client.get("/ready").status_code == 200
+
+
+def test_readiness_hides_database_error_details_and_recovers(application):
+    app, db = application
+    db.ready.side_effect = psycopg.OperationalError("private credentials and host details")
+    with TestClient(app) as client:
+        response = client.get("/ready")
+        assert response.status_code == 503
+        assert response.json() == {"detail": "not_ready"}
+        db.ready.side_effect = None
+        assert client.get("/ready").status_code == 200
+
+
+def test_readiness_cancels_an_unresponsive_database_check(application):
+    app, db = application
+    cancelled = []
+
+    async def wait_forever():
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.append(True)
+
+    db.ready.side_effect = wait_forever
+    with TestClient(app) as client:
+        response = client.get("/ready")
+    assert response.status_code == 503
+    assert response.json() == {"detail": "not_ready"}
+    assert cancelled == [True]
 
 
 def test_public_images_cache_bytes_and_support_conditional_requests(application):

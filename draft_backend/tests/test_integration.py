@@ -1,57 +1,12 @@
-"""Run against a seeded, disposable cluster, never a production database.
+"""Application workflows and SQL permissions against the runner-owned database."""
 
-Set TEST_DATABASE_URL to the dl_gateway URL emitted by scripts/testdb.py.
-The fixture checks the explicit database marker before allowing any writes.
-Tests add uniquely named data and can be repeated without resetting the cluster.
-"""
-
-import asyncio
 import json
-import os
 from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
-
-from draft_backend.config import Settings
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture(scope="module")
-def database_url():
-    url = os.getenv("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL integration tests")
-    with psycopg.connect(url) as conn:
-        identity = conn.execute("SELECT session_user").fetchone()[0]
-        assert identity == "dl_gateway", "Integration tests require the gateway login"
-        marker = conn.execute("SELECT to_regclass('dl_test.marker')").fetchone()[0]
-        assert marker is not None, "Refusing writes: test database marker is missing"
-        marked = conn.execute(
-            "SELECT EXISTS (SELECT FROM dl_test.marker WHERE singleton)"
-        ).fetchone()[0]
-        assert marked, "Refusing writes: database is not marked for testing"
-    return url
-
-
-@pytest.fixture
-def client(database_url):
-    from draft_backend.app import create_app
-
-    settings = Settings(
-        database_url=database_url,
-        session_secret="x" * 40,
-        public_base_url="http://testserver",
-        app_env="test",
-        test_login_enabled=True,
-        cookie_secure=False,
-    )
-    with TestClient(
-        create_app(settings), backend_options={"loop_factory": asyncio.SelectorEventLoop}
-    ) as value:
-        yield value
 
 
 def login(client, username):
@@ -74,19 +29,7 @@ def snapshot(client, league_id):
     return response.json()
 
 
-def test_draft_workflow_and_database_enforced_access(client):
-    assert client.get("/api/leagues").status_code == 401
-    alice = login(client, "alice")
-    users_response = client.get("/api/users")
-    assert users_response.status_code == 200
-    users = users_response.json()
-    assert all(set(user) == {"id", "display_name"} for user in users)
-    bob = next(user for user in users if user["display_name"] == "Bob")
-    carol = next(user for user in users if user["display_name"] == "Carol")
-    catalog = client.get("/api/draftables").json()
-    assert len(catalog) >= 4
-    players = [row["id"] for row in catalog[:4]]
-
+def configure_league(client, alice, bob, carol):
     name = "Integration " + uuid4().hex
     league_id = rpc(client, "create_league", p_name=name, p_roster_size=2)
     state = snapshot(client, league_id)
@@ -169,6 +112,24 @@ def test_draft_workflow_and_database_enforced_access(client):
         p_teams=[team_a, team_b],
     )
     assert snapshot(client, league_id)["state"]["can_start"] is True
+
+    return league_id, team_a, team_b
+
+
+def test_draft_workflow_and_database_enforced_access(client):
+    assert client.get("/api/leagues").status_code == 401
+    alice = login(client, "alice")
+    users_response = client.get("/api/users")
+    assert users_response.status_code == 200
+    users = users_response.json()
+    assert all(set(user) == {"id", "display_name"} for user in users)
+    bob = next(user for user in users if user["display_name"] == "Bob")
+    carol = next(user for user in users if user["display_name"] == "Carol")
+    catalog = client.get("/api/draftables").json()
+    assert len(catalog) >= 4
+    players = [row["id"] for row in catalog[:4]]
+
+    league_id, team_a, team_b = configure_league(client, alice, bob, carol)
 
     # A removed manager loses visibility and cannot invoke a mutation either.
     login(client, "carol")
@@ -331,42 +292,70 @@ def test_api_role_cannot_bypass_rpc_boundary(database_url, query):
                     (json.dumps({"user_id": 1}),),
                 )
                 conn.execute(query)
-        # Failed request role and claims cannot leak into a pooled connection.
+        # Transaction-local role and claims are restored after this failed transaction.
         assert conn.execute("SELECT current_user").fetchone()[0] == "dl_gateway"
         claims = conn.execute("SELECT current_setting('request.jwt.claims', true)").fetchone()[0]
         assert claims in (None, "")
 
 
-def test_point_budgets_exact_limit_rejection_commissioner_and_undo(client):
+def create_two_team_league(client, *, name, roster_size, budgets):
     alice = login(client, "alice")
     bob = next(u for u in client.get("/api/users").json() if u["display_name"] == "Bob")
+    league = rpc(client, "create_league", p_name=name, p_roster_size=roster_size)
+    teams = [
+        rpc(
+            client,
+            "add_team",
+            p_league=league,
+            p_revision=revision,
+            p_name=user["display_name"],
+            p_manager=user["id"],
+            p_point_budget=budget,
+        )
+        for revision, (user, budget) in enumerate(zip((alice, bob), budgets, strict=True))
+    ]
+    return league, *teams
+
+
+def test_point_budgets_exact_limit_rejection_commissioner_and_undo(client):
+    league, a, b = create_two_team_league(client, name="Points", roster_size=2, budgets=(0, 1))
+    bob = next(u for u in client.get("/api/users").json() if u["display_name"] == "Bob")
     catalog = client.get("/api/draftables").json()
-    free = next(d for d in catalog if d["point_cost"] == 0)
-    cheap = next(d for d in catalog if d["point_cost"] == 1)
-    costly = next(d for d in catalog if d["point_cost"] == 2)
-    league = rpc(client, "create_league", p_name="Points " + uuid4().hex, p_roster_size=2)
-    a = rpc(client, "add_team", p_league=league, p_revision=0,
-            p_name="A", p_manager=alice["id"], p_point_budget=0)
-    b = rpc(client, "add_team", p_league=league, p_revision=1,
-            p_name="B", p_manager=bob["id"], p_point_budget=1)
-    rpc(client, "update_team", p_league=league, p_revision=2, p_team=b,
-        p_name="B", p_manager=bob["id"], p_point_budget=2)
+    by_cost = {d["point_cost"]: d for d in catalog}
+    free, cheap, costly = (by_cost[cost] for cost in (0, 1, 2))
+    rpc(
+        client,
+        "update_team",
+        p_league=league,
+        p_revision=2,
+        p_team=b,
+        p_name="B",
+        p_manager=bob["id"],
+        p_point_budget=2,
+    )
     rpc(client, "set_draft_order", p_league=league, p_revision=3, p_teams=[a, b])
     rpc(client, "draft_action", p_league=league, p_revision=4, p_kind="start")
 
     def act(revision, kind="pick", expected=200, **args):
-        return rpc(client, "draft_action", expected=expected,
-                   p_league=league, p_revision=revision, p_kind=kind, **args)
+        return rpc(
+            client,
+            "draft_action",
+            expected=expected,
+            p_league=league,
+            p_revision=revision,
+            p_kind=kind,
+            **args,
+        )
 
     def balances():
-        return {t["id"]: (t["point_budget"], t["points_spent"], t["points_remaining"])
-                for t in snapshot(client, league)["teams"]}
+        return {
+            t["id"]: (t["point_budget"], t["points_spent"], t["points_remaining"])
+            for t in snapshot(client, league)["teams"]
+        }
 
     assert balances() == {a: (0, 0, 0), b: (2, 0, 2)}
     before = snapshot(client, league)
-    assert act(5, p_draftable=cheap["id"], expected=409) == {
-        "detail": "point_budget_exceeded"
-    }
+    assert act(5, p_draftable=cheap["id"], expected=409) == {"detail": "point_budget_exceeded"}
     after = snapshot(client, league)
     for key in ["revision", "league", "state", "history", "teams"]:
         assert after[key] == before[key]
@@ -380,34 +369,42 @@ def test_point_budgets_exact_limit_rejection_commissioner_and_undo(client):
     assert act(7, p_draftable=cheap["id"], expected=409)["detail"] == "point_budget_exceeded"
     login(client, "alice")
     # Setup budgets freeze at start, even for the commissioner.
-    assert rpc(client, "update_team", expected=409, p_league=league, p_revision=7,
-               p_team=b, p_name="B", p_manager=bob["id"], p_point_budget=100)["detail"] == (
-                   "action_not_permitted"
-               )
+    assert rpc(
+        client,
+        "update_team",
+        expected=409,
+        p_league=league,
+        p_revision=7,
+        p_team=b,
+        p_name="B",
+        p_manager=bob["id"],
+        p_point_budget=100,
+    )["detail"] == ("action_not_permitted")
     assert act(7, kind="undo") == picked
     assert balances()[b] == (2, 0, 2)
-    assert next(h for h in snapshot(client, league)["history"] if h["id"] == picked)[
-        "point_cost"
-    ] == 2
+    assert (
+        next(h for h in snapshot(client, league)["history"] if h["id"] == picked)["point_cost"] == 2
+    )
     replacement = act(8, p_draftable=costly["id"])
     assert replacement != picked
     assert balances()[b] == (2, 2, 0)
 
 
 def test_only_commissioner_can_make_free_picks(client):
-    alice = login(client, "alice")
-    bob = next(u for u in client.get("/api/users").json() if u["display_name"] == "Bob")
+    league, a, b = create_two_team_league(client, name="Free picks", roster_size=1, budgets=(0, 0))
     players = [d["id"] for d in client.get("/api/draftables").json() if d["point_cost"] > 0]
-    league = rpc(client, "create_league", p_name="Free picks " + uuid4().hex, p_roster_size=1)
-    a = rpc(client, "add_team", p_league=league, p_revision=0,
-            p_name="A", p_manager=alice["id"], p_point_budget=0)
-    b = rpc(client, "add_team", p_league=league, p_revision=1,
-            p_name="B", p_manager=bob["id"], p_point_budget=0)
     rpc(client, "set_draft_order", p_league=league, p_revision=2, p_teams=[a, b])
 
     def act(revision, kind="pick", expected=200, **args):
-        return rpc(client, "draft_action", expected=expected,
-                   p_league=league, p_revision=revision, p_kind=kind, **args)
+        return rpc(
+            client,
+            "draft_action",
+            expected=expected,
+            p_league=league,
+            p_revision=revision,
+            p_kind=kind,
+            **args,
+        )
 
     assert act(3, kind="start", p_charge_points=False, expected=400)["detail"] == (
         "invalid_draft_action"

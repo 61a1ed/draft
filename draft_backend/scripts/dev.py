@@ -5,154 +5,40 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
 import psycopg
-from psycopg.conninfo import make_conninfo
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 if __package__:
-    from . import scenarios, testdb
+    from . import postgres, scenarios
     from .bootstrap import PROJECT
     from .import_catalog import import_catalog, load_catalog
+    from .postgres import read_environment
+    from .processes import Processes
 else:
+    import postgres
     import scenarios
-    import testdb
     from bootstrap import PROJECT
     from import_catalog import import_catalog, load_catalog
+    from postgres import read_environment
+    from processes import Processes
 
 FRONTEND = PROJECT.parent / "draft_frontend"
-
-
-def read_environment(path: Path) -> dict[str, str]:
-    return dict(
-        line.split("=", 1)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line and not line.startswith("#")
-    )
-
-
-class Processes:
-    """Own process trees and drain both streams independently, including during startup."""
-
-    def __init__(self, logs: Path):
-        self.logs = logs
-        logs.mkdir(parents=True, exist_ok=True)
-        self.children = []
-        self.readers = []
-        self.lock = threading.Lock()
-
-    def forward(self, stream, path, tag):
-        with stream, path.open("a", encoding="utf-8") as log:
-            for line in stream:
-                log.write(line)
-                log.flush()
-                with self.lock:
-                    sys.stderr.write(f"[{tag}] {line}")
-                    sys.stderr.flush()
-
-    def start(self, name, command, *, cwd=PROJECT, env=None):
-        child = subprocess.Popen(
-            command,
-            cwd=cwd,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            start_new_session=os.name != "nt",
-        )
-        self.children.append(child)
-        for label, stream in (("out", child.stdout), ("err", child.stderr)):
-            reader = threading.Thread(
-                target=self.forward,
-                args=(stream, self.logs / f"{name}.{label}.log", f"{name} {label}"),
-                daemon=True,
-            )
-            reader.start()
-            self.readers.append(reader)
-        return child
-
-    def close(self):
-        failures = []
-        for child in reversed(self.children):
-            try:
-                if os.name == "nt":
-                    if child.poll() is None:
-                        subprocess.run(
-                            ["taskkill", "/PID", str(child.pid), "/T", "/F"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            check=False,
-                            timeout=15,
-                        )
-                else:
-                    try:
-                        os.killpg(child.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                child.wait(timeout=15)
-            except (OSError, subprocess.SubprocessError):
-                failures.append(child.pid)
-        for reader in self.readers:
-            reader.join(timeout=5)
-        if failures:
-            raise RuntimeError(f"Could not stop owned processes: {failures}")
-
-    def run_command(self, pg_bin, name, *args):
-        env = os.environ.copy()
-        env.pop("PGPASSWORD", None)
-        child = self.start(name, [str(testdb.binary(pg_bin, name)), *args], env=env)
-        result = child.wait(timeout=60)
-        self.children.remove(child)
-        if result:
-            raise RuntimeError(f"{name} failed; inspect its log")
-
-
-def wait_database(child, dsn, timeout=30):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if child.poll() is not None:
-            raise RuntimeError("Postgres exited before becoming ready; inspect its log")
-        try:
-            with psycopg.connect(dsn, connect_timeout=1):
-                return
-        except psycopg.OperationalError:
-            time.sleep(0.2)
-    raise RuntimeError("Postgres did not become ready; inspect its log")
-
-
-def start_database(processes, pg_bin, root, port):
-    # postgres itself refuses an already-running data directory; never adopt its process.
-    child = processes.start(
-        "postgres",
-        [str(testdb.binary(pg_bin, "postgres")), "-D", str(root / "data"), "-p", str(port)],
-    )
-    admin = read_environment(root / "admin.env")["ADMIN_DATABASE_URL"]
-    wait_database(child, make_conninfo(admin, dbname="postgres", port=port))
 
 
 def seed(root, catalog):
     pokemon, images = catalog
     admin = read_environment(root / "admin.env")["ADMIN_DATABASE_URL"]
-    import_catalog(admin, pokemon, images)
     with psycopg.connect(admin) as conn:
-        conn.execute("SET LOCAL ROLE dl_owner")
-        conn.execute(
-            "DELETE FROM dl.draftable d WHERE d.dex IS NULL "
-            "AND d.name ~ '^Player [0-9]{2}$' "
-            "AND NOT EXISTS (SELECT FROM dl.pick p WHERE p.draftable_id = d.id)"
-        )
+        conn.execute((PROJECT / "sql/test_users.sql").read_text(encoding="utf-8"))
+    import_catalog(admin, pokemon, images)
     scenarios.apply(scenarios.prepare(root))
     print(f"Loaded {len(pokemon)} Pokémon and the SQL scenarios.", flush=True)
 
@@ -242,9 +128,7 @@ def parse_args(argv=None):
     mode.add_argument(
         "--database-url-env", help="Environment variable with an existing database URL"
     )
-    parser.add_argument(
-        "--pg-bin", type=Path, help="PostgreSQL binaries (otherwise PATH or saved path)"
-    )
+    parser.add_argument("--pg-bin", type=Path, help="PostgreSQL binaries (otherwise PATH)")
     parser.add_argument(
         "--db-port", type=int, help="Local Postgres port (fresh: 55440; resume: saved)"
     )
@@ -274,31 +158,23 @@ def run(args):
             raise RuntimeError("The selected database URL environment variable is empty or missing")
         values = {"DATABASE_URL": dsn}
     else:
-        marker = None
+        pg_bin = postgres.find_binaries(args.pg_bin)
         if args.data_dir:
             data = args.data_dir.resolve()
             root = data.parent
-            marker = testdb.load_marker(root)
             if data != root / "data" or not (data / "PG_VERSION").is_file():
                 raise RuntimeError("Expected an existing launcher-created data directory")
-        found = shutil.which("postgres")
-        pg_bin = args.pg_bin or (
-            Path(marker["pg_bin"]) if marker else Path(found).parent if found else None
-        )
-        if pg_bin is None:
-            raise RuntimeError("Provide --pg-bin or put PostgreSQL binaries on PATH")
-        port = args.db_port if args.db_port is not None else marker["port"] if marker else 55440
-        if port in (args.api_port, args.web_port):
-            raise RuntimeError("Server ports must differ")
-        if marker:
-            if testdb.is_running(pg_bin, root / "data"):
-                raise RuntimeError("This cluster is already running; use --database-url-env")
             values = read_environment(root / ".env")
+            saved_port = int(conninfo_to_dict(values["DATABASE_URL"])["port"])
+            port = args.db_port if args.db_port is not None else saved_port
             values["DATABASE_URL"] = make_conninfo(values["DATABASE_URL"], port=port)
         else:
+            port = args.db_port if args.db_port is not None else 55440
             catalog = load_catalog(
                 PROJECT.parent / "pokemon_catalog.csv", PROJECT.parent / "showdown"
             )
+        if port in (args.api_port, args.web_port):
+            raise RuntimeError("Server ports must differ")
     runs = PROJECT / ".dev-runs"
     runs.mkdir(parents=True, exist_ok=True)
     run_dir = Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%d-%H%M%S-"), dir=runs))
@@ -308,22 +184,14 @@ def run(args):
         if not args.database_url_env:
             if root is None:
                 root = run_dir / "database"
-                testdb.init(
-                    root,
-                    pg_bin,
-                    port,
-                    start_server=lambda binaries, path: start_database(
-                        processes, binaries, path, port
-                    ),
-                    run_command=processes.run_command,
-                )
+                postgres.init(root, pg_bin, port, processes)
                 seed(root, catalog)
                 values = read_environment(root / ".env")
             else:
-                start_database(processes, pg_bin, root, port)
+                postgres.start(processes, pg_bin, root, port)
             print(
                 f"Database: {root / 'data'}\nResume: python scripts/dev.py "
-                f'--data-dir "{root / "data"}" --db-port {port}',
+                f'--data-dir "{root / "data"}" --pg-bin "{pg_bin}" --db-port {port}',
                 flush=True,
             )
         serve(processes, values, args)
