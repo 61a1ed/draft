@@ -93,81 +93,140 @@ def test_check_does_not_load_cloud(tmp_path, monkeypatch, config):
     assert calls == [config]
 
 
-def test_bringup_finishes_activation_before_requesting_manual_dns(monkeypatch, config, capsys):
+@pytest.mark.parametrize(
+    ("action", "events"),
+    [
+        ("setup", ["setup"]),
+        ("prepare", ["prepare"]),
+        ("init-db", ["init-db"]),
+        ("import-catalog", ["import-catalog"]),
+        ("deploy", ["push", "activate"]),
+        ("status", ["status"]),
+        ("logs", ["logs"]),
+        ("ssh", ["ssh"]),
+    ],
+)
+def test_host_step_runs_independently_without_aws(monkeypatch, config, action, events):
     import manage
 
     revision = "a" * 40
     state = {"ip": "192.0.2.42"}
-    events = []
+    calls = []
 
     class Target:
+        options = []
+        host = "ubuntu@192.0.2.42"
+
         def __init__(self, cfg, saved):
             assert cfg is config and saved is state
             self.state = saved
 
         def setup(self):
-            events.append("setup")
+            calls.append("setup")
 
         def prepare(self, commit):
             assert commit == revision
-            events.append("prepare")
+            calls.append("prepare")
 
         def initialize_database(self, commit):
             assert commit == revision
-            events.append("init-db")
+            calls.append("init-db")
 
         def import_catalog(self, commit):
             assert commit == revision
-            events.append("import-catalog")
+            calls.append("import-catalog")
 
-        def release(self, action, commit):
-            assert (action, commit) == ("activate", revision)
-            assert "Set the DNS A record" not in capsys.readouterr().out
-            events.append("activate")
+        def push(self, commit):
+            assert commit == revision
+            calls.append("push")
+
+        def release(self, operation, commit=None):
+            assert operation == "status" or commit == revision
+            calls.append(operation)
+
+        def logs(self, component, commit):
+            assert component == "caddy" and commit is None
+            calls.append("logs")
 
     monkeypatch.setattr(manage, "load_config", lambda path: config)
+    monkeypatch.setattr(manage, "load_state", lambda cfg: state)
     monkeypatch.setattr(remote, "commit_id", lambda *args: revision)
-    monkeypatch.setattr(remote, "local_check", lambda cfg: events.append("check"))
     monkeypatch.setattr(remote, "Remote", Target)
-    monkeypatch.setitem(
-        sys.modules,
-        "cloud",
-        SimpleNamespace(
-            provision=lambda cfg: events.append("provision"),
-            trust_host=lambda cfg: events.append("trust-host"),
-            load_state=lambda cfg: state,
-        ),
-    )
-    manage.main(["bringup"])
-    assert events == [
-        "check",
-        "provision",
-        "trust-host",
-        "setup",
-        "prepare",
-        "init-db",
-        "import-catalog",
-        "activate",
-    ]
-    assert "Set the DNS A record for example.com to 192.0.2.42." in capsys.readouterr().out
+    monkeypatch.setattr(remote, "run", lambda *args, **kwargs: calls.append("ssh"))
+    monkeypatch.setitem(sys.modules, "cloud", None)  # Even importing AWS code must fail.
+    manage.main([action, "caddy"] if action == "logs" else [action])
+    assert calls == events
 
 
-def test_destroy_leaves_dns_manual_and_clears_host_secrets(monkeypatch, config, capsys):
+@pytest.mark.parametrize("action", ["delete-instance", "release-ip", "delete-key"])
+def test_deletion_is_one_explicit_action_and_preserves_local_secrets(
+    monkeypatch, config, capsys, action
+):
     import manage
 
     remote.host_settings(config)
+    before = (config.state_dir / "secrets.json").read_bytes()
     (config.state_dir / "known_hosts").write_text("verified")
     calls = []
     monkeypatch.setattr(manage, "load_config", lambda path: config)
     monkeypatch.setitem(
-        sys.modules,
-        "cloud",
-        SimpleNamespace(destroy=lambda cfg, confirm: calls.append((cfg, confirm))),
+        sys.modules, "cloud",
+        SimpleNamespace(**{action.replace("-", "_"): lambda *args: calls.append(args)}),
     )
-    manage.main(["destroy", "--confirm", "draft"])
+    manage.main([action, "--confirm", "draft"])
     assert calls == [(config, "draft")]
-    assert not (config.state_dir / "secrets.json").exists()
-    assert not (config.state_dir / "known_hosts").exists()
-    assert (
-        "DNS is manual: restore or remove the A record for example.com" in capsys.readouterr().out
-    )
+    assert (config.state_dir / "secrets.json").read_bytes() == before
+    assert (config.state_dir / "known_hosts").read_text() == "verified"
+    assert "DNS is manual" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "args", [["bringup", "--allow-dirty"], ["provision"], ["destroy", "--confirm", "draft"]]
+)
+def test_retired_commands_stop_before_loading_credentials_or_touching_cloud(monkeypatch, args):
+    import manage
+
+    monkeypatch.setattr(manage, "load_config", lambda path: pytest.fail("must not load settings"))
+    monkeypatch.setitem(sys.modules, "cloud", None)
+    with pytest.raises(SystemExit) as error:
+        manage.main(args)
+    assert error.value.code == 2
+
+
+def test_steps_is_read_only_and_needs_no_private_settings(monkeypatch, capsys):
+    import manage
+
+    monkeypatch.setattr(manage, "load_config", lambda path: pytest.fail("must not load settings"))
+    monkeypatch.setitem(sys.modules, "cloud", None)
+    manage.main(["steps"])
+    output = capsys.readouterr().out
+    for action in ("create-key", "create-instance", "attach-ip", "setup", "init-db", "deploy"):
+        assert action in output
+    assert "Run each command separately" in output
+
+
+def test_existing_bringup_receipt_connects_without_migration_or_aws(config, monkeypatch):
+    import manage
+
+    config.state_dir.mkdir()
+    key = config.state_dir / "id_rsa"
+    key.write_text("existing private key")
+    (config.state_dir / "known_hosts").write_text("existing verified host key")
+    (config.state_dir / "secrets.json").write_text("existing application secrets")
+    receipt = {
+        "version": 1, "name": config.name, "region": config.region,
+        "hostname": config.hostname, "account_id": "123456789012",
+        "deployment_id": "original-deployment", "ip": "192.0.2.42",
+        "private_key": str(key), "ssh_user": "ubuntu",
+        "key_pair_name": "draft-key-deadbeef", "static_ip_name": "draft-ip-deadbeef",
+        "instance_name": "draft", "resources": {},
+    }
+    (config.state_dir / "state.json").write_text(json.dumps(receipt))
+    before = {path.name: path.read_bytes() for path in config.state_dir.iterdir()}
+    hosts = []
+    monkeypatch.setattr(manage, "load_config", lambda path: config)
+    monkeypatch.setattr(remote.Remote, "setup", lambda self: hosts.append(self.host))
+    monkeypatch.setitem(sys.modules, "cloud", None)
+    manage.main(["setup"])
+    assert hosts == ["ubuntu@192.0.2.42"]
+    assert {path.name: path.read_bytes() for path in config.state_dir.iterdir()} == before

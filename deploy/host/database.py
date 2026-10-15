@@ -15,6 +15,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -25,7 +26,9 @@ NAME = re.compile(r"[a-z][a-z0-9-]{0,19}")
 
 
 def run(*args, **kwargs):
-    return subprocess.run([str(arg) for arg in args], check=True, **kwargs)
+    command = [str(arg) for arg in args]
+    print("+ " + shlex.join(command), file=sys.stderr, flush=True)
+    return subprocess.run(command, check=True, **kwargs)
 
 
 def environment(path: Path) -> dict[str, str]:
@@ -63,7 +66,7 @@ def psql(database: str, sql: str) -> str:
         database,
     ]
     args += ["--command", sql]
-    return run(*args, env=clean_environment(), capture_output=True, text=True).stdout.strip()
+    return run(*args, env=clean_environment(), stdout=subprocess.PIPE, text=True).stdout.strip()
 
 
 def cluster_state() -> dict:
@@ -130,20 +133,17 @@ class DatabaseAdmin:
         extra = {"ADMIN_DATABASE_URL": "dbname=draft user=postgres"}
         if password is not None:
             extra["DL_GATEWAY_PASSWORD"] = password
-        completed = run(
+        run(
             "runuser",
             "-u",
             "postgres",
             "--",
             backend / ".venv/bin/python",
+            "-u",
             backend / "scripts" / filename,
             *args,
             env=clean_environment(**extra),
-            capture_output=True,
-            text=True,
         )
-        if completed.stdout.strip():
-            print(completed.stdout.strip())
 
     def verify_initialized(self):
         if not self.marker.is_file():
@@ -156,7 +156,10 @@ class DatabaseAdmin:
         backend = self.release(revision)
         if self.marker.exists():
             self.verify_initialized()
-            print("Database is already initialized; existing data and credentials were preserved.")
+            print(
+                "Database is already initialized; existing data and credentials were preserved.",
+                flush=True,
+            )
             return
         password = self.password()
         state = cluster_state()
@@ -193,7 +196,7 @@ class DatabaseAdmin:
             os.replace(temporary, self.marker)
         finally:
             Path(temporary).unlink(missing_ok=True)
-        print("Database initialized. No catalog or test users have been added.")
+        print("Database initialized. No catalog or test users have been added.", flush=True)
 
     def import_catalog(self, revision: str, csv: Path, image_root: Path):
         backend = self.release(revision)
@@ -269,6 +272,7 @@ def main():
     if settings["name"] != name:
         raise RuntimeError("Installed database script does not match the host configuration")
     with open(f"/run/{name}-deploy.lock", "w") as lock:
+        print("Waiting for the host deployment lock...", flush=True)
         fcntl.flock(lock, fcntl.LOCK_EX)
         admin = DatabaseAdmin(name)
         if args.command == "init":

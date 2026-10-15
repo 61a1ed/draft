@@ -30,7 +30,9 @@ UV = Path("/usr/local/bin/uv")
 
 
 def run(*args, **kwargs):
-    return subprocess.run([str(arg) for arg in args], check=True, **kwargs)
+    command = [str(arg) for arg in args]
+    print("+ " + shlex.join(command), file=sys.stderr, flush=True)
+    return subprocess.run(command, check=True, **kwargs)
 
 
 def atomic_write(path: Path, content: bytes, mode=0o644) -> bool:
@@ -247,7 +249,7 @@ def install_packages():
 
 def install_uv(version: str):
     if UV.exists():
-        installed = run(UV, "--version", capture_output=True, text=True).stdout.split()
+        installed = run(UV, "--version", stdout=subprocess.PIPE, text=True).stdout.split()
         if len(installed) >= 2 and installed[1] == version:
             return
     filename = "uv-x86_64-unknown-linux-gnu.tar.gz"
@@ -262,7 +264,7 @@ def install_uv(version: str):
             source.extractall(temporary / "unpacked", filter="data")
         executable = temporary / "unpacked" / "uv-x86_64-unknown-linux-gnu" / "uv"
         atomic_write(UV, executable.read_bytes(), 0o755)
-    installed = run(UV, "--version", capture_output=True, text=True).stdout.split()
+    installed = run(UV, "--version", stdout=subprocess.PIPE, text=True).stdout.split()
     if len(installed) < 2 or installed[1] != version:
         raise RuntimeError("Installed uv version does not match its requested pin")
 
@@ -282,7 +284,7 @@ def install_node(version: str):
                 source.extractall(temporary / "unpacked", filter="data")
             (temporary / "unpacked" / dirname).rename(root)
     if (
-        run(root / "bin/node", "--version", capture_output=True, text=True).stdout.strip()
+        run(root / "bin/node", "--version", stdout=subprocess.PIPE, text=True).stdout.strip()
         != f"v{version}"
     ):
         raise RuntimeError("Installed Node.js version does not match its requested pin")
@@ -365,7 +367,7 @@ def install_layout(config: dict, source: Path):
             f"--git-dir={repository}",
             "rev-parse",
             "--is-bare-repository",
-            capture_output=True,
+            stdout=subprocess.PIPE,
             text=True,
         ).stdout.strip()
         != "true"
@@ -498,6 +500,7 @@ ExecReload=/usr/bin/caddy reload --config /etc/caddy/caddy.json
 
 
 def bootstrap(config: dict, source: Path):
+    print("Checking host configuration and saved credentials...", flush=True)
     validate(config)
     host_preflight()
     # Check ownership and persisted secrets before changing OS state.
@@ -505,15 +508,25 @@ def bootstrap(config: dict, source: Path):
     for filename in ("release.py", "database.py", "start"):
         if not (source / filename).is_file():
             raise RuntimeError("Upload bootstrap.py, release.py, database.py, and start together")
+    print("Installing operating system packages (PostgreSQL and Caddy)...", flush=True)
     install_packages()
+    print("Preparing application accounts...", flush=True)
     restart_caddy = ensure_accounts(config["name"])
+    print("Installing uv...", flush=True)
     install_uv(config["uv_version"])
+    print("Installing Node.js...", flush=True)
     install_node(config["node_version"])
+    print("Preparing application directories and deployment scripts...", flush=True)
     install_layout(config, source)
+    print("Installing Python 3.12 for root and the application account...", flush=True)
     run(UV, "python", "install", "3.12")
     run("runuser", "-u", config["name"], "--", UV, "python", "install", "3.12")
+    print("Configuring and starting PostgreSQL and Caddy services...", flush=True)
     configure_services(config, restart_caddy)
-    print("Host prepared. Database initialization and release activation remain explicit steps.")
+    print(
+        "Host prepared. Database initialization and release activation remain explicit steps.",
+        flush=True,
+    )
 
 
 def main():
@@ -525,6 +538,7 @@ def main():
     import fcntl
 
     with open(f"/run/{config['name']}-deploy.lock", "w") as lock:
+        print("Waiting for the host deployment lock...", flush=True)
         fcntl.flock(lock, fcntl.LOCK_EX)
         bootstrap(config, Path(__file__).resolve().parent)
 

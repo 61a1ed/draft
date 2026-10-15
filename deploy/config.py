@@ -37,6 +37,26 @@ class Config:
         return self.public_url + self.callback_path
 
 
+def load_state(config: Config) -> dict:
+    """Read the host receipt locally, including receipts from the old bringup command."""
+    path = config.state_dir / "state.json"
+    if not path.exists():
+        return {}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        raise RuntimeError("Cannot read deployment state.json; restore it before proceeding")
+    if (
+        not isinstance(state, dict)
+        or state.get("version") != 1
+        or state.get("name") != config.name
+        or state.get("region") != config.region
+        or state.get("hostname") != config.hostname
+    ):
+        raise RuntimeError("Deployment state does not match NAME, REGION and HOSTNAME")
+    return state
+
+
 def _text(values: dict, key: str, default=None) -> str:
     value = values.get(key, default)
     if not isinstance(value, str) or not value.strip() or value != value.strip():

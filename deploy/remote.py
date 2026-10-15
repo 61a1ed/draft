@@ -9,11 +9,14 @@ import re
 import secrets
 import shlex
 import shutil
+import signal
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from config import Config
@@ -22,8 +25,114 @@ HERE = Path(__file__).resolve().parent
 REPOSITORY = HERE.parent
 
 
-def run(*args, **kwargs):
-    return subprocess.run(args, check=True, **kwargs)
+PROGRESS_INTERVAL = 15
+POLL_INTERVAL = 0.5
+
+
+def command_text(args):
+    """Render a command for the workstation shell; never include environment values."""
+    if os.name == "nt":
+        quoted = [
+            str(arg) if re.fullmatch(r"[A-Za-z0-9_./:\\=-]+", str(arg))
+            else "'" + str(arg).replace("'", "''") + "'"
+            for arg in args
+        ]
+        return ("& " if quoted[0].startswith("'") else "") + " ".join(quoted)
+    return shlex.join(str(arg) for arg in args)
+
+
+def _stop_process(process, *, interactive):
+    """Stop local children too: Git can own an SSH process holding output pipes open."""
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        if os.name == "nt" and not interactive:
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        elif os.name != "nt" and not interactive:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if process.poll() is None:
+            process.kill()
+        try:
+            return process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            print("Local command stopped, but an output pipe did not close.", file=sys.stderr)
+            return None, None
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
+def run(*args, timeout=60, progress=None, interactive=False, **kwargs):
+    """Poll even on Windows, where an unbounded pipe-reader join delays Ctrl-C."""
+    print(command_text(args), file=sys.stderr, flush=True)
+    if kwargs.pop("capture_output", False):
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
+    if not interactive:
+        kwargs.setdefault("stdin", subprocess.DEVNULL)
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kwargs["start_new_session"] = True
+    started = time.monotonic()
+    next_update = started + PROGRESS_INTERVAL
+    if progress:
+        print(f"{progress}...", flush=True)
+    process = subprocess.Popen(args, **kwargs)
+    try:
+        while True:
+            elapsed = time.monotonic() - started
+            wait = (
+                POLL_INTERVAL if timeout is None
+                else min(POLL_INTERVAL, max(0, timeout - elapsed))
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=wait)
+                break
+            except subprocess.TimeoutExpired as error:
+                now = time.monotonic()
+                elapsed = now - started
+                if timeout is not None and elapsed >= timeout:
+                    if progress:
+                        print(
+                            f"Timed out: {progress} after {elapsed:.0f}s.",
+                            file=sys.stderr, flush=True,
+                        )
+                    raise subprocess.TimeoutExpired(
+                        args, timeout, output=error.output, stderr=error.stderr
+                    ) from None
+                if progress and now >= next_update:
+                    print(f"Still waiting: {progress} ({elapsed:.0f}s elapsed).", flush=True)
+                    next_update = now + PROGRESS_INTERVAL
+    except BaseException as error:
+        # Never launch another remote command while handling a cancelled local one.
+        try:
+            stdout, stderr = _stop_process(process, interactive=interactive)
+            if isinstance(error, subprocess.TimeoutExpired):
+                # Windows reader threads publish their buffers only when the pipe closes.
+                if stdout is not None:
+                    error.output = stdout
+                if stderr is not None:
+                    error.stderr = stderr
+        except (OSError, subprocess.SubprocessError) as cleanup_error:
+            print(f"Could not finish local process cleanup: {cleanup_error}", file=sys.stderr)
+        raise
+    result = subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+    if result.returncode and progress:
+        print(f"Failed: {progress} (exit {result.returncode}).", file=sys.stderr, flush=True)
+    result.check_returncode()
+    if progress:
+        print(f"Completed: {progress} ({time.monotonic() - started:.0f}s).", flush=True)
+    return result
 
 
 def private_json(path, data):
@@ -91,7 +200,7 @@ def commit_id(revision="HEAD", allow_dirty=False):
             "draft_backend",
             "draft_frontend",
             "deploy",
-            capture_output=True,
+            stdout=subprocess.PIPE,
             text=True,
         ).stdout
         if dirty.strip():
@@ -107,7 +216,7 @@ def commit_id(revision="HEAD", allow_dirty=False):
         "--verify",
         "--end-of-options",
         revision + "^{commit}",
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
     ).stdout.strip()
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
@@ -122,7 +231,7 @@ def commit_id(revision="HEAD", allow_dirty=False):
         "--",
         "draft_backend",
         "draft_frontend",
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
     ).stdout
     if any(line.startswith("160000 ") for line in tree.splitlines()):
@@ -166,11 +275,17 @@ class Remote:
     def __init__(self, config, state):
         self.config = config
         self.state = state
+        if not state.get("ip") or state.get("destroyed"):
+            raise RuntimeError(
+                "No saved host IP. Inspect cloud-status and finish the explicit cloud steps first."
+            )
         self.host = f"{state.get('ssh_user', 'ubuntu')}@{state['ip']}"
         key = Path(state["private_key"]).resolve()
         known = (config.state_dir / "known_hosts").resolve()
-        if not key.is_file() or not known.is_file():
-            raise RuntimeError("Provision the SSH key and verify the host key first")
+        if not key.is_file():
+            raise RuntimeError("Restore the saved SSH private key before connecting to this host")
+        if not known.is_file():
+            raise RuntimeError("Run trust-host once to verify and save this host's SSH identity")
         # as_posix also makes the same arguments usable by Git's SSH shell on Windows.
         self.options = [
             "-i",
@@ -185,21 +300,33 @@ class Remote:
             "UserKnownHostsFile=" + known.as_posix(),
             "-o",
             "ConnectTimeout=15",
+            "-o",
+            "ConnectionAttempts=1",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=3",
         ]
 
     def ssh(self, *args, **kwargs):
-        return run("ssh", *self.options, self.host, shlex.join(args), **kwargs)
+        kwargs.setdefault("progress", f"SSH to {self.host}: {args[0]}")
+        return run("ssh", "-T", *self.options, self.host, shlex.join(args), **kwargs)
 
     def copy(self, local, remote):
-        return run("scp", *self.options, str(local), f"{self.host}:{remote}")
+        return run(
+            "scp", *self.options, str(local), f"{self.host}:{remote}",
+            timeout=600, progress=f"Uploading {Path(local).name} to {self.host}",
+        )
 
     def upload_directory(self):
         path = self.ssh(
             "mktemp",
             "-d",
             f"/tmp/{self.config.name}-upload.XXXXXXXX",
-            capture_output=True,
+            stdout=subprocess.PIPE,
             text=True,
+            timeout=30,
+            progress=f"Creating upload directory on {self.host}",
         ).stdout.strip()
         if not re.fullmatch(
             r"/tmp/" + re.escape(self.config.name) + r"-upload\.[A-Za-z0-9]+", path
@@ -212,33 +339,51 @@ class Remote:
             r"/tmp/" + re.escape(self.config.name) + r"-upload\.[A-Za-z0-9]+", path
         ):
             raise ValueError("Refusing to clean an unexpected remote path")
-        self.ssh("rm", "-rf", "--", path)
+        self.ssh(
+            "rm", "-rf", "--", path, timeout=15,
+            progress=f"Removing temporary upload from {self.host}",
+        )
+
+    @contextmanager
+    def upload(self):
+        path = self.upload_directory()
+        try:
+            yield path
+        except BaseException:
+            # A disconnected remote installer may still be using the uploaded files.
+            print(
+                f"Upload retained on {self.host}: {path}. "
+                "Inspect it after checking any interrupted remote operation.",
+                file=sys.stderr, flush=True,
+            )
+            raise
+        else:
+            try:
+                self.cleanup_upload(path)
+            except (OSError, subprocess.SubprocessError) as error:
+                print(
+                    f"Operation completed, but upload cleanup failed for {path}: {error}",
+                    file=sys.stderr, flush=True,
+                )
 
     def setup(self):
-        deadline = time.monotonic() + 300
-        while True:
-            try:
-                self.ssh("true", capture_output=True)
-                break
-            except subprocess.CalledProcessError:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError(
-                        "SSH did not become available; check SSH_CIDRS and retry setup"
-                    )
-                time.sleep(5)
-        self.ssh("sudo", "-n", "cloud-init", "status", "--wait")
+        self.ssh("true", timeout=30, progress=f"Checking SSH on {self.host}")
+        self.ssh(
+            "sudo", "-n", "cloud-init", "status", "--wait", timeout=600,
+            progress="Waiting for Ubuntu first-boot initialization (cloud-init)",
+        )
         settings = host_settings(self.config)
         with tempfile.TemporaryDirectory(dir=self.config.state_dir, prefix="setup-") as directory:
             payload = Path(directory) / "host.json"
             private_json(payload, settings)
-            upload = self.upload_directory()
-            try:
+            with self.upload() as upload:
                 for name in ("bootstrap.py", "database.py", "release.py", "start"):
                     self.copy(HERE / "host" / name, upload + "/" + name)
                 self.copy(payload, upload + "/host.json")
-                self.ssh("sudo", "-n", "python3", upload + "/bootstrap.py", upload + "/host.json")
-            finally:
-                self.cleanup_upload(upload)
+                self.ssh(
+                    "sudo", "-n", "python3", "-u", upload + "/bootstrap.py", upload + "/host.json",
+                    timeout=1800, progress=f"Installing host services on {self.host}",
+                )
 
     def push(self, revision):
         env = dict(os.environ, GIT_SSH_COMMAND=shlex.join(["ssh", *self.options]))
@@ -252,6 +397,8 @@ class Remote:
             url,
             f"{revision}:refs/heads/deploy",
             env=env,
+            timeout=600,
+            progress=f"Pushing release {revision} to {self.host}",
         )
 
     def release(self, action, revision=None):
@@ -259,6 +406,7 @@ class Remote:
             "sudo",
             "-n",
             "python3",
+            "-u",
             f"/usr/local/lib/{self.config.name}/release.py",
             "--config",
             f"/etc/{self.config.name}/deploy.json",
@@ -266,7 +414,10 @@ class Remote:
         ]
         if revision:
             args.append(revision)
-        return self.ssh(*args)
+        return self.ssh(
+            *args, timeout=60 if action == "status" else 1800,
+            progress=f"Release {action} on {self.host}" + (f" ({revision})" if revision else ""),
+        )
 
     def prepare(self, revision):
         self.push(revision)
@@ -277,30 +428,34 @@ class Remote:
             "sudo",
             "-n",
             "python3",
+            "-u",
             f"/usr/local/lib/{self.config.name}/database.py",
             "init",
             revision,
+            timeout=900,
+            progress=f"Initializing PostgreSQL on {self.host}",
         )
 
     def import_catalog(self, revision):
         with tempfile.TemporaryDirectory(dir=self.config.state_dir, prefix="catalog-") as directory:
             archive = Path(directory) / "catalog.tar.gz"
+            print("Building catalog upload archive...", flush=True)
             build_catalog_archive(self.config, archive)
-            upload = self.upload_directory()
-            try:
+            with self.upload() as upload:
                 self.copy(archive, upload + "/catalog.tar.gz")
                 # Extraction is an installed, constrained operation; no root tar shell expansion.
                 self.ssh(
                     "sudo",
                     "-n",
                     "python3",
+                    "-u",
                     f"/usr/local/lib/{self.config.name}/database.py",
                     "import-archive",
                     revision,
                     upload + "/catalog.tar.gz",
+                    timeout=900,
+                    progress=f"Importing catalog on {self.host}",
                 )
-            finally:
-                self.cleanup_upload(upload)
 
     def logs(self, component, revision=None):
         if component == "app":
@@ -313,7 +468,10 @@ class Remote:
             unit = "postgresql@16-main.service"
         else:
             unit = "caddy.service"
-        self.ssh("sudo", "-n", "journalctl", "-u", unit, "-n", "100", "--no-pager")
+        self.ssh(
+            "sudo", "-n", "journalctl", "-u", unit, "-n", "100", "--no-pager",
+            progress=f"Reading {component} logs on {self.host}",
+        )
 
 
 def smoke(config):

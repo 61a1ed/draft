@@ -11,8 +11,10 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -22,6 +24,9 @@ from pathlib import Path
 
 
 def run(*args, **kwargs):
+    if kwargs.get("cwd"):
+        print(f"In {kwargs['cwd']}:", file=sys.stderr, flush=True)
+    print("+ " + shlex.join(str(arg) for arg in args), file=sys.stderr, flush=True)
     return subprocess.run(args, check=True, **kwargs)
 
 
@@ -87,7 +92,7 @@ class Releases:
             revision,
             "draft_backend",
             "draft_frontend",
-            capture_output=True,
+            stdout=subprocess.PIPE,
         ).stdout
         temporary = Path(tempfile.mkdtemp(prefix=".stage-", dir=self.releases))
         try:
@@ -143,7 +148,7 @@ with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as archive:
             "-c",
             program,
             str(directory / "draft_frontend/dist"),
-            capture_output=True,
+            stdout=subprocess.PIPE,
         ).stdout
 
     def publish_assets(self, directory):
@@ -270,6 +275,7 @@ with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as archive:
         return (json.dumps(config, indent=2) + "\n").encode()
 
     def wait_ready(self, revision, timeout=180):
+        print(f"Waiting for release {revision} readiness (up to {timeout}s)...", flush=True)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             response = subprocess.run(
@@ -318,7 +324,7 @@ with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as archive:
             "--no-legend",
             "--no-pager",
             f"{self.name}@*.service",
-            capture_output=True,
+            stdout=subprocess.PIPE,
             text=True,
         )
         loaded = run(
@@ -329,7 +335,7 @@ with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as archive:
             "--no-legend",
             "--no-pager",
             f"{self.name}@*.service",
-            capture_output=True,
+            stdout=subprocess.PIPE,
             text=True,
         )
         names = {
@@ -352,6 +358,7 @@ with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as archive:
         self.wait_ready(revision)
         run("systemctl", "enable", self.unit(revision))
         # Deliberately retain both processes after ambiguous API/persistence errors.
+        print("Switching Caddy to the ready release...", flush=True)
         self.load_caddy(data)
         atomic_write(self.config, data)
         print(f"Active release: {revision}", flush=True)
@@ -398,6 +405,7 @@ def main():
     import fcntl
 
     with open(f"/run/{releases.name}-deploy.lock", "w") as lock:
+        print("Waiting for the host deployment lock...", flush=True)
         fcntl.flock(lock, fcntl.LOCK_EX)
         if args.action == "status":
             releases.status()
