@@ -1542,19 +1542,6 @@ main {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 15px;
 }
-.signin-button {
-  border: 1px solid #e4dcea;
-  width: 100%;
-  background: #fff;
-  color: #756282;
-  gap: 18px;
-  font-size: 12px;
-}
-.test-login {
-  padding-top: 22px;
-  margin-top: 20px;
-  border-top: 1px solid #eee5f5;
-}
 .test-login > .eyebrow {
   display: block;
   margin-bottom: 15px;

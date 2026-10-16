@@ -12,6 +12,7 @@ export function useDraft() {
   const [snapshot, setSnapshot] = useState<LeagueSnapshot | null>(null)
   const [connection, setConnection] = useState<ConnectionStatus>('closed')
   const [error, setError] = useState('')
+  const [sessionCheckFailed, setSessionCheckFailed] = useState(false)
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [streamEpoch, setStreamEpoch] = useState(0)
@@ -62,6 +63,7 @@ export function useDraft() {
     setLeagueId(null)
     setSnapshot(null)
     setError('')
+    setSessionCheckFailed(false)
     setNotice('')
   }, [invalidate])
 
@@ -84,6 +86,7 @@ export function useDraft() {
       setCatalog([])
       setUsers([])
       setNotice('')
+      setSessionCheckFailed(false)
       setBusy(true)
       try {
         const current = authenticated ?? (await api.session(abort.signal))
@@ -100,7 +103,10 @@ export function useDraft() {
       } catch (cause) {
         if (!isCurrent(token)) return
         enterGuest()
-        if (!(cause instanceof ApiError && cause.status === 401)) setError(errorMessage(cause))
+        if (!(cause instanceof ApiError && cause.status === 401)) {
+          setSessionCheckFailed(true)
+          setError(errorMessage(cause))
+        }
         throw cause
       } finally {
         if (isCurrent(token)) {
@@ -461,6 +467,7 @@ export function useDraft() {
     snapshot,
     connection,
     error,
+    sessionCheckFailed,
     setError,
     notice,
     setNotice,

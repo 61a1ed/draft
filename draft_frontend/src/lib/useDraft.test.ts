@@ -185,6 +185,7 @@ describe('draft request ownership and event ordering', () => {
     expect(current.session?.user.id).toBe(42)
     expect(current.snapshot?.league_id).toBe(7)
     expect(current.error).toBe('')
+    expect(current.sessionCheckFailed).toBe(false)
   })
 
   it('keeps an authenticated stream and retries failed initial reads', async () => {
@@ -207,8 +208,11 @@ describe('draft request ownership and event ordering', () => {
     expect(current.error).toBe('')
   })
 
-  it('shows backend failure without fictional data', async () => {
-    vi.mocked(api.session).mockRejectedValueOnce(new TypeError('backend offline'))
+  it.each([
+    [new TypeError('backend offline'), 'Could not reach the server'],
+    [new ApiError(503, 'database_unavailable'), 'The database is unavailable'],
+  ])('marks failed session checks for retry without fictional data: %s', async (cause, message) => {
+    vi.mocked(api.session).mockRejectedValueOnce(cause)
     await mount()
 
     expect(current.mode).toBe('disconnected')
@@ -216,8 +220,45 @@ describe('draft request ownership and event ordering', () => {
     expect(current.snapshot).toBeNull()
     expect(current.catalog).toEqual([])
     expect(current.leagues).toEqual([])
-    expect(current.error).toContain('Could not reach the server')
+    expect(current.error).toContain(message)
+    expect(current.sessionCheckFailed).toBe(true)
     expect(current.busy).toBe(false)
+  })
+
+  it('clears the failed session check while retrying and restores the signed-in account', async () => {
+    vi.mocked(api.session).mockRejectedValueOnce(new TypeError('backend offline'))
+    await mount()
+    const retry = deferred<Session>()
+    vi.mocked(api.session).mockReturnValueOnce(retry.promise)
+    let connecting!: Promise<void>
+    await act(async () => {
+      connecting = current.connect()
+    })
+
+    expect(current.mode).toBe('loading')
+    expect(current.sessionCheckFailed).toBe(false)
+    await act(async () => {
+      retry.resolve(session)
+      await connecting
+    })
+    expect(current.mode).toBe('live')
+    expect(current.session).toEqual(session)
+    expect(current.sessionCheckFailed).toBe(false)
+    expect(current.error).toBe('')
+  })
+
+  it('returns to ordinary signed-out state when a failed session check retries with no session', async () => {
+    vi.mocked(api.session).mockRejectedValueOnce(new TypeError('backend offline'))
+    await mount()
+    const signedOut = new ApiError(401, 'sign_in_required')
+    vi.mocked(api.session).mockRejectedValueOnce(signedOut)
+    await act(async () => {
+      await expect(current.connect()).rejects.toBe(signedOut)
+    })
+
+    expect(current.mode).toBe('disconnected')
+    expect(current.sessionCheckFailed).toBe(false)
+    expect(current.error).toBe('')
   })
 
   it('stays signed out after logout or a missing session', async () => {
@@ -225,6 +266,7 @@ describe('draft request ownership and event ordering', () => {
     await mount()
     expect(current.mode).toBe('disconnected')
     expect(current.error).toBe('')
+    expect(current.sessionCheckFailed).toBe(false)
 
     await act(async () => {
       await current.connect(session)
@@ -236,6 +278,7 @@ describe('draft request ownership and event ordering', () => {
     expect(current.mode).toBe('disconnected')
     expect(current.session).toBeNull()
     expect(current.snapshot).toBeNull()
+    expect(current.sessionCheckFailed).toBe(false)
   })
 
   it('refreshes all SQL data and preserves the selected league with fresh revision authority', async () => {
@@ -405,6 +448,7 @@ describe('draft request ownership and event ordering', () => {
     expect(current.connection).toBe('closed')
     expect(current.error).toContain('Sign-out could not be confirmed')
     expect(current.error).toContain('browser session may still be active')
+    expect(current.sessionCheckFailed).toBe(false)
   })
 })
 
@@ -435,6 +479,7 @@ describe('snapshot refresh failures', () => {
     if (status === 401) expect(streams[0].stop).toHaveBeenCalled()
     else expect(streams[0].stop).not.toHaveBeenCalled()
     expect(current.mode).toBe(status === 401 ? 'disconnected' : 'live')
+    expect(current.sessionCheckFailed).toBe(false)
   })
 
   it('cancels pending read retries when changing leagues', async () => {
@@ -652,6 +697,7 @@ describe('account membership discovery and recovery', () => {
     expect(current.mode).toBe('disconnected')
     expect(current.snapshot).toBeNull()
     expect(current.leagues).toEqual([])
+    expect(current.sessionCheckFailed).toBe(false)
     expect(streams[0].stop).toHaveBeenCalled()
     const reads = vi.mocked(api.leagues).mock.calls.length
     await act(async () => {

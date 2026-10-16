@@ -31,8 +31,10 @@ npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173** and sign in. The frontend requires the backend;
-missing authentication shows Sign in, and connection failures show Retry.
+Open **http://127.0.0.1:5173** and sign in. The frontend restores valid sessions
+automatically. Signed-out visitors see a welcome page with **Sign in**, which
+starts authentication directly. A failed session check shows **Try again**;
+sign-in errors appear inline on the welcome page.
 Catalog images are served by the backend through `/images`, with no copied
 Pokémon image library in `public/`. Watchlists are stored locally per user.
 
@@ -62,9 +64,9 @@ See the backend README for provisioning a fresh test database. This frontend
 does not initialize, import into, or modify a database by itself.
 
 For fixture login, copy `.env.example` to `.env.local` and set
-`VITE_ENABLE_TEST_LOGIN=true`, then restart Vite. The sign-in dialog exposes
-Alice, Bob, and Carol **only in development** with that explicit flag. The
-backend must independently allow test login against a marked test database.
+`VITE_ENABLE_TEST_LOGIN=true`, then restart Vite. A separate **Use a test account**
+button opens the Alice, Bob, and Carol selector **only in development** with that
+explicit flag. The backend must independently allow test login against a marked test database.
 Production builds never display this control.
 
 Configure the backend with `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`.

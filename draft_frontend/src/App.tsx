@@ -169,27 +169,17 @@ function TeamRoster({
   )
 }
 
-function SignIn({
+function TestSignIn({
   onConnect,
   onClose,
 }: {
-  onConnect: (session?: Session) => Promise<void>
+  onConnect: (session: Session) => Promise<void>
   onClose: () => void
 }) {
-  const [error, setError] = useState(() => {
-    const code = new URLSearchParams(window.location.search).get('auth_error')
-    return code ? new ApiError(400, code).message : ''
-  })
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [username, setUsername] = useState('alice')
   const mounted = useRef(true)
-  useEffect(() => {
-    const url = new URL(window.location.href)
-    if (url.searchParams.has('auth_error')) {
-      url.searchParams.delete('auth_error')
-      window.history.replaceState(null, '', url)
-    }
-  }, [])
   useEffect(() => {
     mounted.current = true
     return () => {
@@ -203,8 +193,8 @@ function SignIn({
     try {
       const next = await api.testLogin(username)
       if (!mounted.current) return
+      onClose()
       await onConnect(next)
-      if (mounted.current) onClose()
     } catch (cause) {
       if (mounted.current) setError(errorMessage(cause))
     } finally {
@@ -212,53 +202,26 @@ function SignIn({
     }
   }
   return (
-    <Modal title="Sign in" onClose={onClose}>
+    <Modal title="Use a test account" onClose={onClose}>
       {error && (
         <div className="inline-error" role="alert">
           {error}
         </div>
       )}
-      <button
-        className="button signin-button"
-        disabled={busy}
-        onClick={() => window.location.assign('/auth/login')}
-      >
-        Continue to sign in
-      </button>
-      <button
-        className="button text-button full-width"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true)
-          setError('')
-          try {
-            await onConnect()
-            onClose()
-          } catch (cause) {
-            setError(errorMessage(cause))
-          } finally {
-            setBusy(false)
-          }
-        }}
-      >
-        Reconnect existing session
-      </button>
-      {import.meta.env.DEV && import.meta.env.VITE_ENABLE_TEST_LOGIN === 'true' && (
-        <form className="test-login" onSubmit={testLogin}>
-          <span className="eyebrow">LOCAL TEST ACCOUNTS</span>
-          <label className="field">
-            Account
-            <select value={username} onChange={(event) => setUsername(event.target.value)}>
-              <option value="alice">Alice</option>
-              <option value="bob">Bob</option>
-              <option value="carol">Carol</option>
-            </select>
-          </label>
-          <button className="button secondary full-width" disabled={busy}>
-            {busy ? 'Connecting…' : 'Use test account'}
-          </button>
-        </form>
-      )}
+      <form className="test-login" onSubmit={testLogin}>
+        <span className="eyebrow">LOCAL TEST ACCOUNTS</span>
+        <label className="field">
+          Account
+          <select value={username} onChange={(event) => setUsername(event.target.value)}>
+            <option value="alice">Alice</option>
+            <option value="bob">Bob</option>
+            <option value="carol">Carol</option>
+          </select>
+        </label>
+        <button className="button secondary full-width" disabled={busy}>
+          {busy ? 'Signing in…' : 'Use test account'}
+        </button>
+      </form>
     </Modal>
   )
 }
@@ -270,9 +233,18 @@ export default function App() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' })
   }, [view])
-  const [signIn, setSignIn] = useState(() =>
-    new URLSearchParams(window.location.search).has('auth_error'),
-  )
+  const [authError, setAuthError] = useState(() => {
+    const code = new URLSearchParams(window.location.search).get('auth_error')
+    return code ? new ApiError(400, code).message : ''
+  })
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('auth_error')) {
+      url.searchParams.delete('auth_error')
+      window.history.replaceState(null, '', url)
+    }
+  }, [])
+  const [testSignIn, setTestSignIn] = useState(false)
   const [create, setCreate] = useState(false)
   const [help, setHelp] = useState(false)
   const [selected, setSelected] = useState<SelectedPick | null>(null)
@@ -280,7 +252,7 @@ export default function App() {
     kind: 'start' | 'undo'
     revision: number
   } | null>(null)
-  const closeSignIn = useCallback(() => setSignIn(false), [])
+  const closeTestSignIn = useCallback(() => setTestSignIn(false), [])
   const [chargePoints, setChargePoints] = useState(true)
   const [watchlist, setWatchlist] = useState<number[]>([])
   const watchKey = `draft-club:watchlist:${mode}:${session?.user.id ?? 0}`
@@ -352,29 +324,54 @@ export default function App() {
 
   if (mode === 'disconnected')
     return (
-      <div className="loading-page empty-state">
+      <main className="loading-page empty-state">
         <img src="/favicon.svg" alt="" />
-        <h2>Connect to your draft database</h2>
-        <p>Sign in to explore the leagues and scenarios in the running backend.</p>
+        <h2>{draft.sessionCheckFailed ? 'We couldn’t load your account' : 'Pokémon Draft'}</h2>
+        {!draft.sessionCheckFailed && (
+          <p>Sign in to create a league, draft Pokémon, and manage your team.</p>
+        )}
+        {authError && (
+          <p className="inline-error" role="alert">
+            {authError}
+          </p>
+        )}
         {draft.error && (
           <p className="inline-error" role="alert">
             {draft.error}
           </p>
         )}
-        <button className="button primary" disabled={draft.busy} onClick={() => setSignIn(true)}>
-          Sign in
-          <ArrowRight size={16} />
-        </button>
-        <button
-          className="button secondary"
-          disabled={draft.busy}
-          onClick={() => void draft.connect().catch(() => {})}
-        >
-          <RefreshCw size={16} />
-          {draft.busy ? 'Connecting…' : 'Retry connection'}
-        </button>
-        {signIn && <SignIn onConnect={draft.connect} onClose={closeSignIn} />}
-      </div>
+        {draft.sessionCheckFailed ? (
+          <button
+            className="button primary"
+            disabled={draft.busy}
+            onClick={() => void draft.connect().catch(() => {})}
+          >
+            <RefreshCw size={16} />
+            Try again
+          </button>
+        ) : (
+          <button
+            className="button primary"
+            disabled={draft.busy}
+            onClick={() => window.location.assign('/auth/login')}
+          >
+            Sign in
+            <ArrowRight size={16} />
+          </button>
+        )}
+        {import.meta.env.DEV && import.meta.env.VITE_ENABLE_TEST_LOGIN === 'true' && (
+          <>
+            <button
+              className="button text-button"
+              disabled={draft.busy}
+              onClick={() => setTestSignIn(true)}
+            >
+              Use a test account
+            </button>
+            {testSignIn && <TestSignIn onConnect={draft.connect} onClose={closeTestSignIn} />}
+          </>
+        )}
+      </main>
     )
 
   return (
@@ -558,13 +555,13 @@ export default function App() {
               </button>
             </div>
           )}
-          {draft.error && (
+          {(authError || draft.error) && (
             <div className="error-banner" role="alert">
-              <span>{draft.error}</span>
+              <span>{authError || draft.error}</span>
               <button
                 className="icon-button"
                 aria-label="Dismiss error"
-                onClick={() => draft.setError('')}
+                onClick={() => (authError ? setAuthError('') : draft.setError(''))}
               >
                 <X size={18} />
               </button>
@@ -838,7 +835,6 @@ export default function App() {
           )}
         </main>
       </div>
-      {signIn && <SignIn onConnect={draft.connect} onClose={closeSignIn} />}
       {help && (
         <Modal title="Draft rules" onClose={() => setHelp(false)}>
           <div className="guide">
