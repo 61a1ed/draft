@@ -111,8 +111,7 @@ function Publication({
   }
   return (
     <section className="card tournament-publication">
-      <span className="eyebrow">READY FOR THE NEXT CHAPTER</span>
-      <h2>From draft room to match day</h2>
+      <h2>Publish tournament</h2>
       <p>Publish one round robin for {count} teams, followed by a two-team final.</p>
       <form onSubmit={(event) => void submit(event)}>
         <fieldset className="form-fieldset" disabled={busy}>
@@ -584,7 +583,7 @@ export function Tournament({ snapshot, userId, users, refreshKey, busy, mutate }
             {champion ??
               (advance.finalPublished
                 ? qualifiers.map((id) => teamName(snapshot.teams, id)).join(' vs ')
-                : 'Every match counts.')}
+                : 'Round robin')}
           </h2>
           <p>
             {champion
@@ -620,7 +619,7 @@ export function Tournament({ snapshot, userId, users, refreshKey, busy, mutate }
           </p>
         </section>
         <section className="card tournament-progress">
-          <span className="eyebrow">ROAD TO THE FINAL</span>
+          <span className="eyebrow">FINAL QUALIFICATION</span>
           <h3>
             {advance.finalPublished
               ? 'Finalists confirmed'
@@ -692,7 +691,6 @@ export function Tournament({ snapshot, userId, users, refreshKey, busy, mutate }
       <section className="tournament-schedule" aria-label="Tournament schedule">
         <div className="tournament-schedule-heading">
           <div>
-            <span className="eyebrow">MATCH DAY</span>
             <h2>Schedule & results</h2>
             <p>Suggested weeks are flexible. Play and report whenever ready.</p>
           </div>
