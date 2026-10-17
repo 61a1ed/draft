@@ -117,7 +117,7 @@ def configure_league(client, alice, bob, carol):
 
 
 def test_draft_workflow_and_database_enforced_access(client):
-    assert client.get("/api/leagues").status_code == 401
+    assert client.get("/api/leagues").status_code == 200
     alice = login(client, "alice")
     users_response = client.get("/api/users")
     assert users_response.status_code == 200
@@ -131,14 +131,14 @@ def test_draft_workflow_and_database_enforced_access(client):
 
     league_id, team_a, team_b = configure_league(client, alice, bob, carol)
 
-    # A removed manager loses visibility and cannot invoke a mutation either.
+    # A removed manager can still read all data, but cannot mutate it.
     login(client, "carol")
-    assert client.get(f"/api/leagues/{league_id}").status_code == 404
-    assert all(row["id"] != league_id for row in client.get("/api/leagues").json())
+    assert snapshot(client, league_id)["actions"] == []
+    assert any(row["id"] == league_id for row in client.get("/api/leagues").json())
     rpc(
         client,
         "draft_action",
-        expected=404,
+        expected=409,
         p_league=league_id,
         p_revision=7,
         p_kind="start",
@@ -250,6 +250,16 @@ def test_draft_workflow_and_database_enforced_access(client):
     assert [row["team_id"] for row in state["rosters"]] == [team_a, team_b, team_b, team_a]
     assert len(state["history"]) == 5
 
+    client.cookies.clear()
+    public_state = snapshot(client, league_id)
+    assert public_state["actions"] == []
+    for key in ["league", "state", "teams", "rosters", "history"]:
+        assert public_state[key] == state[key]
+    assert client.get("/api/leagues/2147483647").status_code == 404
+    assert client.post("/api/rpc/draft_action", json={
+        "p_league": league_id, "p_revision": state["revision"], "p_kind": "undo",
+    }).status_code == 401
+
 
 def test_oidc_registration_is_idempotent_and_updates_display_name(client):
     subject = "integration-oidc-" + uuid4().hex
@@ -273,7 +283,6 @@ def test_oidc_registration_is_idempotent_and_updates_display_name(client):
 @pytest.mark.parametrize(
     "query",
     [
-        "SELECT issuer, subject FROM dl.app_user",
         "UPDATE dl.league SET revision = revision + 1 WHERE false",
         "INSERT INTO dl.draftable (name) VALUES ('forbidden')",
         "SELECT dl.require_writer()",

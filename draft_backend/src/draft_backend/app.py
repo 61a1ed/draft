@@ -12,7 +12,7 @@ from psycopg_pool import PoolTimeout
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from .auth import install_auth, require_user, session_valid
+from .auth import install_auth, optional_user, require_user, session_valid
 from .config import Settings
 from .db import Database
 from .events import AccountEventResponse
@@ -25,6 +25,7 @@ Revision = Annotated[int, Field(strict=True, ge=0, le=2147483647)]
 Points = Annotated[int, Field(strict=True, ge=0, le=2147483647)]
 Name = Annotated[str, Field(min_length=1)]
 User = Annotated[int, Depends(require_user)]
+Reader = Annotated[int | None, Depends(optional_user)]
 
 
 class Input(BaseModel):
@@ -172,7 +173,7 @@ def create_app(settings: Settings | None = None):
             status, code = 503, "database_unavailable"
         else:
             status, code = 500, "database_error"
-        # Constraint details may contain private records; do not return them.
+        # Return stable application errors rather than database implementation details.
         return JSONResponse({"detail": code}, status_code=status)
 
     @app.exception_handler(PoolTimeout)
@@ -197,11 +198,11 @@ def create_app(settings: Settings | None = None):
         return {"ready": True}
 
     @app.get("/api/users", tags=["reads"])
-    async def users(user: User):
+    async def users(user: Reader):
         return await app.state.db.read(user, "SELECT id, display_name FROM dl.app_user ORDER BY id")
 
     @app.get("/api/draftables", tags=["reads"])
-    async def draftables(user: User):
+    async def draftables(user: Reader):
         return await app.state.db.read(
             user,
             "SELECT id, name, point_cost, dex, species, form, "
@@ -234,7 +235,7 @@ def create_app(settings: Settings | None = None):
         )
 
     @app.get("/api/leagues", tags=["reads"])
-    async def leagues(user: User):
+    async def leagues(user: Reader):
         return await app.state.db.read(user, "SELECT * FROM dl.league ORDER BY id")
 
     async def snapshot(user, league_id):
@@ -246,7 +247,7 @@ def create_app(settings: Settings | None = None):
         return rows[0]
 
     @app.get("/api/leagues/{league_id}", tags=["reads"])
-    async def league(league_id: int, user: User):
+    async def league(league_id: int, user: Reader):
         return await snapshot(user, league_id)
 
     async def rpc(user, function, body):

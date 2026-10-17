@@ -125,7 +125,6 @@ def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
             commissioner, owner = await signed_in(stack, app, names[0])
             manager, first = await signed_in(stack, app, names[1])
             replacement, second = await signed_in(stack, app, names[2])
-            assert (await manager.get("/api/leagues")).json() == []
             tab1 = await BrowserStream(app, manager).opened()
             stack.push_async_callback(tab1.close)
             tab2 = await BrowserStream(app, manager).opened()
@@ -141,10 +140,10 @@ def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
             )
             await tab1.invalidated()
             await tab2.invalidated()
-            assert [row["id"] for row in (await manager.get("/api/leagues")).json()] == [league]
+            assert league in [row["id"] for row in (await manager.get("/api/leagues")).json()]
             assert (await snapshot(manager, league))["revision"] == 1
 
-            # Both former-manager tabs wake up after their account loses access.
+            # Both former-manager tabs wake up after their management role changes.
             await rpc(
                 commissioner, "update_team", p_league=league, p_revision=1,
                 p_team=team, p_name="Reassigned", p_manager=second["id"], p_point_budget=100,
@@ -152,12 +151,12 @@ def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
             await tab1.invalidated()
             await tab2.invalidated()
             await other.invalidated()
-            assert (await manager.get("/api/leagues")).json() == []
-            assert (await manager.get(f"/api/leagues/{league}")).status_code == 404
+            assert (await snapshot(manager, league))["revision"] == 2
+            assert (await snapshot(manager, league))["actions"] == []
             assert (await snapshot(replacement, league))["revision"] == 2
             await rpc(commissioner, "remove_team", p_league=league, p_revision=2, p_team=team)
             await other.invalidated()
-            assert (await replacement.get("/api/leagues")).json() == []
+            assert (await snapshot(replacement, league))["revision"] == 3
 
             team = await rpc(
                 commissioner, "add_team", p_league=league, p_revision=3,
@@ -237,7 +236,8 @@ def test_stream_expiry_and_cancellation_close_database_connections(test_database
             await expect_listeners(test_database.admin, 1)
             await asyncio.wait_for(stream.task, 4)
             await expect_listeners(test_database.admin, 0)
-            assert (await manager.get("/api/leagues")).status_code == 401
+            assert (await manager.get("/api/leagues")).status_code == 200
+            assert (await manager.get("/auth/me")).status_code == 401
 
             manager, _ = await signed_in(stack, app, name)
             cancelled = await BrowserStream(app, manager).opened()

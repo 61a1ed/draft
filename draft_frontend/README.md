@@ -112,7 +112,7 @@ Catalog refresh is explicit because administrative repricing has no backend
 event. Existing roster/history prices always use the amount originally charged.
 The toolbar's **Refresh all data** reloads the session, catalog, user and league
 lists, and the selected snapshot/event stream. It keeps the selected league if
-it still exists, otherwise selects the first visible league. Use it after applying
+it still exists, otherwise selects the first league. Use it after applying
 scenario SQL. This also clears old revision authority after administrative resets.
 
 ## Checks and production build

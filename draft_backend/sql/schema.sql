@@ -3,11 +3,13 @@
 -- All API writes MUST run in SERIALIZABLE transactions (checked below).
 -- Retry serialization failures as whole transactions with unchanged arguments.
 -- A stale revision is an application conflict, not a reason to change/retry it.
--- Read policy: commissioner and team managers see the entire league. Signed-in
--- users may read the global catalog and user display names. No invitations yet.
+-- All schema data is public. Authentication and actor permissions govern writes.
 -- Catalog provisioning is administrative; no API writes to those tables.
 CREATE SCHEMA dl;
 REVOKE ALL ON SCHEMA dl FROM PUBLIC;
+GRANT USAGE ON SCHEMA dl TO PUBLIC;
+ALTER DEFAULT PRIVILEGES IN SCHEMA dl GRANT SELECT ON TABLES TO PUBLIC;
+ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 CREATE TABLE dl.app_user (
     id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -74,26 +76,12 @@ CREATE UNIQUE INDEX pick_active_draftable_uq ON dl.pick (league_id, draftable_id
     WHERE undone_at IS NULL;
 CREATE INDEX pick_history_idx ON dl.pick (league_id, id DESC);
 
--- Small auth/read boundary. These claims must come from the trusted gateway.
+-- Write identity. These claims must come from the trusted gateway.
 CREATE FUNCTION dl.user_id() RETURNS integer LANGUAGE sql STABLE
 SET search_path = pg_catalog, dl, pg_temp AS $$
     SELECT (nullif(current_setting('request.jwt.claims', true), '')::jsonb
             ->> 'user_id')::integer
 $$;
-CREATE FUNCTION dl.can_read(p_league integer) RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, dl, pg_temp AS $$
-    SELECT EXISTS (SELECT FROM league WHERE id = p_league
-                   AND commissioner_user_id = dl.user_id())
-        OR EXISTS (SELECT FROM team WHERE league_id = p_league
-                   AND manager_user_id = dl.user_id())
-$$;
-ALTER TABLE dl.league ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.team ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.pick ENABLE ROW LEVEL SECURITY;
-CREATE POLICY league_read ON dl.league FOR SELECT USING (dl.can_read(id));
-CREATE POLICY team_read ON dl.team FOR SELECT USING (dl.can_read(league_id));
-CREATE POLICY pick_read ON dl.pick FOR SELECT USING (dl.can_read(league_id));
 
 CREATE FUNCTION dl.snake_position(p_pick integer, p_teams integer)
 RETURNS integer LANGUAGE sql IMMUTABLE STRICT
@@ -214,7 +202,7 @@ RETURNS dl.permitted_action LANGUAGE plpgsql
 SET search_path = pg_catalog, dl, pg_temp AS $$
 DECLARE u integer := require_writer(); a dl.permitted_action; rev integer;
 BEGIN
-    IF NOT can_read(p_league) THEN
+    IF NOT EXISTS (SELECT FROM league WHERE id = p_league) THEN
         RAISE SQLSTATE 'PT404' USING MESSAGE = 'league_not_found';
     END IF;
     SELECT revision INTO rev FROM league WHERE id = p_league;
@@ -377,7 +365,7 @@ BEGIN
 END $$;
 
 -- Every supported setup/draft RPC touches league exactly once, preserving its
--- existing revision rules. OLD also covers a commissioner who just lost access.
+-- existing revision rules. OLD also covers the departing commissioner.
 CREATE FUNCTION dl.notify_league() RETURNS trigger LANGUAGE plpgsql
 SET search_path = pg_catalog, dl, pg_temp AS $$
 BEGIN
@@ -414,20 +402,14 @@ END $$;
 CREATE TRIGGER team_changed AFTER INSERT OR UPDATE OR DELETE ON dl.team
 FOR EACH ROW EXECUTE FUNCTION dl.notify_team();
 
-REVOKE ALL ON ALL TABLES IN SCHEMA dl FROM PUBLIC;
+GRANT SELECT ON ALL TABLES IN SCHEMA dl TO PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA dl FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION dl.user_id(), dl.snake_position(integer,integer) TO PUBLIC;
 
 -- Deployment (dl_api is a separate, already-created NOLOGIN role).
 -- Configure the request transaction as SERIALIZABLE before any query.
 -- configure the impersonated API role's default_transaction_isolation.
--- GRANT USAGE ON SCHEMA dl TO dl_api;
--- GRANT SELECT (id, display_name) ON dl.app_user TO dl_api;
--- GRANT SELECT ON dl.draftable, dl.league, dl.team, dl.pick,
---   dl.active_pick, dl.draft_state, dl.roster, dl.team_points,
---   dl.permitted_action, dl.league_snapshot TO dl_api;
--- GRANT EXECUTE ON FUNCTION dl.user_id(), dl.can_read(integer),
---   dl.snake_position(integer,integer),
---   dl.create_league(text,integer,integer),
+-- GRANT EXECUTE ON FUNCTION dl.create_league(text,integer,integer),
 --   dl.update_league(integer,integer,text,integer,integer),
 --   dl.add_team(integer,integer,text,integer,integer),
 --   dl.update_team(integer,integer,integer,text,integer,integer),

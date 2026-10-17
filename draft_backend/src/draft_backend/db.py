@@ -81,7 +81,7 @@ class Database:
             await conn.execute("SELECT 1")
 
     async def _execute(
-        self, user_id: int, query: str, params: Any, *, write: bool
+        self, user_id: int | None, query: str, params: Any, *, write: bool
     ) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn:
             async with conn.transaction():
@@ -102,7 +102,7 @@ class Database:
             # Commit has completed before returning results to the HTTP layer.
         return rows
 
-    async def read(self, user_id: int, query: str, params: Any = ()) -> list[dict[str, Any]]:
+    async def read(self, user_id: int | None, query: str, params: Any = ()) -> list[dict[str, Any]]:
         return await self._execute(user_id, query, params, write=False)
 
     async def image(self, image_hash: str) -> dict[str, Any] | None:

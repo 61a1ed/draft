@@ -40,6 +40,11 @@ def session_valid(request: Request) -> bool:
     )
 
 
+def optional_user(request: Request) -> int | None:
+    """Personalize public reads when a valid session is present."""
+    return request.session["user_id"] if session_valid(request) else None
+
+
 def require_user(request: Request) -> int:
     if not session_valid(request):
         request.session.clear()

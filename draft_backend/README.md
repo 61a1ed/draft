@@ -148,15 +148,16 @@ addresses come from configuration rather than forwarded request headers.
 
 ## HTTP contract
 
-All `/api` routes require a session. Read results come directly from PostgreSQL:
+Schema data is public. Data reads require no session and come directly from PostgreSQL.
+Writes and the account notification stream require a session:
 
 | Method/path | Result |
 |---|---|
 | `GET /api/users` | Array of `{id, display_name}`; no login identities |
 | `GET /api/draftables` | Global catalog array |
 | `GET /images/{hash}` / `HEAD /images/{hash}` | Public PNG image; no session required |
-| `GET /api/leagues` | Array of leagues visible to the caller |
-| `GET /api/leagues/{id}` | One `dl.league_snapshot` row, including actions |
+| `GET /api/leagues` | Array of all leagues |
+| `GET /api/leagues/{id}` | One `dl.league_snapshot` row; actions personalized to the signed-in user |
 | `GET /api/events` | Account SSE stream, including accounts with no leagues |
 | `GET /healthz` | Process status; public |
 | `GET /ready` | Public readiness check; 200 with a working pooled DB query, otherwise 503 |
@@ -376,11 +377,13 @@ the heartbeat interval. Cookies authenticate native EventSource automatically.
 |---|---|
 | `dl_owner` | NOLOGIN, non-superuser schema/function owner; never used for requests |
 | `dl_api` | NOLOGIN, read views/tables plus public SQL functions; no table DML |
-| `dl_auth` | NOLOGIN, read/upsert `app_user` only |
+| `dl_auth` | NOLOGIN, upsert `app_user`; public schema reads |
 | `dl_gateway` | Unprivileged LOGIN, NOINHERIT; can explicitly select API/auth roles |
 
-People are `app_user` rows. Commissioner/manager permissions remain in the
-schema. `request.jwt.claims` is populated transaction-locally from the verified
+People are `app_user` rows. All tables, views, and columns in `dl` are publicly
+readable, including account identities and tournament history. New owner-created
+tables and views inherit public reads. Commissioner/manager write permissions remain
+in the schema. `request.jwt.claims` is populated transaction-locally from the verified
 session; despite its name, no browser JWT is needed. Runtime credentials belong
 only to the trusted Python server. Startup rejects an owner/superuser connection.
 

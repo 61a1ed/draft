@@ -8,8 +8,8 @@
 -- individual tiebreak-round evidence. These writers validate eligibility,
 -- completeness and freshness; they do not implement an automatic ranking engine.
 -- Selecting a tiebreak field certifies that those entrants remain tied under the
--- announced criteria. Publishing the ordered final field certifies places 1/2
--- and that all qualification ties have been resolved under those criteria.
+-- announced criteria. Publishing the final field certifies its two members;
+-- their order has no meaning and ties between two advancing teams need no ruling.
 
 CREATE FUNCTION dl.withdraw_team(p_league integer, p_revision integer,
     p_team integer, p_reason text)
@@ -22,19 +22,14 @@ DECLARE
     fixture dl.match;
 BEGIN
     PERFORM dl.tournament_check_revision(p_league, p_revision);
-    IF NOT EXISTS (SELECT FROM tournament
-                   WHERE league_id = p_league AND published_at IS NOT NULL) THEN
-        RAISE SQLSTATE 'PT409' USING MESSAGE = 'tournament_not_published';
-    END IF;
     IF p_reason IS NULL OR btrim(p_reason) = '' THEN
         RAISE SQLSTATE 'PT400' USING MESSAGE = 'reason_required';
     END IF;
-    SELECT s.id, s.standings_finalized_at INTO source_stage, finalized_at
+    SELECT s.id, s.qualification_finalized_at INTO source_stage, finalized_at
     FROM tournament_stage s
-    WHERE s.tournament_id = p_league AND s.source_stage_id IS NULL
-      AND s.format = 'round_robin';
+    WHERE s.tournament_id = p_league AND s.source_stage_id IS NULL;
     IF NOT FOUND THEN
-        RAISE SQLSTATE 'PT409' USING MESSAGE = 'invalid_tournament_pipeline';
+        RAISE SQLSTATE 'PT409' USING MESSAGE = 'stage_not_found';
     END IF;
     IF NOT EXISTS (
         SELECT FROM team t JOIN stage_entry e ON e.team_id = t.id
@@ -63,41 +58,17 @@ BEGIN
             ORDER BY m.id
         LOOP
             UPDATE match SET revision = revision + 1 WHERE id = fixture.id;
-            INSERT INTO match_disposition (match_id, cancelled, decided_by, reason)
-            VALUES (fixture.id,
-                    fixture.current_decision_id IS NULL
-                        AND fixture.team_a_submission_id IS NULL
-                        AND fixture.team_b_submission_id IS NULL,
-                    u, btrim(p_reason));
+            INSERT INTO match_disposition (match_id, withdrawal_team_id)
+            VALUES (fixture.id, p_team);
         END LOOP;
-    ELSE
-        -- Final publication freezes source results and both final entrants.
-        -- Nonfinalists and already official finals need no match changes.
-        SELECT m.* INTO fixture
-        FROM match m
-        JOIN tournament_round r ON r.id = m.round_id
-        JOIN tournament_stage s ON s.id = r.stage_id
-        WHERE s.tournament_id = p_league AND s.source_stage_id = source_stage
-          AND s.format = 'single_elimination'
-          AND (m.team_a_id = p_team OR m.team_b_id = p_team)
-          AND m.current_decision_id IS NULL;
-        IF FOUND THEN
-            IF EXISTS (SELECT FROM match_disposition WHERE match_id = fixture.id) THEN
-                RAISE SQLSTATE 'PT409' USING MESSAGE = 'final_fixture_removed';
-            END IF;
-            UPDATE match SET revision = revision + 1 WHERE id = fixture.id;
-            -- Private result helper appends the commissioner report/decision and
-            -- moves only the official pointer; both participant pointers survive.
-            PERFORM dl.tournament_append_commissioner_result(
-                fixture.id, u, btrim(p_reason), 'forfeit', NULL, NULL,
-                CASE WHEN fixture.team_a_id = p_team THEN 'b' ELSE 'a' END);
-        END IF;
     END IF;
+    -- After qualification, record withdrawal only. Leave the final and all
+    -- source results intact, with no automatic forfeit, replacement or closure.
     PERFORM dl.notify_league_accounts(p_league);
 END $$;
 
 CREATE FUNCTION dl.create_tiebreak_round(p_stage integer, p_revision integer,
-    p_teams integer[], p_opens_at timestamptz, p_closes_at timestamptz, p_reason text)
+    p_teams integer[], p_reason text, p_suggested_start_date date DEFAULT NULL)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, dl, pg_temp AS $$
 DECLARE
@@ -112,20 +83,18 @@ BEGIN
     END IF;
     u := dl.tournament_commissioner(stage.tournament_id);
     PERFORM dl.tournament_check_revision(stage.tournament_id, p_revision);
-    IF NOT EXISTS (SELECT FROM tournament
-                   WHERE league_id = stage.tournament_id AND published_at IS NOT NULL) THEN
-        RAISE SQLSTATE 'PT409' USING MESSAGE = 'tournament_not_published';
-    END IF;
     IF stage.format <> 'round_robin' OR stage.source_stage_id IS NOT NULL THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'tiebreak_requires_source_round_robin';
     END IF;
-    IF stage.standings_finalized_at IS NOT NULL THEN
+    IF stage.qualification_finalized_at IS NOT NULL THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'qualification_already_finalized';
     END IF;
     IF p_reason IS NULL OR btrim(p_reason) = '' THEN
         RAISE SQLSTATE 'PT400' USING MESSAGE = 'reason_required';
     END IF;
-    PERFORM dl.tournament_validate_window(p_opens_at, p_closes_at);
+    IF p_suggested_start_date IS NOT NULL AND NOT isfinite(p_suggested_start_date) THEN
+        RAISE SQLSTATE 'PT400' USING MESSAGE = 'invalid_suggested_date';
+    END IF;
     IF p_teams IS NULL OR cardinality(p_teams) < 2
        OR array_ndims(p_teams) IS DISTINCT FROM 1 THEN
         RAISE SQLSTATE 'PT400' USING MESSAGE = 'at_least_two_teams_required';
@@ -159,8 +128,8 @@ BEGIN
     SELECT coalesce(max(number), 0) + 1 INTO round_number
     FROM tournament_round WHERE stage_id = p_stage;
     INSERT INTO tournament_round
-        (stage_id, number, purpose, tiebreak_reason, created_by, opens_at, closes_at)
-    VALUES (p_stage, round_number, 'tiebreak', btrim(p_reason), u, p_opens_at, p_closes_at)
+        (stage_id, number, purpose, tiebreak_reason, created_by, suggested_start_date)
+    VALUES (p_stage, round_number, 'tiebreak', btrim(p_reason), u, p_suggested_start_date)
     RETURNING id INTO result;
     -- Canonical pair orientation makes the complete fixture preview deterministic.
     INSERT INTO match (round_id, team_a_id, team_b_id)
@@ -172,7 +141,7 @@ BEGIN
 END $$;
 
 CREATE FUNCTION dl.publish_final(p_league integer, p_revision integer,
-    p_qualifiers integer[], p_opens_at timestamptz, p_closes_at timestamptz)
+    p_qualifiers integer[], p_suggested_start_date date DEFAULT NULL)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, dl, pg_temp AS $$
 DECLARE
@@ -184,25 +153,17 @@ DECLARE
     result integer;
 BEGIN
     PERFORM dl.tournament_check_revision(p_league, p_revision);
-    IF NOT EXISTS (SELECT FROM tournament
-                   WHERE league_id = p_league AND published_at IS NOT NULL) THEN
-        RAISE SQLSTATE 'PT409' USING MESSAGE = 'tournament_not_published';
-    END IF;
     SELECT * INTO source_stage FROM tournament_stage
-    WHERE tournament_id = p_league AND source_stage_id IS NULL AND format = 'round_robin';
+    WHERE tournament_id = p_league AND source_stage_id IS NULL;
     IF NOT FOUND THEN
-        RAISE SQLSTATE 'PT409' USING MESSAGE = 'invalid_tournament_pipeline';
+        RAISE SQLSTATE 'PT409' USING MESSAGE = 'stage_not_found';
     END IF;
     SELECT * INTO final_stage FROM tournament_stage
-    WHERE tournament_id = p_league AND source_stage_id = source_stage.id
-      AND format = 'single_elimination' AND qualifier_count = 2
-      AND position > source_stage.position;
+    WHERE tournament_id = p_league AND source_stage_id = source_stage.id;
     IF NOT FOUND THEN
-        RAISE SQLSTATE 'PT409' USING MESSAGE = 'invalid_tournament_pipeline';
+        RAISE SQLSTATE 'PT409' USING MESSAGE = 'stage_not_found';
     END IF;
-    IF source_stage.standings_finalized_at IS NOT NULL
-       OR EXISTS (SELECT FROM stage_entry WHERE stage_id = final_stage.id)
-       OR EXISTS (SELECT FROM tournament_round WHERE stage_id = final_stage.id) THEN
+    IF source_stage.qualification_finalized_at IS NOT NULL THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'final_already_published';
     END IF;
     IF p_qualifiers IS NULL OR cardinality(p_qualifiers) <> 2
@@ -213,9 +174,9 @@ BEGIN
        OR (SELECT count(DISTINCT team_id) FROM unnest(p_qualifiers) AS selected(team_id)) <> 2 THEN
         RAISE SQLSTATE 'PT400' USING MESSAGE = 'distinct_qualifiers_required';
     END IF;
-    -- Normalize array bounds while retaining the certified first/second order.
-    SELECT array_agg(team_id ORDER BY place) INTO qualifiers
-    FROM unnest(p_qualifiers) WITH ORDINALITY AS selected(team_id, place);
+    -- Input order is irrelevant. Canonical A/B orientation has no seed/rank meaning.
+    SELECT array_agg(team_id ORDER BY team_id) INTO qualifiers
+    FROM unnest(p_qualifiers) AS selected(team_id);
     IF EXISTS (
         SELECT FROM unnest(qualifiers) AS selected(team_id)
         LEFT JOIN stage_entry e ON e.stage_id = source_stage.id AND e.team_id = selected.team_id
@@ -226,7 +187,9 @@ BEGIN
     ) THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'ineligible_qualifier';
     END IF;
-    PERFORM dl.tournament_validate_window(p_opens_at, p_closes_at);
+    IF p_suggested_start_date IS NOT NULL AND NOT isfinite(p_suggested_start_date) THEN
+        RAISE SQLSTATE 'PT400' USING MESSAGE = 'invalid_suggested_date';
+    END IF;
     IF EXISTS (
         SELECT FROM match m JOIN tournament_round r ON r.id = m.round_id
         WHERE r.stage_id = source_stage.id AND m.current_decision_id IS NULL
@@ -236,17 +199,13 @@ BEGIN
     END IF;
 
     PERFORM dl.tournament_bump(p_league);
-    UPDATE stage_entry e SET final_place = selected.place::integer
-    FROM unnest(qualifiers) WITH ORDINALITY AS selected(team_id, place)
-    WHERE e.stage_id = source_stage.id AND e.team_id = selected.team_id;
     UPDATE tournament_stage
-    SET standings_finalized_at = clock_timestamp(), standings_finalized_by = u
+    SET qualification_finalized_at = clock_timestamp(), qualification_finalized_by = u
     WHERE id = source_stage.id;
-    INSERT INTO stage_entry (stage_id, team_id, seed, entered_by)
-    SELECT final_stage.id, team_id, place::integer, u
-    FROM unnest(qualifiers) WITH ORDINALITY AS selected(team_id, place);
-    INSERT INTO tournament_round (stage_id, number, purpose, created_by, opens_at, closes_at)
-    VALUES (final_stage.id, 1, 'normal', u, p_opens_at, p_closes_at)
+    INSERT INTO stage_entry (stage_id, team_id, entered_by)
+    SELECT final_stage.id, team_id, u FROM unnest(qualifiers) AS selected(team_id);
+    INSERT INTO tournament_round (stage_id, number, purpose, created_by, suggested_start_date)
+    VALUES (final_stage.id, 1, 'normal', u, p_suggested_start_date)
     RETURNING id INTO final_round;
     INSERT INTO match (round_id, team_a_id, team_b_id)
     VALUES (final_round, qualifiers[1], qualifiers[2]) RETURNING id INTO result;
@@ -254,13 +213,13 @@ BEGIN
     RETURN result;
 END $$;
 
-COMMENT ON FUNCTION dl.create_tiebreak_round(integer, integer, integer[], timestamptz, timestamptz, text)
+COMMENT ON FUNCTION dl.create_tiebreak_round(integer, integer, integer[], text, date)
 IS 'Commissioner certifies selected eligible entrants remain tied under announced external criteria. Validates completion and freshness; does not compute rankings.';
-COMMENT ON FUNCTION dl.publish_final(integer, integer, integer[], timestamptz, timestamptz)
-IS 'Commissioner certifies the ordered two eligible qualifiers under announced external criteria. Atomically freezes places 1/2 and publishes their final; does not compute rankings.';
+COMMENT ON FUNCTION dl.publish_final(integer, integer, integer[], date)
+IS 'Commissioner certifies two eligible qualifiers, without ordering them. Atomically freezes final membership and publishes its fixture; does not compute rankings.';
 
 REVOKE ALL ON FUNCTION
     dl.withdraw_team(integer, integer, integer, text),
-    dl.create_tiebreak_round(integer, integer, integer[], timestamptz, timestamptz, text),
-    dl.publish_final(integer, integer, integer[], timestamptz, timestamptz)
+    dl.create_tiebreak_round(integer, integer, integer[], text, date),
+    dl.publish_final(integer, integer, integer[], date)
 FROM PUBLIC;

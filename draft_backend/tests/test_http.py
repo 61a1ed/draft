@@ -178,7 +178,7 @@ def test_public_images_cache_bytes_and_support_conditional_requests(application)
     digest = "a" * 64
     db.image.return_value = {"content_type": "image/png", "data": b"png bytes"}
     with TestClient(app) as client:
-        assert client.get("/api/draftables").status_code == 401
+        assert client.get("/api/draftables").status_code == 200
         response = client.get(f"/images/{digest}")
         assert response.status_code == 200
         assert response.content == b"png bytes"
@@ -217,6 +217,25 @@ def test_missing_and_invalid_images_are_not_cached(application):
         assert app.state.images == {}
 
 
+@pytest.mark.parametrize(
+    "path", ["/api/users", "/api/draftables", "/api/leagues", "/api/leagues/1"]
+)
+def test_public_reads_use_optional_session_identity(application, path):
+    app, db = application
+    db.read.return_value = [{"league_id": 1}]
+    with TestClient(app) as client:
+        assert client.get(path).status_code == 200
+        assert db.read.await_args.args[0] is None
+        login = client.post(
+            "/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"}
+        ).json()
+        assert client.get(path).status_code == 200
+        assert db.read.await_args.args[0] == 1
+        client.post("/auth/logout", headers={"X-CSRF-Token": login["csrf_token"]})
+        assert client.get(path).status_code == 200
+        assert db.read.await_args.args[0] is None
+
+
 def test_csrf_and_origin_protect_writes_and_logout(application):
     app, db = application
     with TestClient(app) as client:
@@ -244,7 +263,7 @@ def test_csrf_and_origin_protect_writes_and_logout(application):
         )
         assert client.post("/auth/logout").status_code == 403
         assert client.post("/auth/logout", headers=headers).status_code == 204
-        assert client.get("/api/leagues").status_code == 401
+        assert client.get("/api/leagues").status_code == 200
 
 
 def test_startup_refuses_test_login_on_an_unmarked_database(application):

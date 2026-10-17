@@ -5,11 +5,11 @@
 
 CREATE FUNCTION dl.tournament_result_context(p_match integer)
 RETURNS TABLE (match_row dl.match, league_id integer, wins_required integer,
-               manager_a integer, manager_b integer, published boolean)
+               manager_a integer, manager_b integer)
 LANGUAGE sql STABLE
 SET search_path = pg_catalog, dl, pg_temp AS $$
     SELECT m, t.league_id, s.wins_required,
-           a.manager_user_id, b.manager_user_id, t.published_at IS NOT NULL
+           a.manager_user_id, b.manager_user_id
     FROM match m
     JOIN tournament_round r ON r.id = m.round_id
     JOIN tournament_stage s ON s.id = r.stage_id
@@ -18,7 +18,7 @@ SET search_path = pg_catalog, dl, pg_temp AS $$
     JOIN team b ON b.id = m.team_b_id AND b.league_id = t.league_id
     JOIN stage_entry ea ON ea.stage_id = s.id AND ea.team_id = a.id
     JOIN stage_entry eb ON eb.stage_id = s.id AND eb.team_id = b.id
-    WHERE m.id = p_match AND dl.can_read(t.league_id)
+    WHERE m.id = p_match
 $$;
 
 CREATE FUNCTION dl.tournament_validate_result(p_wins_required integer,
@@ -59,7 +59,7 @@ BEGIN
     RETURN report;
 END $$;
 
--- Shared by record/correct and the fixed withdrawal-forfeit operation. Callers
+-- Shared by record/correct. Callers
 -- authorize and validate first, then advance tournament and match revisions.
 -- This helper only appends history and moves the official pointer. It does not
 -- change revisions, notify, alter player pointers or decide whether play is open.
@@ -105,7 +105,7 @@ BEGIN
     IF side IS NULL THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'action_not_permitted';
     END IF;
-    IF NOT ctx.published OR m.current_decision_id IS NOT NULL
+    IF m.current_decision_id IS NOT NULL
        OR EXISTS (SELECT FROM match_disposition WHERE match_id = p_match) THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'match_not_open';
     END IF;
@@ -173,7 +173,7 @@ BEGIN
     IF m.revision IS DISTINCT FROM p_revision THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'stale_revision';
     END IF;
-    IF NOT ctx.published OR m.current_decision_id IS NOT NULL
+    IF m.current_decision_id IS NOT NULL
        OR EXISTS (SELECT FROM match_disposition WHERE match_id = p_match) THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'match_not_open';
     END IF;
@@ -224,7 +224,7 @@ BEGIN
     IF m.revision IS DISTINCT FROM p_revision THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'stale_revision';
     END IF;
-    IF NOT ctx.published OR m.current_decision_id IS NULL THEN
+    IF m.current_decision_id IS NULL THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'official_result_required';
     END IF;
     IF p_reason IS NULL OR btrim(p_reason) = '' THEN
@@ -268,9 +268,6 @@ BEGIN
     END IF;
     IF m.revision IS DISTINCT FROM p_revision THEN
         RAISE SQLSTATE 'PT409' USING MESSAGE = 'stale_revision';
-    END IF;
-    IF NOT ctx.published THEN
-        RAISE SQLSTATE 'PT409' USING MESSAGE = 'tournament_not_published';
     END IF;
     -- NULL removes the link. Require an absolute HTTP(S) link with a host;
     -- reject credentials, whitespace/control characters and browser backslashes.

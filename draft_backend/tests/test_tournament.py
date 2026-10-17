@@ -7,7 +7,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
@@ -17,7 +16,7 @@ from psycopg.types.json import Jsonb
 pytestmark = pytest.mark.integration
 
 UTC = timezone.utc
-START = datetime(2026, 10, 25, 9)
+START = date(2026, 10, 25)
 OPENS = datetime(2027, 1, 1, 9, tzinfo=UTC)
 CLOSES = OPENS + timedelta(days=7)
 
@@ -46,7 +45,7 @@ def rejected(code="PT409"):
 
 
 class Tournament:
-    def __init__(self, database, count=4, *, publish=True, configure=True):
+    def __init__(self, database, count=4, *, publish=True):
         self.database = database
         with psycopg.connect(database.admin) as conn:
             self.users = [
@@ -81,38 +80,6 @@ class Tournament:
                 (self.league, self.owner, count),
             )
         self.managers = dict(zip(self.teams, self.users, strict=False))
-        if not configure:
-            return
-        assert (
-            self.call(
-                "configure_tournament",
-                p_league=self.league,
-                p_revision=None,
-                p_time_zone="America/Los_Angeles",
-            )
-            == self.league
-        )
-        assert self.revision() == 0
-        self.stage = self.call(
-            "configure_stage",
-            p_league=self.league,
-            p_revision=0,
-            p_position=1,
-            p_name="Season",
-            p_format="round_robin",
-            p_best_of=3,
-        )
-        self.final_stage = self.call(
-            "configure_stage",
-            p_league=self.league,
-            p_revision=1,
-            p_position=2,
-            p_name="Final",
-            p_format="single_elimination",
-            p_best_of=5,
-            p_source_stage=self.stage,
-            p_qualifier_count=2,
-        )
         if publish:
             self.publish()
 
@@ -157,13 +124,23 @@ class Tournament:
                     raise
 
     def publish(self, **kwargs):
-        return self.call(
-            "publish_tournament",
+        arguments = dict(
             p_league=self.league,
-            p_revision=self.revision(),
-            p_starts_at=START,
-            **kwargs,
+            p_league_revision=self.scalar(
+                "SELECT revision FROM dl.league WHERE id=%s", (self.league,)
+            ),
+            p_first_suggested_date=START,
         )
+        arguments.update(kwargs)
+        result = self.call("publish_tournament", **arguments)
+        self.stage, self.final_stage = [
+            row[0]
+            for row in self.read(
+                "SELECT id FROM dl.tournament_stage WHERE tournament_id=%s ORDER BY position",
+                (self.league,),
+            )
+        ]
+        return result
 
     def matches(self, stage=None):
         return self.read(
@@ -210,96 +187,98 @@ class Tournament:
             p_league=self.league,
             p_revision=self.revision(),
             p_qualifiers=self.teams[:2] if qualifiers is None else qualifiers,
-            p_opens_at=OPENS,
-            p_closes_at=CLOSES,
         )
 
 
 @pytest.mark.parametrize("count", [2, 3, 4, 5, 6])
-def test_complete_round_robin_and_local_weekly_windows(tournament_database, count):
+def test_complete_round_robin_and_suggested_weekly_dates(tournament_database, count):
     t = Tournament(tournament_database, count)
     rows = t.read(
-        "SELECT r.number, r.opens_at, r.closes_at, m.team_a_id, m.team_b_id "
+        "SELECT r.number, r.suggested_start_date, m.team_a_id, m.team_b_id "
         "FROM dl.tournament_round r JOIN dl.match m ON m.round_id=r.id "
         "WHERE r.stage_id=%s ORDER BY r.number, m.id",
         (t.stage,),
     )
     expected_rounds = count if count % 2 else count - 1
     assert len(rows) == count * (count - 1) // 2
-    assert len({tuple(sorted(row[3:])) for row in rows}) == len(rows)
+    assert len({tuple(sorted(row[2:])) for row in rows}) == len(rows)
     assert {row[0] for row in rows} == set(range(1, expected_rounds + 1))
     for number in range(1, expected_rounds + 1):
         fixtures = [row for row in rows if row[0] == number]
-        teams = [team for row in fixtures for team in row[3:]]
+        teams = [team for row in fixtures for team in row[2:]]
         assert len(teams) == len(set(teams)) == count - count % 2
-        opening, closing = fixtures[0][1:3]
-        local = ZoneInfo("America/Los_Angeles")
-        assert opening.astimezone(local).replace(tzinfo=None) == START + timedelta(weeks=number - 1)
-        assert closing.astimezone(local).replace(tzinfo=None) == START + timedelta(weeks=number)
-    # First week crosses the DST fall-back and therefore lasts 169 actual hours.
-    assert rows[0][2].astimezone(UTC) - rows[0][1].astimezone(UTC) == timedelta(hours=169)
+        assert fixtures[0][1] == START + timedelta(weeks=number - 1)
     assert t.read(
-        "SELECT team_id, seed FROM dl.stage_entry WHERE stage_id=%s ORDER BY team_id", (t.stage,)
-    ) == [(team, None) for team in t.teams]
+        "SELECT team_id FROM dl.stage_entry WHERE stage_id=%s ORDER BY team_id", (t.stage,)
+    ) == [(team,) for team in t.teams]
     assert t.matches(t.final_stage) == []
+    assert t.revision() == 0
 
 
-def test_publication_freezes_setup_and_blocks_draft_undo(tournament_database):
+def test_atomic_publication_blocks_draft_undo_and_dates_are_advisory(tournament_database):
     t = Tournament(tournament_database, publish=False)
     with rejected("PT400"):
-        t.call("configure_tournament", p_league=t.league, p_revision=2, p_time_zone="Not/AZone")
+        t.publish(p_first_suggested_date=None)
+    with rejected("PT400"):
+        t.publish(p_final_best_of=4)
     with rejected():
-        t.call("configure_tournament", p_league=t.league, p_revision=None, p_time_zone="UTC")
+        t.publish(p_league_revision=-1)
     with rejected():
-        t.call(
-            "configure_stage",
-            user=t.users[1],
-            p_league=t.league,
-            p_revision=2,
-            p_position=1,
-            p_name="Season",
-            p_format="round_robin",
-            p_best_of=5,
-        )
-    assert t.revision() == 2
-    t.publish()
-    for position, source in [(1, None), (2, t.stage)]:
-        with rejected():
-            t.call(
-                "configure_stage",
-                p_league=t.league,
-                p_revision=t.revision(),
-                p_position=position,
-                p_name="Changed",
-                p_format="round_robin",
-                p_best_of=7,
-                p_source_stage=source,
-                p_qualifier_count=2 if source else None,
-            )
+        t.publish(user=t.users[1])
+    assert t.scalar("SELECT count(*) FROM dl.tournament WHERE league_id=%s", (t.league,)) == 0
+    assert (
+        t.scalar("SELECT count(*) FROM dl.tournament_stage WHERE tournament_id=%s", (t.league,))
+        == 0
+    )
+    t.publish(p_season_best_of=5, p_final_best_of=7)
+    assert t.read(
+        "SELECT best_of FROM dl.tournament_stage WHERE tournament_id=%s ORDER BY position",
+        (t.league,),
+    ) == [(5,), (7,)]
     league_revision = t.scalar("SELECT revision FROM dl.league WHERE id=%s", (t.league,))
     with rejected():
         t.call("draft_action", p_league=t.league, p_revision=league_revision, p_kind="undo")
     with rejected():
         t.publish()
-    round_id = t.scalar("SELECT id FROM dl.tournament_round WHERE stage_id=%s LIMIT 1", (t.stage,))
     before = t.matches()
+    match, team_a, team_b = before[0]
+    round_id = t.scalar("SELECT round_id FROM dl.match WHERE id=%s", (match,))
     revision = t.revision()
     t.call(
-        "set_round_window",
+        "set_round_suggested_date",
         p_round=round_id,
         p_revision=revision,
-        p_opens_at=OPENS,
-        p_closes_at=CLOSES,
+        p_suggested_start_date=date(2099, 1, 1),
     )
     with rejected():
         t.call(
-            "set_round_window",
+            "set_round_suggested_date",
             p_round=round_id,
             p_revision=revision,
-            p_opens_at=OPENS,
-            p_closes_at=CLOSES,
+            p_suggested_start_date=None,
         )
+    # Reporting before the suggested week is allowed.
+    t.report(match, t.managers[team_a], a=3, b=1)
+    t.call(
+        "set_round_suggested_date",
+        p_round=round_id,
+        p_revision=t.revision(),
+        p_suggested_start_date=date(2000, 1, 1),
+    )
+    # Reporting after the suggested week is allowed too, without moving the match.
+    t.report(match, t.managers[team_b], a=3, b=1)
     assert t.matches() == before
+    assert t.scalar("SELECT current_decision_id FROM dl.match WHERE id=%s", (match,)) is not None
+    t.call(
+        "set_round_suggested_date",
+        p_round=round_id,
+        p_revision=t.revision(),
+        p_suggested_start_date=None,
+    )
+    assert (
+        t.scalar("SELECT suggested_start_date FROM dl.tournament_round WHERE id=%s", (round_id,))
+        is None
+    )
 
 
 @pytest.mark.parametrize("a,b", [(0, 0), (1, 0), (2, 2), (3, 0), (-1, 2)])
@@ -420,10 +399,17 @@ def test_withdrawal_preserves_evidence_and_removes_all_source_fixtures(tournamen
     )
     assert dict(
         t.read(
-            "SELECT match_id, cancelled FROM dl.match_disposition WHERE match_id=ANY(%s)",
+            "SELECT d.match_id, m.current_decision_id IS NULL "
+            "AND m.team_a_submission_id IS NULL AND m.team_b_submission_id IS NULL "
+            "FROM dl.match_disposition d JOIN dl.match m ON m.id=d.match_id "
+            "WHERE d.match_id=ANY(%s)",
             ([row[0] for row in affected],),
         )
     ) == {official[0]: False, reported[0]: False, untouched[0]: True}
+    assert t.read(
+        "SELECT DISTINCT withdrawal_team_id FROM dl.match_disposition WHERE match_id=ANY(%s)",
+        ([row[0] for row in affected],),
+    ) == [(withdrawn,)]
     assert (
         t.scalar(
             "SELECT counts_in_standings FROM dl.match_official_result WHERE match_id=%s",
@@ -472,8 +458,7 @@ def test_tiebreak_completion_certified_choices_and_frozen_finalists(tournament_d
             p_stage=t.stage,
             p_revision=t.revision(),
             p_teams=teams,
-            p_opens_at=OPENS,
-            p_closes_at=CLOSES,
+            p_suggested_start_date=OPENS.date(),
             p_reason="Commissioner-certified qualification tie",
         )
 
@@ -507,17 +492,23 @@ def test_tiebreak_completion_certified_choices_and_frozen_finalists(tournament_d
     chosen = t.teams[-2:][::-1]
     final = t.final(chosen)
     assert t.read(
-        "SELECT team_id, final_place FROM dl.stage_entry "
-        "WHERE stage_id=%s AND final_place IS NOT NULL ORDER BY final_place",
-        (t.stage,),
-    ) == list(zip(chosen, [1, 2], strict=True))
-    assert t.read(
-        "SELECT team_id, seed, final_place FROM dl.stage_entry WHERE stage_id=%s ORDER BY seed",
+        "SELECT team_id FROM dl.stage_entry WHERE stage_id=%s ORDER BY team_id",
         (t.final_stage,),
-    ) == [
-        (chosen[0], 1, None),
-        (chosen[1], 2, None),
-    ]
+    ) == [(team,) for team in sorted(chosen)]
+    assert t.matches(t.final_stage) == [(final, *sorted(chosen))]
+    assert (
+        t.scalar(
+            "SELECT qualification_finalized_at FROM dl.tournament_stage WHERE id=%s", (t.stage,)
+        )
+        is not None
+    )
+    assert (
+        t.scalar(
+            "SELECT suggested_start_date FROM dl.tournament_round WHERE stage_id=%s",
+            (t.final_stage,),
+        )
+        is None
+    )
     prior = t.matches(t.final_stage)
     with rejected():
         t.final()
@@ -539,7 +530,7 @@ def test_tiebreak_completion_certified_choices_and_frozen_finalists(tournament_d
     t.record(final, a=3, b=1)
 
 
-def test_finalist_withdrawal_awards_forfeit_without_reseeding(tournament_database):
+def test_finalist_withdrawals_leave_final_unresolved_without_reseeding(tournament_database):
     t = Tournament(tournament_database)
     t.complete()
     final = t.final()
@@ -560,9 +551,14 @@ def test_finalist_withdrawal_awards_forfeit_without_reseeding(tournament_databas
         p_reason="Finalist unavailable",
     )
     decision = t.scalar("SELECT current_decision_id FROM dl.match WHERE id=%s", (final,))
-    assert t.read(
-        "SELECT outcome_kind, winner_side FROM dl.match_official_result WHERE match_id=%s", (final,)
-    ) == [("forfeit", "b")]
+    assert (
+        t.read(
+            "SELECT outcome_kind, winner_side FROM dl.match_official_result WHERE match_id=%s",
+            (final,),
+        )
+        == []
+    )
+    assert decision is None
     assert t.read(
         "SELECT team_a_submission_id, team_b_submission_id FROM dl.match WHERE id=%s", (final,)
     ) == [(first, second)]
@@ -584,6 +580,19 @@ def test_finalist_withdrawal_awards_forfeit_without_reseeding(tournament_databas
     )
     assert t.scalar("SELECT current_decision_id FROM dl.match WHERE id=%s", (final,)) == decision
     assert t.matches(t.final_stage) == [(final, a, b)]
+    assert t.scalar("SELECT count(*) FROM dl.match_disposition WHERE match_id=%s", (final,)) == 0
+    # A commissioner may still explicitly record a result; withdrawal did not invent one.
+    t.call(
+        "record_result",
+        p_match=final,
+        p_revision=t.match_revision(final),
+        p_reason="Explicit commissioner award",
+        p_outcome_kind="forfeit",
+        p_awarded_winner_side="b",
+    )
+    assert t.read(
+        "SELECT outcome_kind, winner_side FROM dl.match_official_result WHERE match_id=%s", (final,)
+    ) == [("forfeit", "b")]
 
 
 def test_availability_owner_revision_fractional_offset_and_dst_copy(tournament_database):
@@ -678,7 +687,7 @@ def test_vod_is_separate_from_competitive_results(tournament_database):
 def test_rpc_authentication_scope_and_private_helpers(tournament_database):
     t = Tournament(tournament_database)
     match, _, _ = t.matches()[0]
-    with rejected("PT404"):
+    with rejected():
         t.report(match, t.outsider)
     with rejected("PT401"):
         t.report(match, -1)
@@ -696,8 +705,7 @@ def test_rpc_authentication_scope_and_private_helpers(tournament_database):
     helpers = t.read(
         "SELECT p.oid::regprocedure::text, has_function_privilege('dl_api', p.oid, 'EXECUTE') "
         "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
-        "WHERE n.nspname='dl' AND p.proname LIKE 'tournament_%' "
-        "AND p.proname <> 'tournament_draft_undo_allowed'"
+        "WHERE n.nspname='dl' AND p.proname LIKE 'tournament_%'"
     )
     assert helpers and not any(allowed for _, allowed in helpers)
     with psycopg.connect(t.database.gateway) as conn:
@@ -711,6 +719,57 @@ def test_rpc_authentication_scope_and_private_helpers(tournament_database):
         )
         with pytest.raises(psycopg.Error, match="SERIALIZABLE"):
             conn.execute("SELECT dl.set_match_vod(%s, 0, NULL)", (match,))
+
+
+def test_entire_schema_is_public_including_history_and_future_tables(tournament_database):
+    t = Tournament(tournament_database)
+    match, a, _ = t.matches()[0]
+    t.report(match, t.managers[a])
+    t.record(match)
+    t.call(
+        "set_team_availability",
+        p_team=a,
+        user=t.managers[a],
+        p_revision=None,
+        p_time_zone="UTC",
+        p_display_step_minutes=30,
+        p_windows=Jsonb([{"starts_at": OPENS.isoformat(), "ends_at": CLOSES.isoformat()}]),
+    )
+    with psycopg.connect(t.database.admin) as conn:
+        with conn.transaction(force_rollback=True):
+            # No memberships or special grants: this role has only PUBLIC privileges.
+            reader = sql.Identifier("public_reader_" + uuid4().hex)
+            conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(reader))
+            conn.execute("SET LOCAL ROLE dl_owner")
+            future = sql.Identifier("future_" + uuid4().hex)
+            conn.execute(sql.SQL("CREATE TABLE dl.{} (value text)").format(future))
+            conn.execute(sql.SQL("INSERT INTO dl.{} VALUES ('public')").format(future))
+            conn.execute("RESET ROLE")
+            relations = conn.execute(
+                "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname='dl' AND c.relkind IN ('r', 'v') ORDER BY c.relname"
+            ).fetchall()
+            counts = {}
+            for (name,) in relations:
+                query = sql.SQL("SELECT * FROM dl.{}").format(sql.Identifier(name))
+                counts[name] = len(conn.execute(query).fetchall())
+            for role in [reader, sql.Identifier("dl_api")]:
+                conn.execute(sql.SQL("SET LOCAL ROLE {}").format(role))
+                for user in [None, t.outsider]:
+                    conn.execute(
+                        "SELECT set_config('request.jwt.claims', %s, true)",
+                        (json.dumps({"user_id": user}),),
+                    )
+                    for (name,) in relations:
+                        query = sql.SQL("SELECT * FROM dl.{}").format(sql.Identifier(name))
+                        assert len(conn.execute(query).fetchall()) == counts[name], name
+                    assert conn.execute(
+                        "SELECT count(*) FROM dl.result_submission WHERE match_id=%s", (match,)
+                    ).fetchone() == (2,)
+                    assert conn.execute(
+                        "SELECT count(*) FROM dl.match_decision WHERE match_id=%s", (match,)
+                    ).fetchone() == (1,)
+                conn.execute("RESET ROLE")
 
 
 def test_opposing_reports_survive_serializable_retry_with_original_null_tokens(tournament_database):
@@ -748,28 +807,32 @@ def test_draft_undo_and_publication_cannot_both_commit(tournament_database):
             race,
             "publish_tournament",
             p_league=t.league,
-            p_revision=t.revision(),
-            p_starts_at=START,
+            p_league_revision=league_revision,
+            p_first_suggested_date=START,
         )
         undone = pool.submit(
             race, "draft_action", p_league=t.league, p_revision=league_revision, p_kind="undo"
         )
         outcomes = [published.result(timeout=30), undone.result(timeout=30)]
     assert sorted(outcomes) == ["PT409", "committed"]
-    published_at = t.scalar(
-        "SELECT published_at FROM dl.tournament WHERE league_id=%s", (t.league,)
+    published = t.scalar(
+        "SELECT EXISTS (SELECT FROM dl.tournament WHERE league_id=%s)", (t.league,)
     )
     status = t.scalar("SELECT status FROM dl.draft_state WHERE league_id=%s", (t.league,))
-    assert (published_at is not None, status) in {(True, "completed"), (False, "drafting")}
+    assert (published, status) in {(True, "completed"), (False, "drafting")}
 
 
 @pytest.mark.parametrize("resource", ["tournament", "availability"])
-def test_concurrent_first_creation_preserves_expected_absence(tournament_database, resource):
-    t = Tournament(tournament_database, 2, configure=False)
+def test_concurrent_publication_or_first_availability_has_one_winner(tournament_database, resource):
+    t = Tournament(tournament_database, 2, publish=False)
     barrier = Barrier(2)
     if resource == "tournament":
-        name = "configure_tournament"
-        arguments = dict(p_league=t.league, p_revision=None, p_time_zone="UTC")
+        name = "publish_tournament"
+        arguments = dict(
+            p_league=t.league,
+            p_league_revision=t.scalar("SELECT revision FROM dl.league WHERE id=%s", (t.league,)),
+            p_first_suggested_date=START,
+        )
     else:
         name = "set_team_availability"
         arguments = dict(
@@ -827,7 +890,7 @@ def test_invalid_availability_endpoints_roll_back_the_entire_edit(tournament_dat
 
 
 def test_every_writer_notifies_members_only_on_commit_and_noop_is_quiet(tournament_database):
-    t = Tournament(tournament_database, 2, configure=False)
+    t = Tournament(tournament_database, 2, publish=False)
     channels = {f"dl_user_{user}" for user in t.users[:-1]}
     with psycopg.connect(t.database.admin, autocommit=True) as listener:
         for user in t.users:
@@ -841,62 +904,15 @@ def test_every_writer_notifies_members_only_on_commit_and_noop_is_quiet(tourname
             assert list(listener.notifies(timeout=0.05)) == []
             return value
 
-        changed(
-            t.call, "configure_tournament", p_league=t.league, p_revision=None, p_time_zone="UTC"
-        )
-        changed(
-            t.call,
-            "configure_tournament",
-            p_league=t.league,
-            p_revision=0,
-            p_time_zone="America/Los_Angeles",
-        )
-        assert t.revision() == 1
-        t.stage = changed(
-            t.call,
-            "configure_stage",
-            p_league=t.league,
-            p_revision=1,
-            p_position=1,
-            p_name="Season",
-            p_format="round_robin",
-            p_best_of=3,
-        )
-        assert (
-            changed(
-                t.call,
-                "configure_stage",
-                p_league=t.league,
-                p_revision=2,
-                p_position=1,
-                p_name="Renamed season",
-                p_format="round_robin",
-                p_best_of=3,
-            )
-            == t.stage
-        )
-        t.final_stage = changed(
-            t.call,
-            "configure_stage",
-            p_league=t.league,
-            p_revision=3,
-            p_position=2,
-            p_name="Final",
-            p_format="single_elimination",
-            p_best_of=5,
-            p_source_stage=t.stage,
-            p_qualifier_count=2,
-        )
         changed(t.publish)
         match, a, b = t.matches()[0]
         round_id = t.scalar("SELECT round_id FROM dl.match WHERE id=%s", (match,))
         changed(
             t.call,
-            "set_round_window",
+            "set_round_suggested_date",
             p_round=round_id,
             p_revision=t.revision(),
-            p_opens_at=OPENS,
-            p_closes_at=CLOSES,
+            p_suggested_start_date=OPENS.date(),
         )
         changed(
             t.call,
@@ -968,8 +984,7 @@ def test_every_writer_notifies_members_only_on_commit_and_noop_is_quiet(tourname
             p_stage=t.stage,
             p_revision=t.revision(),
             p_teams=t.teams,
-            p_opens_at=OPENS,
-            p_closes_at=CLOSES,
+            p_suggested_start_date=OPENS.date(),
             p_reason="Certified qualification tie",
         )
         extra = t.scalar("SELECT id FROM dl.match WHERE round_id=%s", (round_id,))

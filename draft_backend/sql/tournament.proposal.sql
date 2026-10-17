@@ -13,17 +13,13 @@
 -- Both players report independently; matching current reports become official.
 -- Official corrections are commissioner-only. Withdrawal has fixed consequences;
 -- final publication freezes the two qualifiers, with no replacement finalists.
--- Setup supplies best_of = 3 and 5 respectively; these are configuration values.
+-- Publication defaults to best_of = 3 and 5; callers may choose other odd values.
 -- No manager replacement, individual game records, recurring calendars,
 -- appointment booking, generic metadata, rule-version infrastructure, or new
 -- triggers. Availability is advisory and independent of match/result lifecycle.
 --
--- Permission boundary: all new tables have RLS enabled, with no read policies or
--- API table grants. Views are security-invoker. The companion grants expose only
--- controlled SERIALIZABLE writers and a scoped draft-undo eligibility helper.
--- Participants and commissioner see current participant reports; league members
--- see official results. Independent reporting means independent authorship here,
--- not blind reporting. Detailed read policies still need review.
+-- All tournament data, including reports and decision history, is public.
+-- The companion grants expose controlled SERIALIZABLE writers.
 --
 -- INVARIANT OWNERSHIP
 -- CHECK/UNIQUE/FK constraints below enforce local shapes and selected ownership
@@ -33,16 +29,12 @@
 -- commissioner-certified against announced criteria, not automatically ranked.
 
 -- One-to-one extension of a league, independently revisioned from the draft.
--- time_zone defines calendar/round presentation, not a fixed UTC offset.
--- Writers validate named time zones against PostgreSQL's supported zone names.
+-- Created atomically at publication; no separately configured/unpublished row.
 CREATE TABLE dl.tournament (
     league_id integer PRIMARY KEY REFERENCES dl.league(id),
-    time_zone text NOT NULL CHECK (btrim(time_zone) <> ''),
     revision integer NOT NULL DEFAULT 0 CHECK (revision >= 0),
-    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    published_at timestamptz,
-    published_by integer REFERENCES dl.app_user(id),
-    CHECK ((published_at IS NULL) = (published_by IS NULL))
+    published_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    published_by integer NOT NULL REFERENCES dl.app_user(id)
 );
 
 -- Common typed rules. No rule payload is copied to individual matches.
@@ -51,56 +43,50 @@ CREATE TABLE dl.tournament (
 -- rules, including the final before its entrants have been selected.
 --
 -- A root stage draws from this league's drafted teams. A later stage selects
--- qualifier_count entrants from source_stage_id's certified qualifier places.
--- standings_finalized_at/by on the source stage record final publication: only
--- places 1 and 2 are certified. Final-stage champion follows its official result;
--- there is no separate complete-ranking or final-stage certification operation.
--- The initial publisher accepts only the two-stage pipeline described above;
--- a configurable qualifier_count alone does not implement a larger bracket.
+-- qualifier_count entrants from source_stage_id. Membership in the later stage
+-- is the qualification record; there is no duplicated placing on the source.
+-- qualification_finalized_at/by freeze that selection, not the live standings.
+-- These tables describe stages generally. The current publisher constructs the
+-- round-robin/two-team-final arrangement; it does not accept a stage graph or
+-- consult a supported-format registry. Other generators can be added when needed.
+-- Format is a label supplied by that generator, not a schema-level allowlist.
 CREATE TABLE dl.tournament_stage (
     id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tournament_id integer NOT NULL REFERENCES dl.tournament(league_id),
     position integer NOT NULL CHECK (position > 0),
     name text NOT NULL CHECK (btrim(name) <> ''),
-    format text NOT NULL CHECK (format IN ('round_robin', 'single_elimination')),
+    format text NOT NULL CHECK (btrim(format) <> ''),
     best_of integer NOT NULL CHECK (best_of > 0 AND best_of % 2 = 1),
     wins_required integer GENERATED ALWAYS AS (best_of / 2 + 1) STORED NOT NULL,
     source_stage_id integer REFERENCES dl.tournament_stage(id),
     qualifier_count integer CHECK (qualifier_count > 0),
-    standings_finalized_at timestamptz,
-    standings_finalized_by integer REFERENCES dl.app_user(id),
+    qualification_finalized_at timestamptz,
+    qualification_finalized_by integer REFERENCES dl.app_user(id),
     UNIQUE (tournament_id, position),
     CHECK (source_stage_id IS NULL OR source_stage_id <> id),
     CHECK ((source_stage_id IS NULL) = (qualifier_count IS NULL)),
-    CHECK ((standings_finalized_at IS NULL) = (standings_finalized_by IS NULL))
+    CHECK ((qualification_finalized_at IS NULL) = (qualification_finalized_by IS NULL))
 );
 
--- Membership/seeding is an independent fact, not inferred from current results.
--- final_place certifies only the source stage's two qualifiers (1 and 2).
--- Nonqualifiers remain NULL. It freezes when the final is published, even if
--- later corrections change live records. Final-stage entries use seeds 1 and 2;
--- their final_place remains NULL because the final result identifies the winner.
--- Live wins/losses remain derived from current official results.
--- Once published, the final retains exactly its two original entries and fixture.
--- A finalist withdrawal causes a forfeit, never a replacement admission.
+-- Membership is an independent fact, not inferred from current results. The
+-- final's two entries are the sole qualification record, with no first/second
+-- ordering or seeding. A/B orientation has no competitive meaning. Corrections
+-- and withdrawals never replace the finalists. Live records remain derived.
 CREATE TABLE dl.stage_entry (
     stage_id integer NOT NULL REFERENCES dl.tournament_stage(id),
     team_id integer NOT NULL REFERENCES dl.team(id),
-    seed integer CHECK (seed > 0),
-    final_place integer CHECK (final_place IN (1, 2)),
     entered_by integer NOT NULL REFERENCES dl.app_user(id),
     entered_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    PRIMARY KEY (stage_id, team_id),
-    UNIQUE (stage_id, seed),
-    UNIQUE (stage_id, final_place)
+    PRIMARY KEY (stage_id, team_id)
 );
 CREATE INDEX stage_entry_team_idx ON dl.stage_entry (team_id);
 
--- A logical round has a dated playing window; it is not intrinsically a week.
--- The initial schedule allocates one regular-season fixture per team per week
--- (or a bye), but later makeups retain the original round assignment.
+-- A suggested calendar date opens the availability widget to that week. It is
+-- optional, advisory, and never gates reporting or progression. The publisher
+-- suggests dates seven days apart. Late matches keep their original round/date;
+-- players may browse availability in any week without an extension or reschedule.
 -- Normal rounds contribute to their stage's record. A tiebreak round is one
--- qualification attempt, with every selected pair playing once in its window;
+-- qualification attempt, with every selected pair playing once;
 -- a team may therefore play multiple fixtures in that round. Another unresolved
 -- tie creates another round, never an overwrite or a custom SQL intervention.
 -- Tiebreaks reuse the stage's entrants and best_of. Their results are read per
@@ -113,11 +99,9 @@ CREATE TABLE dl.tournament_round (
     tiebreak_reason text CHECK (btrim(tiebreak_reason) <> ''),
     created_by integer NOT NULL REFERENCES dl.app_user(id),
     created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    opens_at timestamptz NOT NULL CHECK (isfinite(opens_at)),
-    closes_at timestamptz NOT NULL CHECK (isfinite(closes_at)),
+    suggested_start_date date CHECK (isfinite(suggested_start_date)),
     UNIQUE (stage_id, number),
-    CHECK ((purpose = 'tiebreak') = (tiebreak_reason IS NOT NULL)),
-    CHECK (opens_at < closes_at)
+    CHECK ((purpose = 'tiebreak') = (tiebreak_reason IS NOT NULL))
 );
 
 -- Opponent columns guarantee exactly two distinct teams on every row.
@@ -145,7 +129,7 @@ CREATE INDEX match_round_idx ON dl.match (round_id);
 CREATE INDEX match_team_a_idx ON dl.match (team_a_id);
 CREATE INDEX match_team_b_idx ON dl.match (team_b_id);
 
--- Managers are fixed, so a team is an unambiguous availability owner. Its user
+-- Availability belongs to a team. Managers are fixed after draft start. Its user
 -- and league follow through team; no duplicated user_id/league_id is needed.
 -- This header gives a whole availability edit its own revision, including edits
 -- that remove the final window. time_zone is the owner's input/display zone.
@@ -264,34 +248,27 @@ ALTER TABLE dl.match ADD CONSTRAINT match_current_decision_fk
 -- Mismatching reports need review only while the fixture is active and has no
 -- official decision. No flag table, player appeal queue or review watermark.
 
--- A fixed withdrawal consequence, immutable through the API. No row means the
--- fixture is active and its official result counts. There are no standalone
--- cancel/exclude/restore/reopen controls. Withdrawal excludes fixtures with an
--- official result or either participant report, and cancels fixtures with none.
--- Excluding unresolved reports preserves evidence without claiming it was unplayed.
--- The presence of this row removes the fixture from its round's record; there
--- is no independently editable inclusion flag. The official-result view derives
--- counts_in_standings from row absence. Round purpose remains unchanged.
-CREATE TABLE dl.match_disposition (
-    match_id integer PRIMARY KEY REFERENCES dl.match(id),
-    cancelled boolean NOT NULL,
-    decided_by integer NOT NULL REFERENCES dl.app_user(id),
-    decided_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    reason text NOT NULL CHECK (btrim(reason) <> '')
-);
-
--- One terminal withdrawal event for this team's tournament. Its tournament is
--- reached through team.league_id; writers require it to exist. No row means
--- eligible. The application offers no reinstatement or independent status edit.
--- Before final publication, the SAME operation applies the fixed dispositions
--- to all this team's first-stage fixtures, including every tiebreak attempt.
--- After final publication, source-stage results/qualification remain unchanged;
--- a finalist withdrawal awards the other finalist a forfeit on the same fixture.
+-- One terminal withdrawal event. Its tournament follows team.league_id.
+-- Before final publication, withdrawal removes this team's source-stage fixtures.
+-- After final publication it only records withdrawal: no automatic forfeit,
+-- replacement finalist, or closure. An unplayable final may remain unresolved.
 CREATE TABLE dl.tournament_withdrawal (
     team_id integer PRIMARY KEY REFERENCES dl.team(id),
     decided_by integer NOT NULL REFERENCES dl.app_user(id),
     decided_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     reason text NOT NULL CHECK (btrim(reason) <> '')
+);
+
+-- Withdrawal is the only fixture-removal operation. Record its cause once;
+-- attribution/reason/time come from the referenced withdrawal. If both opponents
+-- withdraw, the first disposition remains. No independent cancel/restore control.
+-- Row absence means the fixture counts. For display, a removed fixture with no
+-- participant reports or official decision is a cancellation; otherwise it is
+-- excluded evidence. Those pointers cannot become populated after removal, so
+-- this distinction needs no stored flag. Existing official results can be corrected.
+CREATE TABLE dl.match_disposition (
+    match_id integer PRIMARY KEY REFERENCES dl.match(id),
+    withdrawal_team_id integer NOT NULL REFERENCES dl.tournament_withdrawal(team_id)
 );
 
 -- Small read projections, not a final HTTP/API surface.
@@ -305,7 +282,6 @@ SELECT m.id AS match_id, d.id AS decision_id, d.authority, d.decided_by,
        d.decided_at, d.reason,
        s.id AS submission_id, s.outcome_kind,
        s.team_a_game_wins, s.team_b_game_wins, s.winner_side,
-       coalesce(a.cancelled, false) AS cancelled,
        (a.match_id IS NULL) AS counts_in_standings
 FROM dl.match m
 JOIN dl.match_decision d ON d.id = m.current_decision_id
@@ -328,7 +304,7 @@ WITH counted AS (
     JOIN dl.match m ON m.id = o.match_id
     JOIN dl.tournament_round r ON r.id = m.round_id
     JOIN dl.match_participant p ON p.match_id = m.id
-    WHERE r.purpose = 'normal' AND o.counts_in_standings AND NOT o.cancelled
+    WHERE r.purpose = 'normal' AND o.counts_in_standings
 )
 SELECT e.stage_id, e.team_id,
        (w.team_id IS NOT NULL) AS withdrawn,
@@ -362,214 +338,77 @@ FROM dl.tournament_round r
 JOIN dl.match m ON m.round_id = r.id
 JOIN dl.match_participant p ON p.match_id = m.id
 LEFT JOIN dl.match_official_result o
-    ON o.match_id = m.id AND o.counts_in_standings AND NOT o.cancelled
+    ON o.match_id = m.id AND o.counts_in_standings
 LEFT JOIN dl.tournament_withdrawal w ON w.team_id = p.team_id
 GROUP BY r.id, r.stage_id, r.purpose, p.team_id, w.team_id;
 
-ALTER TABLE dl.tournament ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.tournament_stage ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.stage_entry ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.tournament_round ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.match ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.team_availability ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.availability_window ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.result_submission ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.match_decision ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.match_disposition ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dl.tournament_withdrawal ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON TABLE
-    dl.tournament, dl.tournament_stage, dl.stage_entry, dl.tournament_round,
-    dl.match, dl.team_availability, dl.availability_window,
-    dl.result_submission, dl.match_decision,
-    dl.match_disposition, dl.tournament_withdrawal,
-    dl.match_participant,
-    dl.match_official_result, dl.stage_record, dl.round_record
-FROM PUBLIC;
-
--- CONTROLLED-WRITE CONTRACTS (implemented by the companion proposal SQL files)
+-- CONTROLLED-WRITE CONTRACTS (companion proposal SQL files)
 --
--- Common transaction pattern:
--- * Keep require_writer(), SERIALIZABLE transactions and whole-call retries.
---   Authenticate/authorize, check the operation's freshness token, advance the
---   relevant revisions and apply the complete operation atomically. All validation
---   reads belong inside the retried transaction. Preserve the client's original
---   expected revision or own-report ID on retry; stale edits/previews return PT409.
--- * Expected revisions protect decisions made from an earlier screen. SERIALIZABLE
---   protects concurrent database operations. Neither replaces business checks.
---   Use ordinary revision UPDATEs, without an additional SELECT FOR UPDATE or
---   advisory-lock protocol. Updates already acquire the necessary row locks.
--- * Tournament configuration, withdrawal, tiebreak creation and final publication
---   check the expected tournament revision. Commissioner result operations check
---   the expected match revision. Player submissions instead check their own current
---   report ID as described below; an opponent's report is not a stale player edit.
---   All result operations bump both tournament and match revisions, so competitive
---   changes invalidate commissioner previews even without a player revision check.
--- * Update tournament before matches (matches in ascending id order for a batch).
---   Availability updates only its own header/revision. VOD-only edits update only
---   the match revision. Keep a consistent UPDATE order to limit deadlocks.
---   The shared tournament UPDATE still causes contention; accept that simple
---   freshness mechanism at this scale rather than adding more version machinery.
--- * Allocate a new stage round number after the tournament revision UPDATE.
---   Keep UNIQUE(stage_id, number). There are no report/status/disposition counters;
---   pointers select reports/decisions, and withdrawals/dispositions are single
---   immutable events. Do not blanket-retry unique-constraint violations.
--- * Resolve league/manager scope through joins. Validate stage entries, opponents,
---   source stages and actors against their competition. Authenticate all authors.
--- * Submissions, decisions, dispositions and withdrawals are append-only
---   through the API. Keep the FK/CHECK/UNIQUE constraints as local integrity rules.
--- * Emit existing account-scoped wake-ups on successful mutations. Durable rows,
---   not NOTIFY deliveries, drive the UI. No custom SQL is an operational workflow.
+-- All writes authenticate, authorize, and run in SERIALIZABLE transactions.
+-- Retry complete transactions on 40001/40P01 with original arguments; PT409
+-- requires a fresh view. Read current evidence inside the retried transaction.
+-- No extra advisory-lock or SELECT FOR UPDATE protocol is required.
 --
--- configure_tournament / configure_stage / publish_tournament:
--- * Check/bump tournament revision for configuration and publication. Freeze
---   stage rules, first-stage membership/seeds and existing fixture assignments.
---   Only publish_final admits the final's two entries and creates its normal
---   fixture after publication.
--- * Require a completed draft. Add a publication guard to existing draft undo,
---   and read draft completion during publication in the same SERIALIZABLE call.
---   Both operations must be correct in either serial order; a lock cannot supply
---   the missing rule. If publication also updates league.revision, update league
---   before tournament consistently. Do not remove/reorder drafted teams.
--- * Validate named time zones and the supported two-stage pipeline: round_robin
---   followed by single_elimination with two qualifiers from that round robin;
---   both stages belong to this tournament, with source position strictly earlier.
---   Freeze format/best_of/source/qualifier settings for BOTH stages at publication.
--- * Require at least two drafted entrants. Generate complete first-stage entries
---   and a single round robin: every unordered pair once across NORMAL rounds,
---   each team at most once per normal round. Even N has N-1 rounds; odd N has N
---   rounds with one bye per team. No persisted bye fixture or automatic bye win.
--- * Use weekly local windows in the tournament zone, respecting DST. Publish only
---   normal first-stage rounds here; final entries/fixture await publish_final.
+-- publish_tournament checks the LEAGUE revision and completed draft, then creates
+-- the tournament, both stages, source entries and weekly suggested fixture dates
+-- together. Tournament revision starts at zero. No configuration calls, pending
+-- tournament state, arbitrary stage graph, or supported-format metadata table.
+-- Draft undo is blocked once a tournament exists. SERIALIZABLE protects the
+-- publication/undo race. Stage rules and fixture assignments stay fixed afterward.
 --
--- availability / deadlines / VOD:
--- * Availability is advisory. Owner edits check/bump team_availability.revision;
---   team.manager is the owner. Accept finite actual instants/ranges, and validate
---   the named zone. The display step controls painting, not UTC alignment.
--- * Changing zone preserves stored instants; copying a week preserves local wall
---   times. League members read availability. Intersect each owner's merged ranges
---   in the requested display window; no booking, acceptance or result dependency.
--- * The commissioner can change a round's playing window using the tournament
---   revision. Extensions apply to that whole round; no per-match deadline override.
---   Makeups retain their original round assignment. Published stage/round/purpose
---   and opponent assignments never change. No replacement-fixture operation.
--- * VOD editing is separate from reporting/agreement; validate the URL in its
---   authorized writer. Spectator observations cannot change competitive results.
+-- Other tournament-wide operations check/bump tournament revision. Result writes
+-- bump tournament then match revisions; batch match updates use ascending IDs.
+-- Commissioner results check match revision. Player reports instead check their
+-- OWN current submission ID, so an opponent's first report is not a stale edit.
+-- Availability uses its own header revision; VOD-only edits use match revision.
+-- Successful changes notify league accounts after commit through existing helpers.
+-- Notifications are wake-ups; current database state drives the interface.
 --
--- submit_result (both participants, including replacement of their own report):
--- * Require a published, active fixture with no official decision. An active
---   fixture has no match_disposition; removed fixtures are read-only to players.
---   Resolve the authenticated player's side through the match's team managers.
---   Availability has no bearing on reporting. There is no first-reporter role.
--- * Accept expected_previous_submission_id for that player's OWN current pointer,
---   NULL for their first report. Require a NULL-safe match to the stored pointer;
---   a stale same-player edit fails. Do not require expected match/tournament revision
---   for this operation, and never compare freshness against the opponent's pointer.
--- * Advance tournament then match revision before inserting the report; on a
---   serialization failure retry the whole call with the same own-report ID and
---   payload. Re-read and revalidate current reports, disposition and official status.
---   Concurrent first reports can both succeed after retry: the opponent's new report
---   leaves the caller's own expected NULL valid. A same-side change or a newly
---   official/removed fixture still rejects a stale edit. Bounded retries can exhaust.
--- * Append an immutable submission and change only the caller's side pointer.
---   Preserve the other side's pointer and all historical reports. Either player
---   may correct their own report while unresolved, including during disagreement.
--- * Validate a played score against the stage: one side equals wins_required and
---   the other is below it. Forfeits name a winner with NULL game counts. Resolve
---   stage rules through joins; do not duplicate best_of on every submission.
--- * Compare the two CURRENT reports after each submission. Validate the pointers
---   refer to this match and reporting_side a/b respectively; commissioner-authored
---   reports cannot serve as participant votes. Compare outcome_kind, canonical A/B
---   game-win counts and awarded_winner_side with NULL-safe equality; VOD is irrelevant.
---   Matching valid reports create an agreement decision citing both exact IDs and
---   set current_decision_id in the same transaction. No separate confirmation call.
--- * One missing report means awaiting a report; two unequal reports mean disagreement
---   in the commissioner queue. Derive this state only for active fixtures with no
---   official decision. No stored dispute flag, timer victory or player handoff state.
---   A player's correction can produce agreement without commissioner intervention.
--- * Once official, close participant submissions and freeze both participant
---   pointers. Only the commissioner can correct the official result. Different
---   retained reports after adjudication do not reopen a dispute or an appeal queue.
--- * Participants and commissioner can read current participant reports. This is
---   independent authorship, not a blind-submission policy. Controlled writers must
---   see both reports; filtered evidence must not appear missing or create agreement.
---   Official-result payloads are visible to league members; raw history stays scoped.
+-- suggested_start_date is a calendar label, never an opening time or deadline.
+-- An edit changes that hint only. Late matches stay in their original round;
+-- later normal rounds can proceed while earlier matches remain unresolved.
+-- Finals/tiebreaks can be published without a suggested date. Qualification still
+-- waits for required results, independent of the suggested calendar dates.
 --
--- record_result / correct_result (commissioner):
--- * With an expected match revision and reason, resolve an active fixture by
---   selecting either current participant report or inserting a commissioner submission
---   (reporting_side NULL). Insert a commissioner decision, move the official
---   pointer atomically, and retain/freeze the participant pointers as evidence.
--- * Correct an official result by appending a commissioner submission and decision
---   with a reason. Keep all previous reports/decisions and the same fixture identity.
---   An excluded historical official result may be corrected, but stays excluded.
---   Do not create a first result for a removed fixture or reopen it to participants.
--- * A request that results in no correction leaves the database unchanged. This
---   version does not record informal post-result requests or their rejection.
--- * Corrections update live records but never change certified qualifiers, final
---   entrants or existing tiebreak opponents. No rollback/reseeding workflow.
+-- Availability is a lightweight aid owned by team.manager_user_id. Store actual
+-- instants, accept overlapping ranges as their union, and permit [] to clear them.
+-- Changing the display zone preserves instants; copying a week preserves local
+-- wall times. DST handling belongs to availability, not tournament scheduling.
+-- There is no booking/acceptance state, phase gate, or added setup recovery workflow.
 --
--- withdraw_team (commissioner, one complete operation):
--- * Require a published tournament, expected tournament revision, a member team
---   with no withdrawal row, and a reason. Withdrawal is terminal for this tournament;
---   no reinstatement action. Preserve team/draft/entry history and manager read access.
--- * Before final publication, insert the withdrawal and remove ALL this team's
---   first-stage fixtures, across normal and tiebreak rounds. For each fixture with
---   an official result or either participant report, insert an exclusion (cancelled=false).
---   With none, insert a cancellation (cancelled=true). Either row removes the
---   fixture from standings; inclusion is derived rather than separately editable.
---   Preserve an existing disposition if the other team already withdrew. Bump
---   affected match revisions. These consequences are automatic, never checkboxes.
--- * Removed fixtures retain submissions but require no further reports or
---   commissioner resolution. Their dispositions satisfy completion checks. No new
---   tiebreak attempt can admit a withdrawn team. Standings derive from the remaining
---   counted fixtures, with no forged scores or cached-total adjustments.
--- * Once the final is published, source-stage results and qualification stay as
---   recorded. If the withdrawing team is a finalist and the final has no official
---   result, insert a commissioner forfeit awarding the other finalist, with the
---   withdrawal reason, retain both participant pointers, and keep both entries/fixture.
---   The official decision closes any unresolved disagreement. No substitute team.
--- * An already official final is unchanged by a later withdrawal. A correction to
---   its factual result uses correct_result, never reopens finalist selection.
+-- submit_result appends immutable evidence and moves only the caller's pointer.
+-- Scores use fixture A/B orientation and must finish the stage's best-of series.
+-- Forfeits have an awarded side and no invented game counts. Matching current
+-- reports from opposite participants produce an agreement decision atomically.
+-- Missing/different reports mean pending/disagreement only while the fixture is
+-- active and unofficial. Official results freeze player pointers. All data is public.
 --
--- create_tiebreak_round / repeat_tiebreak (same commissioner operation):
--- * Select at least two still-tied eligible entrants, a playing window and a reason;
---   preview all pairs. Check expected tournament revision, publication, round_robin
---   format, and that source-stage qualification has not been finalized.
--- * Before EVERY attempt, require all normal fixtures and earlier attempts to have
---   official decisions or withdrawal dispositions. Active unresolved reports
---   must be resolved first. Read current results/eligibility in the same transaction.
--- * After advancing tournament revision, allocate the next round number and insert
---   one tiebreak round plus every unordered selected pair exactly once. Reuse the
---   stage best_of and ordinary submission/agreement/commissioner result writers.
---   Multiple fixtures for a team in this round are intentional; prior encounters
---   are allowed. Do not add tiebreak wins to normal-season totals.
--- * Show normal stage_record and each attempt's round_record separately. Apply the
---   announced criteria; if a cycle survives, repeat with the still-tied subset.
---   No fixed attempt limit, automatic timer winner, or summing different attempts.
--- * Later corrections leave earlier rounds intact. Reassess qualification from
---   corrected evidence; if needed create a fresh attempt. There is no separate
---   cancel/exclude/replace-tiebreak workflow. Withdrawal uses its fixed operation.
--- * The exact secondary criteria, evidence used and forfeit treatment must be
---   announced before launch. Commissioner operation avoids a configurable ranking
---   engine, but does not substitute for a clear competition rule.
---   The writer accepts the commissioner's selection as certification that these
---   entrants remain tied; it validates eligibility/completion, not a ranking formula.
+-- record_result resolves an active fixture by selecting a current player report
+-- or creating commissioner evidence. correct_result appends a new official
+-- decision with a reason; an unchanged payload is a no-op. Corrections preserve
+-- fixture identity and all history, and never change frozen qualification.
+-- Removed fixtures cannot gain new reports or an initial result; corrections
+-- to an existing official result remain possible but never restore its inclusion.
+-- VOD editing is independent of reporting and competitive results.
 --
--- publish_final (commissioner, one complete operation):
--- * Check expected tournament revision and an unpublished final. Require every
---   first-stage fixture, including all tiebreaks, to be official or removed by
---   withdrawal. Resolve all active unresolved reports and qualification ties.
--- * Certify ONLY two eligible qualifiers as final_place 1 and 2 in the source
---   stage; every other entry stays NULL. Do not resolve unrelated lower-place ties.
---   The ordered qualifier argument is the commissioner's certification that the
---   announced criteria were applied and all ties affecting these places resolved.
---   Set source standings_finalized_at/by, insert exactly two final entries with
---   seeds 1/2, and create the final's normal round and one fixture atomically.
--- * That commit is final publication and freezes selection. No separate provisional
---   certification state, started-final marker, full ranking, or replacement action.
---   Final-stage final_place/finalization metadata stay NULL; its official result
---   identifies the champion. Historical score corrections cannot promote a third team.
--- * If fewer than two eligible qualifiers remain, reject publication; never create
---   an invented opponent or infer a champion. A no-champion closure policy remains
---   a launch decision outside this two-entrant final operation.
+-- withdraw_team records a terminal withdrawal. Before qualification is finalized,
+-- it links all affected source-stage fixtures (normal and tiebreak) to that event,
+-- preserving an existing disposition from an earlier opponent withdrawal. Removed
+-- fixtures no longer count and need no resolution. After final publication, leave
+-- source results and the final untouched. No automatic forfeit or replacement.
+-- Normal result operations remain available for the final if a result is supplied.
+--
+-- create_tiebreak_round requires earlier source fixtures to be official or removed,
+-- and at least two distinct eligible entrants. It adds every selected pair once.
+-- The commissioner certifies a tie affecting WHO qualifies; SQL does not rank.
+-- Repeated attempts remain separate round records, never extra season wins.
+--
+-- publish_final requires all source fixtures resolved/removed and two distinct
+-- eligible teams. Their input order is irrelevant: canonical team-ID order assigns
+-- A/B without advantage. Insert final entries, round and fixture, and mark source
+-- qualification_finalized_at/by atomically. Final membership is the sole qualifier
+-- record; there are no places/seeds and no need to break a tie between two teams
+-- that both advance. Later corrections can change live records, not that selection.
+-- An official final result identifies the champion. If a final cannot be created
+-- or played, the tournament may remain incomplete indefinitely; no closure action.

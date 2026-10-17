@@ -1,4 +1,4 @@
-"""Account wake-ups are determined transactionally by SQL, including lost access."""
+"""Account wake-ups are determined transactionally by SQL, including management changes."""
 
 import json
 from contextlib import contextmanager
@@ -76,7 +76,7 @@ def test_sql_rpc_membership_and_draft_changes_notify_exact_accounts(notification
         "SELECT dl.update_team(%s, 3, %s, 'Replacement', %s, 100)",
         (league, first, replacement),
     )
-    # Both sides of reassignment refresh, although the old manager has lost access.
+    # Both sides of reassignment refresh, after the old manager stops managing the team.
     assert_wakes(state, commissioner, manager, other, replacement)
     call(state, "SELECT dl.remove_team(%s, 4, %s)", (league, first))
     assert_wakes(state, commissioner, other, replacement)

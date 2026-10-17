@@ -1,13 +1,11 @@
 -- REVIEW ONLY: run as dl_owner in the proposal installation transaction, after
 -- tournament.proposal.sql, tournament.mutators.proposal.sql,
 -- tournament.results.proposal.sql and tournament.lifecycle.proposal.sql.
--- Controlled SQL calls only: no table DML, sequences, private helpers or raw
--- evidence reads. Read policies/HTTP routes remain a separate implementation.
+-- All tables and views inherit public SELECT from the schema owner defaults.
+-- Only controlled calls receive write authority; HTTP routes are separate work.
 GRANT EXECUTE ON FUNCTION
-    dl.configure_tournament(integer, integer, text),
-    dl.configure_stage(integer, integer, integer, text, text, integer, integer, integer),
-    dl.publish_tournament(integer, integer, timestamp without time zone),
-    dl.set_round_window(integer, integer, timestamptz, timestamptz),
+    dl.publish_tournament(integer, integer, date, integer, integer),
+    dl.set_round_suggested_date(integer, integer, date),
     dl.set_team_availability(integer, integer, text, integer, jsonb),
     dl.copy_team_availability_week(integer, integer, date, date),
     dl.submit_result(integer, integer, text, integer, integer, text),
@@ -15,7 +13,6 @@ GRANT EXECUTE ON FUNCTION
     dl.correct_result(integer, integer, text, text, integer, integer, text),
     dl.set_match_vod(integer, integer, text),
     dl.withdraw_team(integer, integer, integer, text),
-    dl.create_tiebreak_round(integer, integer, integer[], timestamptz, timestamptz, text),
-    dl.publish_final(integer, integer, integer[], timestamptz, timestamptz),
-    dl.tournament_draft_undo_allowed(integer)
+    dl.create_tiebreak_round(integer, integer, integer[], text, date),
+    dl.publish_final(integer, integer, integer[], date)
 TO dl_api;
