@@ -2,14 +2,16 @@ import asyncio
 import re
 import secrets
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
 
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from psycopg.types.json import Jsonb
 from psycopg_pool import PoolTimeout
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field
 from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import install_auth, optional_user, require_user, session_valid
@@ -26,6 +28,28 @@ Points = Annotated[int, Field(strict=True, ge=0, le=2147483647)]
 Name = Annotated[str, Field(min_length=1)]
 User = Annotated[int, Depends(require_user)]
 Reader = Annotated[int | None, Depends(optional_user)]
+
+
+def calendar_date(value):
+    # Pydantic otherwise also accepts epoch numbers and midnight timestamps.
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        raise ValueError("Use a calendar date in YYYY-MM-DD format")
+    return date.fromisoformat(value)
+
+
+def offset_timestamp(value):
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt ][0-9]{2}:[0-9]{2}"
+        r"(?::[0-9]{2}(?:\.[0-9]+)?)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})", value,
+    ):
+        raise ValueError("Use a timestamp with an explicit Z or +/-HH:MM offset")
+    return value
+
+
+CalendarDate = Annotated[date, BeforeValidator(calendar_date)]
+OffsetTimestamp = Annotated[AwareDatetime, BeforeValidator(offset_timestamp)]
+OutcomeKind = Literal["played", "forfeit"]
+Side = Literal["a", "b"]
 
 
 class Input(BaseModel):
@@ -73,6 +97,94 @@ class DraftAction(LeagueRevision):
     p_kind: Literal["start", "pick", "undo"]
     p_draftable: ID | None = None
     p_charge_points: Annotated[bool, Field(strict=True)] = True
+
+
+class PublishTournament(Input):
+    p_league: ID
+    p_league_revision: Revision
+    p_first_suggested_date: CalendarDate
+    p_season_best_of: ID = 3
+    p_final_best_of: ID = 5
+
+
+class SetRoundSuggestedDate(Input):
+    p_round: ID
+    p_revision: Revision
+    p_suggested_start_date: CalendarDate | None
+
+
+class AvailabilityWindow(Input):
+    starts_at: OffsetTimestamp
+    ends_at: OffsetTimestamp
+
+
+class SetTeamAvailability(Input):
+    p_team: ID
+    p_revision: Revision | None
+    p_time_zone: Name
+    p_display_step_minutes: ID
+    p_windows: list[AvailabilityWindow]
+
+
+class CopyTeamAvailabilityWeek(Input):
+    p_team: ID
+    p_revision: Revision
+    p_source: CalendarDate
+    p_target: CalendarDate
+
+
+class SubmitResult(Input):
+    p_match: ID
+    p_expected_previous_submission_id: ID | None
+    p_outcome_kind: OutcomeKind
+    p_team_a_game_wins: Points | None = None
+    p_team_b_game_wins: Points | None = None
+    p_awarded_winner_side: Side | None = None
+
+
+class RecordResult(Input):
+    p_match: ID
+    p_revision: Revision
+    p_reason: Name
+    p_selected_submission: ID | None = None
+    p_outcome_kind: OutcomeKind | None = None
+    p_team_a_game_wins: Points | None = None
+    p_team_b_game_wins: Points | None = None
+    p_awarded_winner_side: Side | None = None
+
+
+class CorrectResult(Input):
+    p_match: ID
+    p_revision: Revision
+    p_reason: Name
+    p_outcome_kind: OutcomeKind
+    p_team_a_game_wins: Points | None = None
+    p_team_b_game_wins: Points | None = None
+    p_awarded_winner_side: Side | None = None
+
+
+class SetMatchVod(Input):
+    p_match: ID
+    p_revision: Revision
+    p_vod_url: str | None
+
+
+class WithdrawTeam(LeagueRevision):
+    p_team: ID
+    p_reason: Name
+
+
+class CreateTiebreakRound(Input):
+    p_stage: ID
+    p_revision: Revision
+    p_teams: list[ID]
+    p_reason: Name
+    p_suggested_start_date: CalendarDate | None = None
+
+
+class PublishFinal(LeagueRevision):
+    p_qualifiers: list[ID]
+    p_suggested_start_date: CalendarDate | None = None
 
 
 class ApplicationSessionMiddleware(SessionMiddleware):
@@ -250,14 +362,44 @@ def create_app(settings: Settings | None = None):
     async def league(league_id: int, user: Reader):
         return await snapshot(user, league_id)
 
+    @app.get("/api/leagues/{league_id}/tournament", tags=["reads"])
+    async def tournament(league_id: int, user: Reader):
+        result = await app.state.db.tournament(user, league_id)
+        if result is None:
+            raise HTTPException(404, "tournament_not_found")
+        return result
+
+    @app.get("/api/matches/{match_id}", tags=["reads"])
+    async def match(match_id: int, user: Reader):
+        result = await app.state.db.match(user, match_id)
+        if result is None:
+            raise HTTPException(404, "match_not_found")
+        return result
+
+    @app.get("/api/teams/{team_id}/availability", tags=["reads"])
+    async def team_availability(team_id: int, user: Reader):
+        result = await app.state.db.team_availability(user, team_id)
+        if result is None:
+            raise HTTPException(404, "team_not_found")
+        return result
+
     async def rpc(user, function, body):
         # Both identifier and argument order come from code, never from input.
-        params = tuple(body.model_dump().values())
+        arguments = body.model_dump()
+        if isinstance(body, SetTeamAvailability):
+            # JSONB needs JSON primitives; date/timestamp arguments outside this
+            # payload remain native values for psycopg's typed adapters.
+            arguments["p_windows"] = Jsonb(body.model_dump(mode="json")["p_windows"])
+        params = tuple(arguments.values())
         placeholders = ", ".join(["%s"] * len(params))
         rows = await app.state.db.write(
             user, f"SELECT dl.{function}({placeholders}) AS result", params
         )
-        if function in {"update_league", "update_team", "remove_team", "set_draft_order"}:
+        if function in {
+            "update_league", "update_team", "remove_team", "set_draft_order",
+            "publish_tournament", "set_round_suggested_date", "set_team_availability",
+            "copy_team_availability_week", "set_match_vod", "withdraw_team",
+        }:
             return {"result": None}  # PostgreSQL's void otherwise decodes as an empty string.
         return rows[0]
 
@@ -288,6 +430,50 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/rpc/draft_action", tags=["SQL functions"])
     async def draft_action(body: DraftAction, user: User):
         return await rpc(user, "draft_action", body)
+
+    @app.post("/api/rpc/publish_tournament", tags=["SQL functions"])
+    async def publish_tournament(body: PublishTournament, user: User):
+        return await rpc(user, "publish_tournament", body)
+
+    @app.post("/api/rpc/set_round_suggested_date", tags=["SQL functions"])
+    async def set_round_suggested_date(body: SetRoundSuggestedDate, user: User):
+        return await rpc(user, "set_round_suggested_date", body)
+
+    @app.post("/api/rpc/set_team_availability", tags=["SQL functions"])
+    async def set_team_availability(body: SetTeamAvailability, user: User):
+        return await rpc(user, "set_team_availability", body)
+
+    @app.post("/api/rpc/copy_team_availability_week", tags=["SQL functions"])
+    async def copy_team_availability_week(body: CopyTeamAvailabilityWeek, user: User):
+        return await rpc(user, "copy_team_availability_week", body)
+
+    @app.post("/api/rpc/submit_result", tags=["SQL functions"])
+    async def submit_result(body: SubmitResult, user: User):
+        return await rpc(user, "submit_result", body)
+
+    @app.post("/api/rpc/record_result", tags=["SQL functions"])
+    async def record_result(body: RecordResult, user: User):
+        return await rpc(user, "record_result", body)
+
+    @app.post("/api/rpc/correct_result", tags=["SQL functions"])
+    async def correct_result(body: CorrectResult, user: User):
+        return await rpc(user, "correct_result", body)
+
+    @app.post("/api/rpc/set_match_vod", tags=["SQL functions"])
+    async def set_match_vod(body: SetMatchVod, user: User):
+        return await rpc(user, "set_match_vod", body)
+
+    @app.post("/api/rpc/withdraw_team", tags=["SQL functions"])
+    async def withdraw_team(body: WithdrawTeam, user: User):
+        return await rpc(user, "withdraw_team", body)
+
+    @app.post("/api/rpc/create_tiebreak_round", tags=["SQL functions"])
+    async def create_tiebreak_round(body: CreateTiebreakRound, user: User):
+        return await rpc(user, "create_tiebreak_round", body)
+
+    @app.post("/api/rpc/publish_final", tags=["SQL functions"])
+    async def publish_final(body: PublishFinal, user: User):
+        return await rpc(user, "publish_final", body)
 
     @app.get("/api/events", tags=["events"])
     async def events(request: Request, user: User):

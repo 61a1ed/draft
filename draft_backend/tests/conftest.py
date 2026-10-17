@@ -11,8 +11,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from draft_backend.app import create_app
+from draft_backend.app import MIGRATION_DIRECTORY, create_app
 from draft_backend.config import Settings
+from draft_backend.migrations import migrate
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import postgres  # noqa: E402
@@ -69,6 +70,7 @@ def test_database(request):
         with psycopg.connect(admin) as conn:
             conn.execute((PROJECT / "sql/test_users.sql").read_text(encoding="utf-8"))
             conn.execute((PROJECT / "tests/catalog.sql").read_text(encoding="utf-8"))
+        migrate(admin, MIGRATION_DIRECTORY, schema="dl", role="dl_owner")
         yield TestDatabase(root, gateway, admin)
     finally:
         processes.close()

@@ -210,8 +210,9 @@ These are separate steps:
 
 Before deploying startup migrations to an existing host, rerun `setup` to install
 the local peer-authentication mapping and add `MIGRATION_DATABASE_URL`. This does
-not reinitialize the database. No migration files are included yet: the current
-schema and grants used by `init-db` are the baseline.
+not reinitialize the database. The first migration, `0001_tournament.sql`, adds
+tournament support at startup. The schema and grants used by `init-db` remain
+the fixed baseline.
 
 Commit the intended app changes before preparing a release. The default revision
 is `HEAD`; use `--revision FULL_COMMIT_ID` on `prepare`, `init-db`, `import-catalog`

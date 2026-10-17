@@ -24,7 +24,9 @@ def test_session_role_is_selected_before_creating_objects(tmp_path, monkeypatch,
     write(tmp_path, "001_first.sql", "SELECT 1;")
     write(tmp_path, "002_second.sql", "SELECT 2;")
 
-    assert migrations.migrate("migration credentials", tmp_path, role=role) == [1, 2]
+    assert migrations.migrate("migration credentials", tmp_path, role=role) == [
+        "001_first.sql", "002_second.sql"
+    ]
 
     connect.assert_called_once_with("migration credentials", autocommit=True)
     statements = [
@@ -54,41 +56,8 @@ def test_failed_role_switch_does_not_create_objects(tmp_path, monkeypatch):
     connect.return_value.__exit__.assert_called_once()
 
 
-@pytest.mark.parametrize(
-    "filenames",
-    [
-        ["1_first.sql"],
-        ["_first.sql"],
-        ["a001 bad.sql"],
-        ["a001.bad.sql"],
-    ],
-)
-def test_invalid_files_fail_before_connecting(tmp_path, monkeypatch, filenames):
-    for filename in filenames:
-        (tmp_path / filename).write_text("SELECT 1;", encoding="utf-8")
-    monkeypatch.setattr(migrations.psycopg, "connect", lambda *a, **kw: pytest.fail("connected"))
-    with pytest.raises(ValueError):
-        migrations.migrate("unused", tmp_path)
-
-
-def test_case_insensitive_duplicates_fail_before_connecting(tmp_path, monkeypatch):
-    first = tmp_path / "first"
-    second = tmp_path / "second"
-    first.mkdir()
-    second.mkdir()
-    # Separate directories let this exercise case collisions on Windows too.
-    paths = [
-        write(first, "a001-first.sql", "SELECT 1;"),
-        write(second, "A001-FIRST.sql", "SELECT 1;"),
-    ]
-    monkeypatch.setattr(type(tmp_path), "iterdir", lambda self: iter(paths))
-    monkeypatch.setattr(migrations.psycopg, "connect", lambda *a, **kw: pytest.fail("connected"))
-    with pytest.raises(ValueError, match="Duplicate"):
-        migrations.migrate("unused", tmp_path)
-
-
 def test_nul_byte_fails_before_connecting(tmp_path, monkeypatch):
-    write(tmp_path, "a001-first.sql", "SELECT 1;\x00SELECT 2;")
+    write(tmp_path, "001_first.sql", "SELECT 1;\x00SELECT 2;")
     monkeypatch.setattr(migrations.psycopg, "connect", lambda *a, **kw: pytest.fail("connected"))
     with pytest.raises(ValueError, match="NUL byte"):
         migrations.migrate("unused", tmp_path)
@@ -129,25 +98,24 @@ def history(conn, schema):
 @pytest.mark.integration
 def test_filename_order_idempotence_and_portable_checksums(tmp_path, migration_database):
     conninfo, schema, conn = migration_database
-    write(tmp_path, "B2026-10-16-update.sql", f"UPDATE {schema}.example SET value = value + 1;")
-    write(tmp_path, "a010-update.sql", f"UPDATE {schema}.example SET value = value + 1;")
+    write(tmp_path, "a_update.sql", f"UPDATE {schema}.example SET value = value + 1;")
+    write(tmp_path, "Z_update.sql", f"UPDATE {schema}.example SET value = value + 1;")
+    write(tmp_path, "2_update.sql", f"UPDATE {schema}.example SET value = value + 1;")
     first = write(
         tmp_path,
-        "a002-create.sql",
+        "10_create.sql",
         (
             f"CREATE TABLE {schema}.example (value integer);\n"
-            f"INSERT INTO {schema}.example VALUES (40);\n"
+            f"INSERT INTO {schema}.example VALUES (39);\n"
         ),
     )
     write(tmp_path, "README.txt", "This is not a migration.")
     assert migrations.migrate(conninfo, tmp_path, schema=schema) == [
-        "a002-create.sql",
-        "a010-update.sql",
-        "b2026-10-16-update.sql",
+        "10_create.sql", "2_update.sql", "Z_update.sql", "a_update.sql"
     ]
     assert conn.execute(f"SELECT value FROM {schema}.example").fetchone() == (42,)
     assert history(conn, schema)[0] == (
-        "a002-create.sql",
+        "10_create.sql",
         hashlib.sha256(first.read_bytes()).hexdigest(),
     )
     first.write_bytes(first.read_bytes().replace(b"\n", b"\r\n"))
@@ -165,12 +133,12 @@ def test_migration_role_owns_objects_and_applies_its_default_privileges(
     )
     write(
         tmp_path,
-        "a001-owner.sql",
+        "001_owner.sql",
         f"CREATE TABLE {schema}.example (id integer);"
         f"CREATE FUNCTION {schema}.example() RETURNS integer LANGUAGE sql AS 'SELECT 1';",
     )
     assert migrations.migrate(conninfo, tmp_path, schema=schema, role="dl_owner") == [
-        "a001-owner.sql"
+        "001_owner.sql"
     ]
     owners = conn.execute(
         "SELECT relname, pg_get_userbyid(relowner) FROM pg_class "
@@ -199,58 +167,54 @@ def test_sql_and_ledger_commit_together_and_failed_file_can_retry(
     conninfo, schema, conn = migration_database
     write(
         tmp_path,
-        "a001-initial.sql",
+        "001_initial.sql",
         (f"CREATE TABLE {schema}.example (value integer);INSERT INTO {schema}.example VALUES (1);"),
     )
     if failure == "ledger":
-        assert migrations.migrate(conninfo, tmp_path, schema=schema) == ["a001-initial.sql"]
+        assert migrations.migrate(conninfo, tmp_path, schema=schema) == ["001_initial.sql"]
     source = f"CREATE TABLE {schema}.later (id integer); UPDATE {schema}.example SET value = 2;"
-    write(tmp_path, "a002-later.sql", source + ("SELECT 1 / 0;" if failure == "sql" else ""))
+    write(tmp_path, "002_later.sql", source + ("SELECT 1 / 0;" if failure == "sql" else ""))
     if failure == "ledger":
         conn.execute(
             f"ALTER TABLE {schema}.schema_migrations "
-            "ADD CONSTRAINT test_record_failure CHECK (version <> 'a002-later.sql')"
+            "ADD CONSTRAINT test_record_failure CHECK (version <> '002_later.sql')"
         )
     error = psycopg.errors.DivisionByZero if failure == "sql" else psycopg.errors.CheckViolation
     with pytest.raises(error):
         migrations.migrate(conninfo, tmp_path, schema=schema)
     assert conn.execute(f"SELECT value FROM {schema}.example").fetchone() == (1,)
     assert conn.execute("SELECT to_regclass(%s)", (f"{schema}.later",)).fetchone() == (None,)
-    assert [version for version, _ in history(conn, schema)] == ["a001-initial.sql"]
+    assert [version for version, _ in history(conn, schema)] == ["001_initial.sql"]
     if failure == "ledger":
         conn.execute(f"ALTER TABLE {schema}.schema_migrations DROP CONSTRAINT test_record_failure")
-    write(tmp_path, "a002-later.sql", source)
-    assert migrations.migrate(conninfo, tmp_path, schema=schema) == ["a002-later.sql"]
+    write(tmp_path, "002_later.sql", source)
+    assert migrations.migrate(conninfo, tmp_path, schema=schema) == ["002_later.sql"]
     assert conn.execute(f"SELECT value FROM {schema}.example").fetchone() == (2,)
 
 
 @pytest.mark.integration
 def test_history_validation_and_older_checkout(tmp_path, migration_database):
     conninfo, schema, conn = migration_database
-    write(tmp_path, "a001-first.sql", "SELECT 1;")
-    newest = write(tmp_path, "a010-latest.sql", "SELECT 10;")
+    write(tmp_path, "001_first.sql", "SELECT 1;")
+    newest = write(tmp_path, "010_latest.sql", "SELECT 10;")
     assert migrations.migrate(conninfo, tmp_path, schema=schema) == [
-        "a001-first.sql",
-        "a010-latest.sql",
+        "001_first.sql", "010_latest.sql"
     ]
     newest.unlink()
     assert migrations.migrate(conninfo, tmp_path, schema=schema) == []
     # Validate all known history before executing a later pending migration.
-    write(tmp_path, "a011-pending.sql", f"CREATE TABLE {schema}.unexpected (id integer);")
-    write(tmp_path, "a001-first.sql", "SELECT 2;")
+    write(tmp_path, "011_pending.sql", f"CREATE TABLE {schema}.unexpected (id integer);")
+    write(tmp_path, "001_first.sql", "SELECT 2;")
     with pytest.raises(ValueError, match="changed"):
         migrations.migrate(conninfo, tmp_path, schema=schema)
-    write(tmp_path, "a001-first.sql", "SELECT 1;")
-    backdated = write(tmp_path, "a002-backdated.sql", "SELECT 2;")
+    write(tmp_path, "001_first.sql", "SELECT 1;")
+    backdated = write(tmp_path, "002_backdated.sql", "SELECT 2;")
     with pytest.raises(ValueError, match="predates"):
         migrations.migrate(conninfo, tmp_path, schema=schema)
     assert conn.execute("SELECT to_regclass(%s)", (f"{schema}.unexpected",)).fetchone() == (None,)
-    assert [version for version, _ in history(conn, schema)] == [
-        "a001-first.sql",
-        "a010-latest.sql",
-    ]
+    assert [version for version, _ in history(conn, schema)] == ["001_first.sql", "010_latest.sql"]
     backdated.unlink()
-    assert migrations.migrate(conninfo, tmp_path, schema=schema) == ["a011-pending.sql"]
+    assert migrations.migrate(conninfo, tmp_path, schema=schema) == ["011_pending.sql"]
 
 
 def wait_for_advisory_lock(conn, application_name, future):
@@ -278,7 +242,7 @@ def test_concurrent_startup_and_lock_recovery(tmp_path, migration_database, outc
     gate = uuid4().int % 2**31
     write(
         tmp_path,
-        "a001-create.sql",
+        "001_create.sql",
         (
             f"CREATE TABLE {schema}.example (id integer);"
             f"SELECT pg_advisory_xact_lock({gate});"
@@ -321,11 +285,11 @@ def test_concurrent_startup_and_lock_recovery(tmp_path, migration_database, outc
         finally:
             conn.execute("SELECT pg_advisory_unlock(%s)", (gate,))
         if outcome != "disconnect":
-            assert first.result(timeout=10) == ["a001-create.sql"]
+            assert first.result(timeout=10) == ["001_create.sql"]
         if outcome != "timeout":
             assert second.result(timeout=10) == (
-                ["a001-create.sql"] if outcome == "disconnect" else []
+                ["001_create.sql"] if outcome == "disconnect" else []
             )
     assert migrations.migrate(second_info, tmp_path, schema=schema) == []
     assert conn.execute(f"SELECT id FROM {schema}.example").fetchall() == [(1,)]
-    assert [version for version, _ in history(conn, schema)] == ["a001-create.sql"]
+    assert [version for version, _ in history(conn, schema)] == ["001_create.sql"]

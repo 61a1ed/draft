@@ -21,16 +21,17 @@ role.
 
 The current `sql/schema.sql` and `sql/grants.sql` are the fixed installation
 baseline. Subsequent changes belong in `src/draft_backend/sql_migrations/`;
-there are no migrations yet. Startup applies these files through the separate
+`0001_tournament.sql` adds tournament storage, rules, public projections, and
+permissions. Startup applies these files through the separate
 `MIGRATION_DATABASE_URL` connection as `dl_owner`, closes it, then opens the
 ordinary `DATABASE_URL` pool. A failed migration prevents startup and readiness.
 The local launcher supplies both connections. For manual or external launches,
 set `MIGRATION_DATABASE_URL` to a connection allowed to `SET ROLE dl_owner` in
 the same database. Production host setup supplies this connection automatically.
 
-Migration names are ordered case-insensitively: start with
-`a001-description.sql`, `a002-description.sql`, etc. A later timestamp series
-such as `B2026-10-16-120000-description.sql` sorts after the `a` series. Each file
+Migration files are ordered lexicographically by their case-sensitive filenames.
+Use zero-padded names such as `0001_tournament.sql`, `0002_description.sql`, etc.
+The whole filename is the history key; its numeric prefix is not parsed. Each file
 and its record in `dl.schema_migrations` commit together; earlier successful
 files remain applied if a later one fails. Do not edit or rename applied files.
 Keep the baseline fixed so fresh installations and existing databases apply
@@ -158,6 +159,9 @@ Writes and the account notification stream require a session:
 | `GET /images/{hash}` / `HEAD /images/{hash}` | Public PNG image; no session required |
 | `GET /api/leagues` | Array of all leagues |
 | `GET /api/leagues/{id}` | One `dl.league_snapshot` row; actions personalized to the signed-in user |
+| `GET /api/leagues/{id}/tournament` | Tournament, schedule, current evidence, official results, records, and withdrawals |
+| `GET /api/matches/{id}` | Match context and complete report/decision history |
+| `GET /api/teams/{id}/availability` | Availability header and timestamp ranges; empty state before the first edit |
 | `GET /api/events` | Account SSE stream, including accounts with no leagues |
 | `GET /healthz` | Process status; public |
 | `GET /ready` | Public readiness check; 200 with a working pooled DB query, otherwise 503 |
@@ -200,6 +204,52 @@ automatically retries a `stale_revision` error. After 409, the frontend should
 fetch the current snapshot and decide what to do. Lost HTTP responses have no
 idempotency-key mechanism; refresh before repeating a write whose outcome is
 unknown, especially `create_league`.
+
+## Tournaments
+
+After a league's draft is complete, its commissioner can publish a round robin
+followed by a two-team final. The migration installs this capability for existing
+and fresh databases; it does not publish tournaments automatically. The HTTP API
+exposes the operations below. Tournament screens are separate frontend work.
+See [the tournament workflow](sql/tournament.md) for qualification, corrections,
+withdrawals, and concurrency semantics.
+
+Each operation uses `POST /api/rpc/<function>` and the existing login/CSRF boundary.
+All argument names have the SQL `p_` prefix. Optional values below default to null
+unless another default is stated. SQL owns authorization and competitive rules.
+
+| Function | JSON arguments (all prefixed `p_`) | `result` |
+|---|---|---|
+| `publish_tournament` | `league`, `league_revision`, `first_suggested_date`, optional `season_best_of` (3), `final_best_of` (5) | null |
+| `set_round_suggested_date` | `round`, `revision`, `suggested_start_date` (nullable) | null |
+| `set_team_availability` | `team`, `revision` (nullable for first save), `time_zone`, `display_step_minutes`, `windows` | null |
+| `copy_team_availability_week` | `team`, `revision`, `source`, `target` | null |
+| `submit_result` | `match`, `expected_previous_submission_id` (nullable for first report), `outcome_kind`, optional `team_a_game_wins`, `team_b_game_wins`, `awarded_winner_side` | Submission ID |
+| `record_result` | `match`, `revision`, `reason`, optional `selected_submission`, `outcome_kind`, `team_a_game_wins`, `team_b_game_wins`, `awarded_winner_side` | Decision ID |
+| `correct_result` | `match`, `revision`, `reason`, `outcome_kind`, optional `team_a_game_wins`, `team_b_game_wins`, `awarded_winner_side` | Decision ID |
+| `set_match_vod` | `match`, `revision`, `vod_url` (nullable) | null |
+| `withdraw_team` | `league`, `revision`, `team`, `reason` | null |
+| `create_tiebreak_round` | `stage`, `revision`, `teams`, `reason`, optional `suggested_start_date` | Round ID |
+| `publish_final` | `league`, `revision`, `qualifiers`, optional `suggested_start_date` | Match ID |
+
+Suggested dates and availability copy dates use `YYYY-MM-DD`. Suggested dates are
+advisory week labels; they never open or close reporting. Availability `windows`
+is an array of `{starts_at, ends_at}` objects with ISO timestamps including `Z`
+or an explicit offset such as `-07:00`. An empty array clears availability.
+The gateway binds these ranges as JSONB. Scores always use fixture A/B orientation;
+a forfeit supplies `awarded_winner_side` (`a` or `b`) with no game counts.
+
+Publication checks the league revision. Date hints, withdrawals, tiebreaks, and
+final publication check the tournament revision. Commissioner results and VOD
+edits check the match revision. Participant reports check only that participant's
+previous submission ID; availability uses its own revision. Refresh the relevant
+read after a write or a 409. Tournament changes reuse the account notification stream.
+
+All tournament reads are public, including reports and decision history. Each
+endpoint reads a consistent database snapshot in one statement. A known team
+without saved availability has a null header and empty windows. A league without
+a published tournament, or a missing league/match/team, returns 404 from its
+corresponding tournament endpoint.
 
 ## Pokémon catalog and images
 
@@ -356,11 +406,14 @@ releases would need 80 before headroom. Neither provisioning nor startup raises
 PostgreSQL connection limits. Use a direct or session-preserving PostgreSQL
 connection, not a transaction-pooling endpoint, for `LISTEN`.
 
-This preproduction schema change has no migration runner. Upgrade disposable
+This notification refactor predates the migration history and is part of the
+fixed bootstrap baseline. For disposable databases older than that baseline, upgrade
 local databases by stopping the old development run and starting
 `uv run python scripts/dev.py --pg-bin <binaries>` without `--data-dir`; this
 provisions the new schema and preserves the old cluster for inspection. Resuming
-an old cluster or deploying application code alone does not update its triggers.
+such a pre-baseline cluster or deploying application code alone does not update
+its notification triggers. Databases already on the fixed baseline receive
+subsequent changes, including tournaments, through startup migrations.
 For an existing deployment, provision a fresh database/cluster using the normal
 bootstrap, import the catalog, and point the new release at it. This does not
 transfer existing leagues or accounts; retain the old database if they are needed.

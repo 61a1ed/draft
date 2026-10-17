@@ -1,7 +1,7 @@
 """Transaction-scoped database identity and the small authentication boundary.
 
 Queries passed to read/write are application-owned SQL, never client-supplied SQL.
-PostgreSQL remains responsible for authorization and all draft state transitions.
+PostgreSQL remains responsible for authorization and all state transitions.
 """
 
 from __future__ import annotations
@@ -104,6 +104,93 @@ class Database:
 
     async def read(self, user_id: int | None, query: str, params: Any = ()) -> list[dict[str, Any]]:
         return await self._execute(user_id, query, params, write=False)
+
+    async def tournament(self, user_id: int | None, league_id: int) -> dict[str, Any] | None:
+        """Public current state from one statement, so revisions and evidence agree."""
+        rows = await self.read(
+            user_id,
+            """
+            WITH stages AS (
+                SELECT * FROM dl.tournament_stage WHERE tournament_id = %s
+            ), rounds AS (
+                SELECT r.* FROM dl.tournament_round r JOIN stages s ON s.id = r.stage_id
+            ), matches AS (
+                SELECT m.* FROM dl.match m JOIN rounds r ON r.id = m.round_id
+            )
+            SELECT t.*,
+                coalesce((SELECT jsonb_agg(to_jsonb(s) ORDER BY s.position, s.id)
+                    FROM stages s), '[]'::jsonb) AS stages,
+                coalesce((SELECT jsonb_agg(to_jsonb(e) ORDER BY e.stage_id, e.team_id)
+                    FROM dl.stage_entry e JOIN stages s ON s.id = e.stage_id),
+                    '[]'::jsonb) AS entries,
+                coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.stage_id, r.number, r.id)
+                    FROM rounds r), '[]'::jsonb) AS rounds,
+                coalesce((SELECT jsonb_agg(to_jsonb(m) ORDER BY m.id)
+                    FROM matches m), '[]'::jsonb) AS matches,
+                coalesce((SELECT jsonb_agg(to_jsonb(s) ORDER BY s.id)
+                    FROM dl.result_submission s JOIN matches m ON m.id = s.match_id
+                    WHERE s.id IN (m.team_a_submission_id, m.team_b_submission_id)),
+                    '[]'::jsonb) AS current_submissions,
+                coalesce((SELECT jsonb_agg(to_jsonb(o) ORDER BY o.match_id)
+                    FROM dl.match_official_result o JOIN matches m ON m.id = o.match_id),
+                    '[]'::jsonb) AS official_results,
+                coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.stage_id, r.team_id)
+                    FROM dl.stage_record r JOIN stages s ON s.id = r.stage_id),
+                    '[]'::jsonb) AS stage_records,
+                coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.round_id, r.team_id)
+                    FROM dl.round_record r JOIN rounds tr ON tr.id = r.round_id),
+                    '[]'::jsonb) AS round_records,
+                coalesce((SELECT jsonb_agg(to_jsonb(w) ORDER BY w.team_id)
+                    FROM dl.tournament_withdrawal w JOIN dl.team tm ON tm.id = w.team_id
+                    WHERE tm.league_id = t.league_id), '[]'::jsonb) AS withdrawals,
+                coalesce((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.match_id)
+                    FROM dl.match_disposition d JOIN matches m ON m.id = d.match_id),
+                    '[]'::jsonb) AS dispositions
+            FROM dl.tournament t WHERE t.league_id = %s
+            """,
+            (league_id, league_id),
+        )
+        return rows[0] if rows else None
+
+    async def match(self, user_id: int | None, match_id: int) -> dict[str, Any] | None:
+        """Public fixture context and complete immutable evidence/decision history."""
+        rows = await self.read(
+            user_id,
+            """
+            SELECT m.*, s.tournament_id AS league_id, r.stage_id,
+                to_jsonb(o) AS official_result, to_jsonb(d) AS disposition,
+                coalesce((SELECT jsonb_agg(to_jsonb(rs) ORDER BY rs.id)
+                    FROM dl.result_submission rs WHERE rs.match_id = m.id),
+                    '[]'::jsonb) AS submissions,
+                coalesce((SELECT jsonb_agg(to_jsonb(md) ORDER BY md.id)
+                    FROM dl.match_decision md WHERE md.match_id = m.id),
+                    '[]'::jsonb) AS decisions
+            FROM dl.match m
+            JOIN dl.tournament_round r ON r.id = m.round_id
+            JOIN dl.tournament_stage s ON s.id = r.stage_id
+            LEFT JOIN dl.match_official_result o ON o.match_id = m.id
+            LEFT JOIN dl.match_disposition d ON d.match_id = m.id
+            WHERE m.id = %s
+            """,
+            (match_id,),
+        )
+        return rows[0] if rows else None
+
+    async def team_availability(self, user_id: int | None, team_id: int) -> dict[str, Any] | None:
+        """An existing team has an empty, unrevisioned state before its first edit."""
+        rows = await self.read(
+            user_id,
+            """
+            SELECT t.id AS team_id, to_jsonb(a) AS availability,
+                coalesce((SELECT jsonb_agg(to_jsonb(w) ORDER BY w.starts_at, w.ends_at, w.id)
+                    FROM dl.availability_window w WHERE w.team_id = t.id),
+                    '[]'::jsonb) AS windows
+            FROM dl.team t LEFT JOIN dl.team_availability a ON a.team_id = t.id
+            WHERE t.id = %s
+            """,
+            (team_id,),
+        )
+        return rows[0] if rows else None
 
     async def image(self, image_hash: str) -> dict[str, Any] | None:
         """Public immutable asset lookup; no user identity or league access."""

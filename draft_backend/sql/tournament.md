@@ -1,6 +1,6 @@
-# Tournament proposal
+# Tournaments
 
-This remains a proposal, outside normal bootstrap, startup migrations, and the HTTP API. The SQL and opt-in test cases have been revised to reflect the design discussion. **The revised PostgreSQL suite has not been run; integration and full validation are deferred.** Earlier test counts for the previous proposal do not validate this revision.
+Tournament storage, rules, projections, and permissions are installed by the first packaged migration, [0001_tournament.sql](../src/draft_backend/sql_migrations/0001_tournament.sql). The HTTP gateway exposes the controlled operations and public reads described in the [backend API contract](../README.md#tournaments).
 
 The implemented workflow is one round robin followed by a two-team final, with repeatable qualification tiebreaks when needed. League size is variable. Each league has its own tournament and champion; one league is one draft and one tournament. The tables retain general stage, entry, round, and match relationships. Another format would need its scheduling/progression operations when actually introduced, without changing the report/decision model. There is no supported-format metadata registry or configurable tournament engine.
 
@@ -8,17 +8,11 @@ The current publisher creates the arrangement it knows how to schedule. It accep
 
 All data is publicly readable, including availability, participant reports, official decisions, and their history. Write authorization remains explicit: commissioners manage the tournament, managers report for their own teams and edit their availability. Read access never depends on league membership.
 
-## Proposal files and eventual integration
+## Installation
 
-For a disposable review database, install these files as `dl_owner` in one transaction after the current backend schema and grants:
+Bootstrap installs the fixed schema and grants baseline. Application startup then applies the packaged tournament migration as `dl_owner` in one transaction, including its permissions and migration-history entry. The integration test database follows the same path. Existing leagues, accounts, draft picks, and catalog data are retained. Restarting after a successful migration validates its checksum and skips reapplying it.
 
-1. [Storage and projections](tournament.proposal.sql).
-2. [Publication, date hints, availability, and draft-undo guard](tournament.mutators.proposal.sql).
-3. [Reports, decisions, corrections, and VOD links](tournament.results.proposal.sql).
-4. [Withdrawals, tiebreaks, and final publication](tournament.lifecycle.proposal.sql).
-5. [Callable-function grants](tournament.grants.proposal.sql).
-
-Later these can become one `0001_tournament.sql`, including permissions, applied as a single transaction. Do not install both the proposal and that future migration. The migration should become the executable source used by the tests at integration time. No migration file or HTTP route is added by this revision.
+The migration is the sole executable tournament SQL source. The earlier five proposal files have been consolidated into it; do not install a proposal separately. An existing review database that had those proposal files applied manually is not a supported migration baseline: use a fresh disposable database for testing.
 
 The existing identity, transaction retry, notification, and public-read mechanisms are reused. All mutations authenticate and require a `SERIALIZABLE` transaction. Retry the entire transaction, including a commit failure, on `40001` or `40P01` with the original arguments. The backend's `Database.write` already does this. `PT409` requires refreshing the view; it is not an automatic retry with a new token.
 
@@ -154,8 +148,8 @@ Draft undo's permitted-action branch checks for an existing tournament. Publicat
 
 Player reports use their own pointer token so opposing first submissions can both succeed after retry. Same-side replacements, an already official match, or a removed fixture reject stale submissions. The commissioner must refresh qualification/withdrawal previews after competitive changes. Notifications are account wake-ups delivered after commit, not a durable event log; the app reloads authoritative state.
 
-## Deferred validation
+## Validation
 
-[test_tournament.py](../tests/test_tournament.py) has been adapted to the new calls and shapes, including atomic publication, advisory dates, unordered qualifiers, linked withdrawal causes, and finals left unresolved by withdrawal. Existing result, concurrency, public-read, availability, and notification cases remain. Python syntax and lint checks passed, all 26 cases collected, and SQL declarations/grants/literal test-call arguments were checked for consistency. The tests were not executed; PostgreSQL parsing and runtime validation remain deferred.
+[test_tournament.py](../tests/test_tournament.py) exercises publication, scheduling, reports, decisions, corrections, withdrawals, tiebreaks, finals, permissions, concurrency, availability, and notifications against the normally migrated database. HTTP coverage in [test_tournament_api.py](../tests/test_tournament_api.py) verifies the gateway contract, JSONB availability, dates, public reads, authorization, and freshness. [test_tournament_migration.py](../tests/test_tournament_migration.py) verifies upgrading a populated baseline and repeat startup.
 
-When integration is requested, install the eventual migration through the normal runner, wire the HTTP request/response models and public reads, and run the PostgreSQL suite against a fresh runner-owned cluster. The JSON availability payload still needs proper JSONB adaptation in the gateway. Round date inputs now need date parsing, not timezone-aware timestamp handling. Availability retains explicit-offset timestamps.
+Run the backend suite with `python -m pytest --integration --pg-bin=<PostgreSQL binaries>`. Tests own a fresh local cluster and retain its files and logs for inspection.

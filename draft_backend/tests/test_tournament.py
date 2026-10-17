@@ -1,10 +1,9 @@
-"""Opt-in PostgreSQL tests of the tournament proposal, outside the live bootstrap."""
+"""Tournament behavior against the normally migrated application database."""
 
 import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from threading import Barrier
 from uuid import uuid4
 
@@ -23,17 +22,6 @@ CLOSES = OPENS + timedelta(days=7)
 
 @pytest.fixture(scope="session")
 def tournament_database(test_database):
-    directory = Path(__file__).resolve().parents[1] / "sql"
-    with psycopg.connect(test_database.admin) as conn:
-        conn.execute("SET LOCAL ROLE dl_owner")
-        for name in (
-            "tournament.proposal.sql",
-            "tournament.mutators.proposal.sql",
-            "tournament.results.proposal.sql",
-            "tournament.lifecycle.proposal.sql",
-            "tournament.grants.proposal.sql",
-        ):
-            conn.execute((directory / name).read_text(encoding="utf-8"))
     return test_database
 
 

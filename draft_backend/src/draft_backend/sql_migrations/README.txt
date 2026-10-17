@@ -1,12 +1,12 @@
 The current sql/schema.sql and sql/grants.sql are the application baseline.
 Bootstrap installs them once; startup applies the SQL files in this directory.
-There are no migrations after the baseline yet.
+The first migration, 0001_tournament.sql, installs tournaments and permissions.
 
-Name the first migration a001-description.sql, then a002-description.sql, etc.
-Names are case-insensitive identities, ordered lexicographically. Keep sequence
-numbers zero-padded. A later series can use timestamps such as
-B2026-10-16-120000-description.sql; it sorts after the a-series.
-The whole filename identifies the migration. Do not rename or edit applied files.
+Every file ending in .sql is a migration. The whole filename is its case-sensitive
+identity and files run in lexicographic order. Use zero-padded numbers to make
+that order clear: 0001_tournament.sql, 0002_description.sql, etc. Numbers are not
+parsed. Do not rename or edit applied files. SQL files must be UTF-8 without NUL
+bytes. Checksums normalize Windows and POSIX line endings.
 
 Each file is one transaction, including its ledger entry in dl.schema_migrations.
 SQL runs as dl_owner. Use schema-qualified object names and transaction-compatible

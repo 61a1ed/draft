@@ -96,13 +96,6 @@ def test_startup_failure_retry_and_migration_connection_cleanup(
     suffix = uuid4().hex
     name = f"startup_{suffix}"
     table = f"dl.{name}"
-    first = f"a001-{suffix}.sql"
-    second = f"a002-{suffix}.sql"
-    (tmp_path / first).write_text(f"CREATE TABLE {table} (id integer);", encoding="utf-8")
-    later = tmp_path / second
-    later.write_text(
-        f"ALTER TABLE {table} ADD COLUMN value integer; SELECT 1 / 0;", encoding="utf-8"
-    )
     monkeypatch.setattr(module, "MIGRATION_DIRECTORY", tmp_path)
     settings = Settings(
         database_url=test_database.gateway,
@@ -113,6 +106,19 @@ def test_startup_failure_retry_and_migration_connection_cleanup(
     )
     options = {"loop_factory": asyncio.SelectorEventLoop}
     with psycopg.connect(test_database.admin, autocommit=True) as conn:
+        existing_history = conn.execute(
+            "SELECT version FROM dl.schema_migrations ORDER BY version"
+        ).fetchall()
+        prefix = max((version for version, in existing_history), default="")
+        first = f"{prefix}_test_{suffix}_1.sql"
+        second = f"{prefix}_test_{suffix}_2.sql"
+        (tmp_path / first).write_text(
+            f"CREATE TABLE {table} (id integer);", encoding="utf-8"
+        )
+        later = tmp_path / second
+        later.write_text(
+            f"ALTER TABLE {table} ADD COLUMN value integer; SELECT 1 / 0;", encoding="utf-8"
+        )
         try:
             app = module.create_app(settings)
             with pytest.raises(psycopg.errors.DivisionByZero):
@@ -121,7 +127,7 @@ def test_startup_failure_retry_and_migration_connection_cleanup(
             assert not hasattr(app.state, "db")
             assert conn.execute(
                 "SELECT version FROM dl.schema_migrations ORDER BY version"
-            ).fetchall() == [(first,)]
+            ).fetchall() == existing_history + [(first,)]
             assert conn.execute(
                 "SELECT count(*) FROM pg_attribute "
                 "WHERE attrelid = %s::regclass AND attname = 'value'", (table,)
@@ -135,7 +141,7 @@ def test_startup_failure_retry_and_migration_connection_cleanup(
                 ).fetchone() == (0,)
                 assert conn.execute(
                     "SELECT version FROM dl.schema_migrations ORDER BY version"
-                ).fetchall() == [(first,), (second,)]
+                ).fetchall() == existing_history + [(first,), (second,)]
                 assert conn.execute(f"SELECT value FROM {table}").fetchall() == []
         finally:
             conn.execute(f"DROP TABLE IF EXISTS {table}")
