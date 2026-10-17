@@ -14,12 +14,25 @@ import type {
   UpdateTeamInput,
   User,
 } from './types'
+import type {
+  CorrectResultInput,
+  CreateTiebreakRoundInput,
+  MatchDetail,
+  PublishFinalInput,
+  PublishTournamentInput,
+  RecordResultInput,
+  SetMatchVodInput,
+  SetRoundSuggestedDateInput,
+  SubmitResultInput,
+  TournamentSnapshot,
+  WithdrawTeamInput,
+} from './tournamentTypes'
 
 const errorMessages: Record<string, string> = {
   sign_in_required: 'Your session has ended. Sign in to continue.',
   stale_revision:
-    'The draft changed while you were working. Review the latest state and try again.',
-  action_not_permitted: 'This action is not available to you for the current turn.',
+    'The league or match changed while you were working. Review the latest state and try again.',
+  action_not_permitted: 'This action is not available to you in the current state.',
   point_budget_exceeded: 'This Pokémon costs more than the team’s remaining points.',
   already_exists_or_claimed: 'That Pokémon is already picked, or that manager is already assigned.',
   league_not_found: 'This league is unavailable or you no longer have access.',
@@ -48,6 +61,35 @@ const errorMessages: Record<string, string> = {
   application_json_required: 'The server could not read the sign-in request.',
   invalid_response:
     'The server returned an unexpected response. Check that the backend is running.',
+  tournament_not_found: 'This league has no published tournament.',
+  tournament_already_published: 'The tournament has already been published. Review its schedule.',
+  draft_not_completed: 'Complete the draft before publishing the tournament.',
+  match_not_found: 'This match is no longer available. Refresh the tournament.',
+  stage_not_found: 'This tournament stage is no longer available. Refresh the tournament.',
+  invalid_suggested_date: 'Choose a valid calendar date for the suggested week.',
+  invalid_best_of: 'Best-of values must be positive odd whole numbers.',
+  invalid_result: 'Enter a completed series score, or choose the winner of a forfeit.',
+  invalid_current_submission: 'The participant report changed. Review the latest reports.',
+  stale_submission:
+    'Your report changed while you were working. Review it before submitting again.',
+  match_not_open: 'This match is already official or has been removed from competition.',
+  reason_required: 'Enter a reason for this commissioner decision.',
+  select_report_or_supply_result: 'Choose a participant report or enter a new result.',
+  submission_not_current: 'That report has been replaced. Review the latest participant reports.',
+  official_result_required: 'This match needs an official result before it can be corrected.',
+  invalid_vod_url: 'Enter a complete HTTP or HTTPS link, or clear the field to remove the VOD.',
+  team_already_withdrawn: 'This team has already withdrawn.',
+  tiebreak_requires_source_round_robin: 'Tiebreak rounds can only be added to the season stage.',
+  qualification_already_finalized: 'The finalists have already been selected.',
+  at_least_two_teams_required: 'Select at least two eligible teams for the tiebreak.',
+  distinct_teams_required: 'Select each tiebreak team only once.',
+  ineligible_tiebreak_team:
+    'A selected team is not eligible for this tiebreak. Review the entrants.',
+  stage_matches_unresolved: 'Resolve all active season and tiebreak matches before progressing.',
+  final_already_published: 'The final has already been published. Review the final fixture.',
+  exactly_two_qualifiers_required: 'Select exactly two eligible finalists.',
+  distinct_qualifiers_required: 'Select two different teams for the final.',
+  ineligible_qualifier: 'A selected finalist is no longer eligible. Review the entrants.',
 }
 
 export class ApiError extends Error {
@@ -184,6 +226,21 @@ export const api = {
   removeTeam: (input: TeamRevision) => rpc<null>('remove_team', input),
   setDraftOrder: (input: SetDraftOrderInput) => rpc<null>('set_draft_order', input),
   draftAction: (input: DraftActionInput) => rpc<number | null>('draft_action', input),
+  tournament: (leagueId: number, signal?: AbortSignal) =>
+    request<TournamentSnapshot>(`/api/leagues/${leagueId}/tournament`, { signal }),
+  match: (matchId: number, signal?: AbortSignal) =>
+    request<MatchDetail>(`/api/matches/${matchId}`, { signal }),
+  publishTournament: (input: PublishTournamentInput) => rpc<null>('publish_tournament', input),
+  setRoundSuggestedDate: (input: SetRoundSuggestedDateInput) =>
+    rpc<null>('set_round_suggested_date', input),
+  submitResult: (input: SubmitResultInput) => rpc<number>('submit_result', input),
+  recordResult: (input: RecordResultInput) => rpc<number>('record_result', input),
+  correctResult: (input: CorrectResultInput) => rpc<number>('correct_result', input),
+  setMatchVod: (input: SetMatchVodInput) => rpc<null>('set_match_vod', input),
+  withdrawTeam: (input: WithdrawTeamInput) => rpc<null>('withdraw_team', input),
+  createTiebreakRound: (input: CreateTiebreakRoundInput) =>
+    rpc<number>('create_tiebreak_round', input),
+  publishFinal: (input: PublishFinalInput) => rpc<number>('publish_final', input),
 }
 
 /** One stream per signed-in browser tab. Explicit retries also recover failed HTTP opens. */

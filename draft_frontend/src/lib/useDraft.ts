@@ -16,6 +16,7 @@ export function useDraft() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [streamEpoch, setStreamEpoch] = useState(0)
+  const [tournamentRefreshKey, setTournamentRefreshKey] = useState(0)
   const generation = useRef(0)
   const selectionGeneration = useRef(0)
   const mounted = useRef(true)
@@ -288,7 +289,11 @@ export function useDraft() {
     }
     refreshAccount.current = refresh
     const stop = subscribeAccount({
-      onInvalidate: () => void refresh(),
+      onInvalidate: () => {
+        if (!valid()) return
+        setTournamentRefreshKey((value) => value + 1)
+        void refresh()
+      },
       onStatus: (status) => {
         if (valid()) setConnection(status)
       },
@@ -329,7 +334,7 @@ export function useDraft() {
   }
 
   const mutate = async (operation: () => Promise<unknown>) => {
-    if (mutationLock.current || currentMode.current !== 'live') return
+    if (mutationLock.current || currentMode.current !== 'live') return false
     const owner = Symbol('mutation')
     mutationLock.current = owner
     setBusy(true)
@@ -339,14 +344,17 @@ export function useDraft() {
     try {
       await operation()
       if (isCurrent(token)) await refreshAccount.current?.()
+      if (isCurrent(token)) setTournamentRefreshKey((value) => value + 1)
+      return isCurrent(token) && selectionGeneration.current === selection
     } catch (cause) {
-      if (!isCurrent(token)) return
+      if (!isCurrent(token)) return false
       if (cause instanceof ApiError && cause.status === 401) expireSession()
       else if (selectionGeneration.current === selection) {
         setError(errorMessage(cause))
         // Refresh even after an unknown outcome. Never replay a write automatically.
         await refreshAccount.current?.()
       }
+      return false
     } finally {
       if (mutationLock.current === owner) {
         mutationLock.current = null
@@ -466,6 +474,7 @@ export function useDraft() {
     leagueId,
     snapshot,
     connection,
+    tournamentRefreshKey,
     error,
     sessionCheckFailed,
     setError,

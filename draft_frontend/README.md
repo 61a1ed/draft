@@ -85,6 +85,15 @@ frontend development.
 - Pick confirmation showing the target team and resulting budget; optional
   commissioner point waiver; undo with revision protection.
 - Team rosters, charged pick prices, and history including undone selections.
+- A signed-in Tournament workspace for the existing round robin and two-team
+  final: publication with frozen best-of values, season records, round schedules
+  and byes, suggested weeks, participant reports and automatic agreement,
+  commissioner decisions/corrections, VOD links, and complete match history.
+- Commissioner withdrawals with explicit impact previews, repeatable qualification
+  tiebreaks with separate records, and selection/publication of the two finalists.
+  The champion comes from the official final result. Qualification follows the
+  commissioner's announced criteria; displayed records do not automatically seed
+  or select finalists. Availability planning and signed-out spectator pages are deferred.
 - One account SSE stream at `/api/events` per signed-in tab, including accounts
   with no leagues. Assignments appear automatically with a notice; selection
   changes keep the stream open, and removed access selects another league or
@@ -140,8 +149,15 @@ fallbacks if the font service is unavailable.
 
 - `src/App.tsx`: workspace navigation, draft views, account and pick dialogs.
 - `src/components/`: catalog, roster setup, and accessible modal components.
+- `src/components/Tournament.tsx`, `TournamentMatch.tsx`: tournament overview,
+  management, schedule, reporting, and history within the signed-in league shell.
 - `src/lib/api.ts`, `types.ts`: typed backend contract and event client.
 - `src/lib/useDraft.ts`: session, league, request, and stream lifecycle.
+- `src/lib/tournamentTypes.ts`, `useTournament.ts`, `tournamentView.ts`: tournament
+  contract, serialized reads/retries, and presentation rules. The existing account
+  stream invalidates tournament and match reads even when the draft revision is
+  unchanged. Each operation uses its own league/tournament/match/report token;
+  stale forms require review, and uncertain writes are refreshed without replay.
 - `src/lib/*.test.*`: API, OAuth, and lifecycle regression tests.
 - `public/`: app favicon and generic image placeholder.
 

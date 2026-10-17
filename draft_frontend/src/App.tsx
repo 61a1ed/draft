@@ -28,11 +28,13 @@ import type { Draftable, LeagueSnapshot, Session, Team } from './lib/types'
 import { Catalog, PokemonImage } from './components/Catalog'
 import { Modal } from './components/Modal'
 import { LeagueSetup } from './components/LeagueSetup'
+import { Tournament } from './components/Tournament'
 
-type View = 'draft' | 'teams' | 'activity' | 'settings'
+type View = 'draft' | 'tournament' | 'teams' | 'activity' | 'settings'
 type SelectedPick = { item: Draftable; revision: number; teamId: number | null }
 const navItems = [
   { id: 'draft', label: 'Draft room', icon: LayoutGrid },
+  { id: 'tournament', label: 'Tournament', icon: Trophy },
   { id: 'teams', label: 'Teams & rosters', icon: Users },
   { id: 'activity', label: 'Draft activity', icon: History },
   { id: 'settings', label: 'League settings', icon: Settings2 },
@@ -426,6 +428,7 @@ export default function App() {
             <button
               key={id}
               className={view === id ? 'active' : ''}
+              aria-label={label}
               aria-current={view === id ? 'page' : undefined}
               onClick={() => setView(id)}
             >
@@ -493,7 +496,7 @@ export default function App() {
                 setConfirmAction(null)
                 void draft.refreshData()
               }}
-              title="Refresh leagues, catalog, and current draft"
+              title="Refresh leagues, catalog, draft, and tournament"
             >
               <RefreshCw size={16} />
             </button>
@@ -625,6 +628,14 @@ export default function App() {
                           </>
                         )}
                       </p>
+                      {snapshot.state.status === 'completed' && (
+                        <button
+                          className="button banner-button"
+                          onClick={() => setView('tournament')}
+                        >
+                          Open tournament <ArrowRight size={15} />
+                        </button>
+                      )}
                       {snapshot.state.status === 'setup' && (
                         <button
                           className="button banner-button"
@@ -822,6 +833,17 @@ export default function App() {
                     </div>
                   )}
                 </section>
+              )}
+              {view === 'tournament' && (
+                <Tournament
+                  key={`${session!.user.id}:${snapshot.league_id}`}
+                  snapshot={snapshot}
+                  userId={session!.user.id}
+                  users={draft.users}
+                  refreshKey={draft.tournamentRefreshKey}
+                  busy={draft.busy}
+                  mutate={draft.mutate}
+                />
               )}
               {view === 'settings' && (
                 <LeagueSetup

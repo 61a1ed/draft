@@ -7,7 +7,7 @@ interface LeagueSetupProps {
   snapshot: LeagueSnapshot
   users: User[]
   busy: boolean
-  onMutation: (operation: () => Promise<unknown>) => Promise<void>
+  onMutation: (operation: () => Promise<unknown>) => Promise<unknown>
 }
 
 type MutationHandler = LeagueSetupProps['onMutation']

@@ -123,6 +123,18 @@ afterEach(async () => {
 })
 
 describe('draft request ownership and event ordering', () => {
+  it('invalidates tournament reads even when the draft revision stays the same', async () => {
+    await mount()
+    const previous = current.tournamentRefreshKey
+    const revision = current.snapshot?.revision
+    await act(async () => {
+      streams[0].handlers.onInvalidate()
+    })
+    expect(current.snapshot?.revision).toBe(revision)
+    expect(current.tournamentRefreshKey).toBeGreaterThan(previous)
+    expect(streams).toHaveLength(1)
+  })
+
   it('keeps both snapshot and league metadata at the latest event revision', async () => {
     const initial = deferred<LeagueSnapshot>()
     vi.mocked(api.snapshot).mockReturnValueOnce(initial.promise)
@@ -333,7 +345,7 @@ describe('draft request ownership and event ordering', () => {
     const mutation = deferred<void>()
     const logout = deferred<void>()
     vi.mocked(api.logout).mockReturnValueOnce(logout.promise)
-    let writing!: Promise<void>
+    let writing!: Promise<boolean>
     let leaving!: Promise<void>
     await act(async () => {
       writing = current.mutate(() => mutation.promise)
@@ -411,8 +423,8 @@ describe('draft request ownership and event ordering', () => {
     await mount()
     const first = deferred<void>()
     const second = deferred<void>()
-    let oldWrite!: Promise<void>
-    let newWrite!: Promise<void>
+    let oldWrite!: Promise<boolean>
+    let newWrite!: Promise<boolean>
     await act(async () => {
       oldWrite = current.mutate(() => first.promise)
     })

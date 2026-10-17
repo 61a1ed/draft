@@ -210,7 +210,8 @@ unknown, especially `create_league`.
 After a league's draft is complete, its commissioner can publish a round robin
 followed by a two-team final. The migration installs this capability for existing
 and fresh databases; it does not publish tournaments automatically. The HTTP API
-exposes the operations below. Tournament screens are separate frontend work.
+exposes the operations below. The adjacent frontend provides a signed-in
+tournament workspace; availability planning and signed-out spectator pages are deferred.
 See [the tournament workflow](sql/tournament.md) for qualification, corrections,
 withdrawals, and concurrency semantics.
 
