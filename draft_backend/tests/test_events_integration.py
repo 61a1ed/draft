@@ -54,9 +54,10 @@ class BrowserStream:
         await asyncio.wait_for(self.task, 5)
 
 
-def settings(database_url, **overrides):
+def settings(test_database, **overrides):
     return Settings(
-        database_url=database_url, session_secret="s" * 40,
+        database_url=test_database.gateway, migration_database_url=test_database.admin,
+        session_secret="s" * 40,
         public_base_url="http://testserver", app_env="test", test_login_enabled=True,
         cookie_secure=False, sse_heartbeat_seconds=0.05, **overrides,
     )
@@ -119,7 +120,7 @@ def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
     names = create_accounts(test_database.admin, 3)
 
     async def exercise():
-        app = create_app(settings(test_database.gateway))
+        app = create_app(settings(test_database))
         async with app.router.lifespan_context(app), AsyncExitStack() as stack:
             commissioner, owner = await signed_in(stack, app, names[0])
             manager, first = await signed_in(stack, app, names[1])
@@ -228,7 +229,7 @@ def test_stream_expiry_and_cancellation_close_database_connections(test_database
     name, = create_accounts(test_database.admin, 1)
 
     async def exercise():
-        app = create_app(settings(test_database.gateway, session_ttl_seconds=2))
+        app = create_app(settings(test_database, session_ttl_seconds=2))
         async with app.router.lifespan_context(app), AsyncExitStack() as stack:
             manager, _ = await signed_in(stack, app, name)
             stream = await BrowserStream(app, manager).opened()

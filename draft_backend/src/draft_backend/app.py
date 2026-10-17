@@ -2,6 +2,7 @@ import asyncio
 import re
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Literal
 
 import psycopg
@@ -15,6 +16,9 @@ from .auth import install_auth, require_user, session_valid
 from .config import Settings
 from .db import Database
 from .events import AccountEventResponse
+from .migrations import migrate
+
+MIGRATION_DIRECTORY = Path(__file__).with_name("sql_migrations")
 
 ID = Annotated[int, Field(strict=True, gt=0, le=2147483647)]
 Revision = Annotated[int, Field(strict=True, ge=0, le=2147483647)]
@@ -124,6 +128,7 @@ def create_app(settings: Settings | None = None):
 
     @asynccontextmanager
     async def lifespan(app):
+        migrate(settings.migration_database_url, MIGRATION_DIRECTORY, schema="dl", role="dl_owner")
         db = app.state.db = Database(settings)
         # Successful immutable image reads live until this worker restarts.
         app.state.images = {}

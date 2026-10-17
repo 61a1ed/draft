@@ -24,6 +24,7 @@ def host_config():
         "node_version": "24.22.0",
         "app_environment": {
             "DATABASE_URL": "postgresql://dl_gateway:private-password@127.0.0.1:5432/draft",
+            "MIGRATION_DATABASE_URL": bootstrap.MIGRATION_DATABASE_URL,
             "SESSION_SECRET": "s" * 40,
             "PUBLIC_BASE_URL": "https://draft.example.com",
             "APP_ENV": "production",
@@ -138,9 +139,11 @@ def host_paths(tmp_path, monkeypatch):
     return etc, pg
 
 
-def test_postgres_installs_only_restricted_remote_certificate_rules(
-    host_config, host_paths, monkeypatch
+@pytest.mark.parametrize("name", ["draft", "draft-preprod"])
+def test_postgres_installs_restricted_remote_and_local_migration_rules(
+    host_config, host_paths, monkeypatch, name
 ):
+    host_config["name"] = name
     etc, pg = host_paths
     calls, writes = [], []
     atomic_write = bootstrap.atomic_write
@@ -157,17 +160,23 @@ def test_postgres_installs_only_restricted_remote_certificate_rules(
     hba = (pg / "pg_hba.conf").read_text().splitlines()[1:]
     assert [line.split() for line in hba] == [
         ["local", "all", "postgres", "peer"],
+        ["local", "draft", "dl_importer", "peer", "map=draft_migrations"],
         ["host", "draft", "dl_gateway", "127.0.0.1/32", "scram-sha-256"],
         ["hostssl", "postgres,draft", "postgres", "0.0.0.0/0", "cert"],
         ["hostssl", "draft", "dl_importer", "0.0.0.0/0", "cert"],
         ["host", "all", "all", "0.0.0.0/0", "reject"],
         ["host", "all", "all", "::/0", "reject"],
     ]
-    configuration = (pg / "conf.d" / "99-draft.conf").read_text()
+    ident = pg / "pg_ident.conf"
+    assert ident.read_text().splitlines()[1:] == [f"draft_migrations {name} dl_importer"]
+    assert (ident, 0o644) in writes
+    assert ("chown", "root:postgres", ident) in calls
+    configuration = (pg / "conf.d" / f"99-{name}.conf").read_text()
     assert "listen_addresses = '0.0.0.0'" in configuration
     assert "port = '5432'" in configuration
     assert "ssl = 'on'" in configuration
-    key = etc / "postgresql" / "draft-tls" / "server.key"
+    assert f"ident_file = '{ident}'" in configuration
+    key = etc / "postgresql" / f"{name}-tls" / "server.key"
     assert (key, 0o640) in writes
     assert ("chown", "root:postgres", key) in calls
     assert ("systemctl", "restart", "postgresql@16-main.service") in calls
@@ -270,6 +279,7 @@ def test_certificate_install_only_updates_postgres_under_host_lock(
     for filename in bootstrap.TLS_FILES:
         assert (installed / filename).read_bytes() == (uploaded / filename).read_bytes()
     assert (pg / "pg_hba.conf").read_bytes() == bootstrap.PG_HBA
+    assert (pg / "pg_ident.conf").read_bytes() == bootstrap.postgres_ident("draft")
     assert not (etc / "draft" / "app.env").exists()
     assert not (etc / "draft" / "deploy.json").exists()
 
@@ -295,6 +305,7 @@ def test_certificate_install_requires_original_host_ca(
 def runtime_check(host_paths, monkeypatch):
     etc, pg = host_paths
     (pg / "pg_hba.conf").write_bytes(bootstrap.PG_HBA)
+    (pg / "pg_ident.conf").write_bytes(bootstrap.postgres_ident("draft"))
     monkeypatch.setattr(bootstrap, "validate_tls_source", lambda path: {})
     monkeypatch.setitem(sys.modules, "grp", SimpleNamespace(
         getgrnam=lambda name: SimpleNamespace(gr_gid=44)
@@ -312,6 +323,7 @@ def runtime_check(host_paths, monkeypatch):
         "settings": bootstrap.postgres_settings("draft"),
         "pending_restart": False,
         "hba_errors": 0,
+        "ident_errors": 0,
         "loaded_at": "before",
         "reload": False,
     }
@@ -337,7 +349,10 @@ def test_firewall_prerequisite_waits_for_effective_authentication_reload(
     assert calls == [False, True, False, False]
 
 
-@pytest.mark.parametrize("fault", ["wrong_port", "tls_off", "pending_restart", "hba_errors"])
+@pytest.mark.parametrize(
+    "fault",
+    ["wrong_port", "tls_off", "wrong_ident", "pending_restart", "hba_errors", "ident_errors"],
+)
 def test_firewall_prerequisite_refuses_unsafe_running_configuration(
     runtime_check, monkeypatch, fault
 ):
@@ -345,6 +360,8 @@ def test_firewall_prerequisite_refuses_unsafe_running_configuration(
         runtime_check["settings"]["port"] = "6543"
     elif fault == "tls_off":
         runtime_check["settings"]["ssl"] = "off"
+    elif fault == "wrong_ident":
+        runtime_check["settings"]["ident_file"] = "/unexpected/pg_ident.conf"
     else:
         runtime_check[fault] = True
     monkeypatch.setattr(bootstrap, "postgres_state", lambda **kwargs: runtime_check)
@@ -360,6 +377,19 @@ def test_firewall_prerequisite_refuses_broader_hba(runtime_check, host_paths, mo
         bootstrap, "postgres_state", lambda **kwargs: pytest.fail("must reject HBA")
     )
     with pytest.raises(RuntimeError, match="authentication rules differ"):
+        bootstrap.check_database_tls("draft")
+
+
+def test_firewall_prerequisite_refuses_broader_user_mapping(
+    runtime_check, host_paths, monkeypatch
+):
+    _, pg = host_paths
+    with (pg / "pg_ident.conf").open("ab") as stream:
+        stream.write(b"draft_migrations another-user dl_importer\n")
+    monkeypatch.setattr(
+        bootstrap, "postgres_state", lambda **kwargs: pytest.fail("must reject user mapping")
+    )
+    with pytest.raises(RuntimeError, match="user mapping differs"):
         bootstrap.check_database_tls("draft")
 
 

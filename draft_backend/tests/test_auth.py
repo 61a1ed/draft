@@ -208,7 +208,7 @@ def test_custom_oidc_callback_is_both_redirect_uri_and_callback_route():
 @pytest.mark.parametrize("path", ["/auth/callback", "/g", "/oauth/callback-v2"])
 def test_oidc_callback_path_accepts_static_root_relative_paths(path):
     settings = Settings(
-        database_url="unused", session_secret="x" * 32,
+        database_url="unused", migration_database_url="migration-unused", session_secret="x" * 32,
         public_base_url="https://draft.example", app_env="test", test_login_enabled=True,
         oidc_callback_path=path,
     )
@@ -225,7 +225,8 @@ def test_oidc_callback_path_accepts_static_root_relative_paths(path):
 def test_oidc_callback_path_rejects_ambiguous_or_conflicting_routes(path):
     with pytest.raises(ValueError, match="OIDC_CALLBACK_PATH"):
         Settings(
-            database_url="unused", session_secret="x" * 32,
+            database_url="unused", migration_database_url="migration-unused",
+            session_secret="x" * 32,
             public_base_url="https://draft.example", app_env="test", test_login_enabled=True,
             oidc_callback_path=path,
         )
@@ -233,7 +234,8 @@ def test_oidc_callback_path_rejects_ambiguous_or_conflicting_routes(path):
 
 def test_oidc_callback_path_can_be_configured_from_environment(monkeypatch):
     for name, value in {
-        "DATABASE_URL": "unused", "SESSION_SECRET": "x" * 32, "APP_ENV": "test",
+        "DATABASE_URL": "unused", "MIGRATION_DATABASE_URL": "migration-unused",
+        "SESSION_SECRET": "x" * 32, "APP_ENV": "test",
         "TEST_LOGIN_ENABLED": "true", "OIDC_ISSUER": "", "OIDC_CLIENT_ID": "",
         "OIDC_CLIENT_SECRET": "", "OIDC_CALLBACK_PATH": "/g",
     }.items():
@@ -247,7 +249,7 @@ def test_oidc_callback_path_can_be_configured_from_environment(monkeypatch):
 def test_oidc_configuration_rejects_non_https_or_invalid_issuers(issuer):
     with pytest.raises(ValueError, match="OIDC_ISSUER"):
         Settings(
-            database_url="unused",
+            database_url="unused", migration_database_url="migration-unused",
             session_secret="x" * 32,
             public_base_url="https://draft.example",
             oidc_issuer=issuer,
@@ -259,7 +261,7 @@ def test_oidc_configuration_rejects_non_https_or_invalid_issuers(issuer):
 def test_oidc_configuration_requires_complete_provider_settings():
     with pytest.raises(ValueError, match="together"):
         Settings(
-            database_url="unused",
+            database_url="unused", migration_database_url="migration-unused",
             session_secret="x" * 32,
             public_base_url="https://draft.example",
             oidc_issuer="https://id.example",
@@ -269,7 +271,7 @@ def test_oidc_configuration_requires_complete_provider_settings():
 def test_oidc_discovery_uses_the_configured_issuer():
     app = FastAPI()
     app.state.settings = Settings(
-        database_url="unused",
+        database_url="unused", migration_database_url="migration-unused",
         session_secret="x" * 32,
         public_base_url="https://draft.example",
         oidc_issuer="https://id.example/tenant",
@@ -285,7 +287,7 @@ def test_oidc_discovery_uses_the_configured_issuer():
 
 def test_settings_owns_test_login_and_retry_validation():
     settings = dict(
-        database_url="unused", session_secret="x" * 32,
+        database_url="unused", migration_database_url="migration-unused", session_secret="x" * 32,
         public_base_url="https://draft.example", app_env="test", test_login_enabled=True,
     )
     assert Settings(**settings, transaction_retries=0).transaction_retries == 0
@@ -297,7 +299,7 @@ def test_settings_owns_test_login_and_retry_validation():
 
 def test_stream_capacity_is_positive_and_configurable(monkeypatch):
     settings = dict(
-        database_url="unused", session_secret="x" * 32,
+        database_url="unused", migration_database_url="migration-unused", session_secret="x" * 32,
         public_base_url="https://draft.example", app_env="test", test_login_enabled=True,
     )
     assert Settings(**settings).sse_max_connections == 30
@@ -305,9 +307,25 @@ def test_stream_capacity_is_positive_and_configurable(monkeypatch):
         with pytest.raises(ValueError, match="positive"):
             Settings(**settings, sse_max_connections=invalid)
     for name, value in {
-        "DATABASE_URL": "unused", "SESSION_SECRET": "x" * 32, "APP_ENV": "test",
+        "DATABASE_URL": "unused", "MIGRATION_DATABASE_URL": "migration-unused",
+        "SESSION_SECRET": "x" * 32, "APP_ENV": "test",
         "TEST_LOGIN_ENABLED": "true", "OIDC_ISSUER": "", "OIDC_CLIENT_ID": "",
         "OIDC_CLIENT_SECRET": "", "SSE_MAX_CONNECTIONS": "7",
     }.items():
         monkeypatch.setenv(name, value)
     assert Settings.from_env().sse_max_connections == 7
+
+
+def test_migration_connection_is_required_from_environment(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "gateway")
+    monkeypatch.setenv("SESSION_SECRET", "x" * 32)
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("TEST_LOGIN_ENABLED", "true")
+    monkeypatch.setenv("OIDC_ISSUER", "")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "")
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "")
+    monkeypatch.delenv("MIGRATION_DATABASE_URL", raising=False)
+    with pytest.raises(ValueError, match="MIGRATION_DATABASE_URL"):
+        Settings.from_env()
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", "owner")
+    assert Settings.from_env().migration_database_url == "owner"

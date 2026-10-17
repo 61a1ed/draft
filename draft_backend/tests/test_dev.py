@@ -12,6 +12,7 @@ from scripts import dev
 def test_environments_remove_secrets_and_disable_color(monkeypatch):
     for key in (
         "DATABASE_URL",
+        "MIGRATION_DATABASE_URL",
         "ADMIN_DATABASE_URL",
         "SESSION_SECRET",
         "MY_DB",
@@ -20,14 +21,23 @@ def test_environments_remove_secrets_and_disable_color(monkeypatch):
     ):
         monkeypatch.setenv(key, "secret")
     backend, frontend = dev.child_environments(
-        {"DATABASE_URL": "local", "TEST_LOGIN_ENABLED": "true"}, 8001, 5174, "MY_DB"
+        {
+            "DATABASE_URL": "local",
+            "MIGRATION_DATABASE_URL": "local-admin",
+            "TEST_LOGIN_ENABLED": "true",
+        },
+        8001,
+        5174,
+        "MY_DB",
     )
     assert backend["DATABASE_URL"] == "local"
+    assert backend["MIGRATION_DATABASE_URL"] == "local-admin"
     assert backend["PUBLIC_BASE_URL"] == "http://127.0.0.1:5174"
     assert frontend["VITE_ENABLE_TEST_LOGIN"] == "true"
     assert (
         not {
             "DATABASE_URL",
+            "MIGRATION_DATABASE_URL",
             "ADMIN_DATABASE_URL",
             "SESSION_SECRET",
             "MY_DB",
@@ -67,8 +77,9 @@ def workspace(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_network_mode_never_prepares_database(workspace, monkeypatch):
+def test_network_mode_does_not_manage_or_seed_database(workspace, monkeypatch):
     monkeypatch.setenv("MY_DB", "postgresql://private")
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", "postgresql://private-admin")
 
     def forbidden(*args, **kwargs):
         pytest.fail("Network mode must not manage or seed a database")
@@ -77,44 +88,73 @@ def test_network_mode_never_prepares_database(workspace, monkeypatch):
         monkeypatch.setattr(dev.postgres, name, forbidden)
     monkeypatch.setattr(dev, "seed", forbidden)
     seen = []
-    monkeypatch.setattr(dev, "serve", lambda processes, values, args: seen.append(values))
+    monkeypatch.setattr(
+        dev,
+        "serve",
+        lambda processes, values, args: seen.append(
+            dev.child_environments(values, args.api_port, args.web_port, args.database_url_env)
+        ),
+    )
     dev.run(dev.parse_args(["--database-url-env", "MY_DB"]))
-    assert seen == [{"DATABASE_URL": "postgresql://private"}]
+    backend, frontend = seen[0]
+    assert backend["DATABASE_URL"] == "postgresql://private"
+    assert backend["MIGRATION_DATABASE_URL"] == "postgresql://private-admin"
+    assert "MIGRATION_DATABASE_URL" not in frontend
 
 
 def test_fresh_runs_unique_and_retained(workspace, monkeypatch):
-    roots, starts, seeds = [], [], []
+    roots, starts, seeds, served = [], [], [], []
     monkeypatch.setattr(dev, "load_catalog", lambda *args: "catalog")
 
     def initialize(root, binaries, port, processes):
         root.mkdir()
         (root / ".env").write_text("DATABASE_URL=local\n")
+        (root / "admin.env").write_text(
+            f"ADMIN_DATABASE_URL=postgresql://postgres:private@localhost:{port}/draft_test\n"
+        )
         roots.append(root)
         starts.append(root)
 
     monkeypatch.setattr(dev.postgres, "init", initialize)
     monkeypatch.setattr(dev, "seed", lambda *args: seeds.append(args))
-    monkeypatch.setattr(dev, "serve", lambda *args: None)
+    monkeypatch.setattr(dev, "serve", lambda processes, values, args: served.append(values))
     dev.run(dev.parse_args([]))
     dev.run(dev.parse_args([]))
     assert len(set(roots)) == 2
     assert all(root.is_dir() for root in roots)
     assert len(starts) == len(seeds) == 2
+    for values in served:
+        connection = dev.conninfo_to_dict(values["MIGRATION_DATABASE_URL"])
+        assert connection["user"] == "postgres"
+        assert connection["port"] == "55440"
 
 
-def test_resume_preserves_data(workspace, monkeypatch):
+@pytest.mark.parametrize("override_port", [None, 55442])
+def test_resume_preserves_data(workspace, monkeypatch, override_port):
     root = workspace / "saved"
     (root / "data").mkdir(parents=True)
     (root / "data/PG_VERSION").write_text("18")
     (root / ".env").write_text("DATABASE_URL=postgresql://localhost:55441/draft_test\n")
+    (root / "admin.env").write_text(
+        "ADMIN_DATABASE_URL=postgresql://postgres:private@localhost:55441/draft_test\n"
+    )
     monkeypatch.setattr(dev, "seed", lambda *args: pytest.fail("must not reseed"))
     monkeypatch.setattr(dev.postgres, "init", lambda *args: pytest.fail("must not initialize"))
-    starts = []
+    starts, served = [], []
     monkeypatch.setattr(dev.postgres, "start", lambda *args: starts.append(args))
-    monkeypatch.setattr(dev, "serve", lambda *args: None)
-    args = dev.parse_args(["--data-dir", str(root / "data"), "--db-port", "55442"])
+    monkeypatch.setattr(dev, "serve", lambda processes, values, args: served.append(values))
+    options = ["--data-dir", str(root / "data")]
+    if override_port is not None:
+        options.extend(["--db-port", str(override_port)])
+    args = dev.parse_args(options)
     dev.run(args)
-    assert starts[0][-1] == 55442
+    port = override_port if override_port is not None else 55441
+    assert starts[0][-1] == port
+    assert dev.conninfo_to_dict(served[0]["DATABASE_URL"])["port"] == str(port)
+    migration = dev.conninfo_to_dict(served[0]["MIGRATION_DATABASE_URL"])
+    assert migration["user"] == "postgres"
+    assert migration["port"] == str(port)
+    assert "MIGRATION_DATABASE_URL" not in dev.read_environment(root / ".env")
 
 
 def test_real_output_forwarding_and_cleanup(tmp_path, capsys):

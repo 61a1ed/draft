@@ -172,6 +172,9 @@ def host_settings(config: Config):
             "DATABASE_URL": "postgresql://dl_gateway:"
             + credentials["gateway_password"]
             + "@127.0.0.1:5432/draft",
+            "MIGRATION_DATABASE_URL": (
+                "host=/var/run/postgresql port=5432 dbname=draft user=dl_importer"
+            ),
             "SESSION_SECRET": credentials["session_secret"],
             "PUBLIC_BASE_URL": config.public_url,
             "APP_ENV": "production",

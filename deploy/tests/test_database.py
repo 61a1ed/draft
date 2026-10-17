@@ -28,7 +28,10 @@ def config(tmp_path):
 @pytest.mark.parametrize("action,role", [("init", "postgres"), ("import", "dl_importer")])
 def test_connection_is_explicit_and_ignores_ambient_credentials(config, monkeypatch, action, role):
     (config.state_dir / "secrets.json").write_text(json.dumps({"gateway_password": "s" * 40}))
-    for key in ("PGPASSWORD", "PGSERVICE", "PGHOSTADDR", "PGSSLMODE", "DL_GATEWAY_PASSWORD"):
+    for key in (
+        "PGPASSWORD", "PGSERVICE", "PGHOSTADDR", "PGSSLMODE", "DL_GATEWAY_PASSWORD",
+        "MIGRATION_DATABASE_URL",
+    ):
         monkeypatch.setenv(key, "untrusted-default")
     checked = []
     monkeypatch.setattr(
@@ -41,6 +44,7 @@ def test_connection_is_explicit_and_ignores_ambient_credentials(config, monkeypa
     assert env["PGSSLMODE"] == "verify-ca"
     assert env["PGSSLCERT"].endswith(f"{role}.crt")
     assert "PGPASSWORD" not in env and "PGSERVICE" not in env and "PGHOSTADDR" not in env
+    assert "MIGRATION_DATABASE_URL" not in env
     assert env.get("DL_GATEWAY_PASSWORD") == ("s" * 40 if action == "init" else None)
 
 

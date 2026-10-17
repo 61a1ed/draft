@@ -35,6 +35,9 @@ def test_secrets_survive_setup_retries_and_reset_after_teardown(config):
     saved = json.loads((config.state_dir / "secrets.json").read_text())
     assert saved["session_secret"] in first["app_environment"]["SESSION_SECRET"]
     assert first["app_environment"]["OIDC_CALLBACK_PATH"] == "/g"
+    assert first["app_environment"]["MIGRATION_DATABASE_URL"] == (
+        "host=/var/run/postgresql port=5432 dbname=draft user=dl_importer"
+    )
     (config.state_dir / "secrets.json").unlink()
     third = remote.host_settings(config)
     assert third["app_environment"]["SESSION_SECRET"] != first["app_environment"]["SESSION_SECRET"]

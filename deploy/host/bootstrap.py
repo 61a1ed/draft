@@ -33,9 +33,11 @@ UV = Path("/usr/local/bin/uv")
 ETC = Path("/etc")
 PG_DIRECTORY = Path("/etc/postgresql/16/main")
 DATABASE_PORT = 5432
+MIGRATION_DATABASE_URL = "host=/var/run/postgresql port=5432 dbname=draft user=dl_importer"
 TLS_FILES = ("server.key", "server.crt", "ca.crt")
 PG_HBA = b"""# Managed by this dedicated application deployment.
 local   all             postgres                    peer
+local   draft           dl_importer                 peer map=draft_migrations
 host    draft           dl_gateway  127.0.0.1/32     scram-sha-256
 hostssl postgres,draft  postgres    0.0.0.0/0        cert
 hostssl draft           dl_importer 0.0.0.0/0        cert
@@ -140,6 +142,8 @@ def validate(config: dict) -> dict:
         raise ValueError(
             "DATABASE_URL must use the supplied local draft gateway credentials on port 5432"
         )
+    if values.get("MIGRATION_DATABASE_URL") != MIGRATION_DATABASE_URL:
+        raise ValueError("MIGRATION_DATABASE_URL must use the local dl_importer Unix socket")
     return config
 
 
@@ -489,6 +493,14 @@ def validate_tls_source(directory: Path) -> dict[str, bytes]:
         ) from error
 
 
+def postgres_ident(name: str) -> bytes:
+    validate_name(name)
+    return (
+        "# Managed by this dedicated application deployment.\n"
+        f"draft_migrations {name} dl_importer\n"
+    ).encode()
+
+
 def postgres_settings(name: str) -> dict[str, str]:
     directory = ETC / "postgresql" / f"{name}-tls"
     return {
@@ -499,6 +511,7 @@ def postgres_settings(name: str) -> dict[str, str]:
         "ssl_key_file": str(directory / "server.key"),
         "ssl_ca_file": str(directory / "ca.crt"),
         "hba_file": str(PG_DIRECTORY / "pg_hba.conf"),
+        "ident_file": str(PG_DIRECTORY / "pg_ident.conf"),
         "password_encryption": "scram-sha-256",
     }
 
@@ -518,9 +531,10 @@ def postgres_state(*, reload=False) -> dict:
     query = """SELECT json_build_object(
         'settings', (SELECT json_object_agg(name, setting) FROM pg_settings
             WHERE name IN ('listen_addresses', 'port', 'ssl', 'ssl_cert_file',
-                'ssl_key_file', 'ssl_ca_file', 'hba_file', 'password_encryption')),
+                'ssl_key_file', 'ssl_ca_file', 'hba_file', 'ident_file', 'password_encryption')),
         'pending_restart', (SELECT bool_or(pending_restart) FROM pg_settings),
         'hba_errors', (SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL),
+        'ident_errors', (SELECT count(*) FROM pg_ident_file_mappings WHERE error IS NOT NULL),
         'loaded_at', pg_conf_load_time()::text,
         'reload', RELOAD_EXPRESSION);"""
     result = run(
@@ -551,16 +565,19 @@ def check_database_tls(name: str):
     hba = PG_DIRECTORY / "pg_hba.conf"
     if hba.is_symlink() or hba.read_bytes() != PG_HBA:
         raise RuntimeError("PostgreSQL authentication rules differ from the required mTLS policy")
+    ident = PG_DIRECTORY / "pg_ident.conf"
+    if ident.is_symlink() or ident.read_bytes() != postgres_ident(name):
+        raise RuntimeError("PostgreSQL user mapping differs from the required migration policy")
     state = postgres_state()
 
     def check_state(current):
         if current["settings"] != postgres_settings(name) or current["pending_restart"]:
             raise RuntimeError("Running PostgreSQL settings differ; run install-db-certs again")
-        if current["hba_errors"]:
+        if current["hba_errors"] or current["ident_errors"]:
             raise RuntimeError("PostgreSQL authentication configuration contains errors")
 
     check_state(state)
-    # pg_hba_file_rules describes the file on disk. Explicitly reload and wait
+    # The authentication views describe files on disk. Explicitly reload and wait
     # for PostgreSQL to process it before allowing the firewall to be opened.
     if not postgres_state(reload=True)["reload"]:
         raise RuntimeError("PostgreSQL could not reload its authentication rules")
@@ -594,6 +611,7 @@ def configure_postgres(config: dict, tls: dict[str, bytes]):
     files = {
         PG_DIRECTORY / "conf.d" / f"99-{name}.conf": (settings.encode(), 0o644),
         PG_DIRECTORY / "pg_hba.conf": (PG_HBA, 0o644),
+        PG_DIRECTORY / "pg_ident.conf": (postgres_ident(name), 0o644),
         **{
             directory / filename: (tls[filename], 0o640 if filename == "server.key" else 0o644)
             for filename in TLS_FILES

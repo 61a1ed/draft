@@ -146,6 +146,7 @@ def init(root: Path, pg_bin: Path, port: int, processes) -> None:
         "\n".join(
             [
                 f"DATABASE_URL={gateway_url}",
+                f"MIGRATION_DATABASE_URL={admin_url}",
                 "APP_ENV=test",
                 "TEST_LOGIN_ENABLED=true",
                 f"SESSION_SECRET={secrets.token_urlsafe(48)}",

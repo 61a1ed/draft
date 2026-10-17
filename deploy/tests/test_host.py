@@ -50,6 +50,7 @@ def host_config():
         "node_version": "24.22.0",
         "app_environment": {
             "DATABASE_URL": "postgresql://dl_gateway:private-password@127.0.0.1:5432/draft",
+            "MIGRATION_DATABASE_URL": bootstrap.MIGRATION_DATABASE_URL,
             "SESSION_SECRET": "s" * 40,
             "PUBLIC_BASE_URL": "https://draft.example.com",
             "APP_ENV": "production",
@@ -122,6 +123,13 @@ def test_host_refuses_unencrypted_or_external_database(host_config):
         bootstrap.validate(host_config)
 
 
+@pytest.mark.parametrize("url", ["", "postgresql://postgres@127.0.0.1/draft"])
+def test_host_requires_local_migration_connection(host_config, url):
+    host_config["app_environment"]["MIGRATION_DATABASE_URL"] = url
+    with pytest.raises(ValueError, match="MIGRATION_DATABASE_URL"):
+        bootstrap.validate(host_config)
+
+
 def test_environment_values_round_trip_without_shell_expansion(tmp_path):
     values = {"SECRET": "spaces $HOME `command` #hash \\path \"quote\" 'apostrophe'", "EMPTY": ""}
     path = tmp_path / "app.env"
@@ -141,6 +149,14 @@ def test_repeated_setup_preserves_credentials_and_rejects_replacement(host_confi
     with pytest.raises(RuntimeError, match="Saved credentials differ"):
         bootstrap.save_configuration(host_config, tmp_path)
     assert (tmp_path / "app.env").read_bytes() == original
+
+
+def test_setup_adds_migration_connection_to_existing_host(host_config, tmp_path):
+    migration_url = host_config["app_environment"].pop("MIGRATION_DATABASE_URL")
+    bootstrap.save_configuration(host_config, tmp_path)
+    host_config["app_environment"]["MIGRATION_DATABASE_URL"] = migration_url
+    bootstrap.save_configuration(host_config, tmp_path)
+    assert bootstrap.read_environment(tmp_path / "app.env") == host_config["app_environment"]
 
 
 def test_setup_keeps_active_caddy_route(tmp_path):

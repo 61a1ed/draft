@@ -18,15 +18,21 @@ Carol and six SQL scenarios. Put PostgreSQL binaries on PATH or pass `--pg-bin`.
 Open **http://127.0.0.1:5173**, sign in with a test account, and select a scenario.
 
 ```powershell
-# Resume the data directory printed by an earlier run (no schema or seed changes)
+# Resume the data directory printed by an earlier run (no reseeding)
 uv run python scripts/dev.py --data-dir '.dev-runs/<run>/database/data'
 # Connect to an already-prepared database using a URL stored in an environment variable
+# Also set MIGRATION_DATABASE_URL to a connection allowed to SET ROLE dl_owner.
 uv run python scripts/dev.py --database-url-env DEV_DATABASE_URL
 ```
 
-Network mode never initializes, seeds, migrates, starts, or stops Postgres. Supply
-normal backend authentication settings in the environment (SESSION_SECRET and
-OIDC settings; for local HTTP use APP_ENV=development and COOKIE_SECURE=false).
+The backend applies pending packaged SQL migrations before serving requests in
+every mode, including resume and network mode. Local runs supply the migration
+connection from the saved `admin.env`; network mode requires
+`MIGRATION_DATABASE_URL` in the environment. Migration failures stop startup.
+
+Network mode never initializes, seeds, starts, or stops Postgres. Supply normal
+backend authentication settings in the environment (SESSION_SECRET and OIDC
+settings; for local HTTP use APP_ENV=development and COOKIE_SECURE=false).
 It does not automatically enable test login. Normal application actions can still
 write to the connected database; this is not a read-only application mode.
 
@@ -36,7 +42,8 @@ Supply `--pg-bin` on resume too, unless PostgreSQL is on PATH.
 `--db-port` defaults to 55440 for fresh databases and the saved port for resumed
 ones; an override affects this invocation only. `--api-port` and `--web-port`
 default to 8000 and 5173. Network mode rejects `--db-port` and `--pg-bin`.
-There is no `--root`, `--prepare-only`, seed flag, or migration support.
+The database port override applies to both runtime and migration connections.
+There is no `--root`, `--prepare-only`, or seed flag.
 
 Ctrl+C force-stops owned process trees, including foreground Postgres. All data
 and logs remain available; Postgres performs crash recovery when resumed. The
@@ -122,8 +129,9 @@ Current bootstrap creates fixed cluster-wide service roles and refuses existing
 ones, so a separate **cluster** is the supported fully isolated option today.
 Sharing one cluster across multiple databases would require a provisioning change
 to reuse known roles. The backend needs no scenario endpoints or routing state.
-Create a fresh cluster when the schema itself changes; routine
-SQL fixture edits only need `scenarios.py apply`.
+Restart the backend to apply newly packaged migrations to a resumed cluster;
+create a fresh cluster when you want to reset its data. Routine SQL fixture edits
+only need `scenarios.py apply`.
 
 ## Automated integration runs
 
@@ -145,7 +153,11 @@ Delete old directories manually when they are no longer useful.
 `scripts/postgres.py` is the single PostgreSQL lifecycle implementation used by
 pytest and `dev.py`; `scripts/processes.py` owns foreground processes and output.
 There is no `testdb.py` management CLI and no JSON filesystem ownership marker.
-Connection settings remain in `.env` and `admin.env` beside `data/`.
+Connection settings remain in `.env` and `admin.env` beside `data/`. New local
+`.env` files include both `DATABASE_URL` and `MIGRATION_DATABASE_URL`, so manual
+backend launches can also apply migrations. The launcher reads `admin.env` for
+older saved clusters whose `.env` lacks the migration connection. Database
+credentials, including the migration connection, are excluded from Vite's environment.
 
 Initialization installs schema and roles without sample data. Development then
 loads test users, Pokémon, and SQL scenarios. Tests load test users and the small
@@ -162,7 +174,7 @@ password, then run:
 uv run python scripts/bootstrap.py
 ```
 
-This is a one-time bootstrap, not a migration runner. It refuses pre-existing
+This is a one-time bootstrap of the current schema baseline. It refuses pre-existing
 `dl_owner`, `dl_api`, `dl_auth`, or `dl_gateway` roles because roles are cluster-wide
 and silently reusing unknown accounts would be unsafe. Use a dedicated cluster
 or explicitly provision equivalent roles/grants yourself when integrating with
@@ -174,7 +186,11 @@ database CREATE privilege afterward. It does not install test fixtures or a
 test marker.
 
 The backend's `DATABASE_URL` must authenticate as `dl_gateway`, never the
-administrator or schema owner. `dl_gateway` has no inherited application table
+administrator or schema owner. Also supply `MIGRATION_DATABASE_URL` for a
+connection allowed to `SET ROLE dl_owner` in the same database. Startup uses that
+connection to apply pending packaged SQL migrations before opening the gateway
+pool; request handling uses only `DATABASE_URL`.
+`dl_gateway` has no inherited application table
 privileges and can explicitly select only `dl_api` or `dl_auth`. Authentication
 uses `dl_auth`; application requests use `dl_api`. Neither can become `dl_owner`.
 App users are rows in `dl.app_user`, not separate PostgreSQL login roles.
@@ -205,7 +221,7 @@ access to your files and no Showdown connection. Reimports upsert by dex/form
 without deleting omitted entries, preserving existing IDs. All changes commit
 together. `--dry-run` performs file/CSV validation without connecting to a database.
 
-The schema is installed directly on a fresh database; no migration runner is
-provided. For disposable development databases, initialize a fresh test cluster
-to exercise the new schema. Run `pytest --integration` to include the import integration test; its connections
-come from the same runner-owned cluster as the other integration tests.
+Bootstrap installs the schema baseline on a fresh database; backend startup
+applies pending packaged migrations. Run `pytest --integration` to include the
+import integration test; its connections come from the same runner-owned cluster
+as the other integration tests.

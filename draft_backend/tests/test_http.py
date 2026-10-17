@@ -3,10 +3,12 @@
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg.conninfo import make_conninfo
 
 from draft_backend import app as module
 from draft_backend.config import Settings
@@ -27,8 +29,10 @@ def application(monkeypatch):
     )
 
     monkeypatch.setattr(module, "Database", lambda _: db)
+    monkeypatch.setattr(module, "migrate", lambda *args, **kwargs: [])
     settings = Settings(
         database_url="postgresql://unused",
+        migration_database_url="postgresql://migration-unused",
         session_secret="x" * 40,
         app_env="test",
         test_login_enabled=True,
@@ -49,6 +53,95 @@ def test_readiness_requires_database_without_a_shared_listener_or_authentication
         db.ready.assert_awaited_once()
         assert client.get("/healthz").json() == {"status": "ok"}
         assert not hasattr(app.state, "events")
+
+
+def test_startup_migrates_before_opening_the_runtime_pool(application, monkeypatch):
+    app, db = application
+    calls = []
+
+    def migrate(conninfo, directory, **kwargs):
+        assert conninfo == app.state.settings.migration_database_url
+        assert directory == module.MIGRATION_DIRECTORY
+        assert kwargs == {"schema": "dl", "role": "dl_owner"}
+        calls.append("migrate")
+
+    async def open_database():
+        calls.append("open")
+
+    monkeypatch.setattr(module, "migrate", migrate)
+    db.open.side_effect = open_database
+    with TestClient(app) as client:
+        assert calls == ["migrate", "open"]
+        assert client.get("/ready").status_code == 200
+
+
+def test_failed_migration_prevents_startup_and_pool_creation(application, monkeypatch):
+    app, db = application
+
+    def fail(*args, **kwargs):
+        raise psycopg.errors.DivisionByZero("migration failed")
+
+    monkeypatch.setattr(module, "migrate", fail)
+    with pytest.raises(psycopg.errors.DivisionByZero):
+        with TestClient(app):
+            pytest.fail("The application must not become ready")
+    db.open.assert_not_awaited()
+    assert not hasattr(app.state, "db")
+
+
+@pytest.mark.integration
+def test_startup_failure_retry_and_migration_connection_cleanup(
+    test_database, tmp_path, monkeypatch
+):
+    suffix = uuid4().hex
+    name = f"startup_{suffix}"
+    table = f"dl.{name}"
+    first = f"a001-{suffix}.sql"
+    second = f"a002-{suffix}.sql"
+    (tmp_path / first).write_text(f"CREATE TABLE {table} (id integer);", encoding="utf-8")
+    later = tmp_path / second
+    later.write_text(
+        f"ALTER TABLE {table} ADD COLUMN value integer; SELECT 1 / 0;", encoding="utf-8"
+    )
+    monkeypatch.setattr(module, "MIGRATION_DIRECTORY", tmp_path)
+    settings = Settings(
+        database_url=test_database.gateway,
+        migration_database_url=make_conninfo(test_database.admin, application_name=name),
+        session_secret="x" * 40,
+        public_base_url="http://testserver",
+        app_env="test", test_login_enabled=True, cookie_secure=False,
+    )
+    options = {"loop_factory": asyncio.SelectorEventLoop}
+    with psycopg.connect(test_database.admin, autocommit=True) as conn:
+        try:
+            app = module.create_app(settings)
+            with pytest.raises(psycopg.errors.DivisionByZero):
+                with TestClient(app, backend_options=options):
+                    pytest.fail("The application must not become ready")
+            assert not hasattr(app.state, "db")
+            assert conn.execute(
+                "SELECT version FROM dl.schema_migrations ORDER BY version"
+            ).fetchall() == [(first,)]
+            assert conn.execute(
+                "SELECT count(*) FROM pg_attribute "
+                "WHERE attrelid = %s::regclass AND attname = 'value'", (table,)
+            ).fetchone() == (0,)
+
+            later.write_text(f"ALTER TABLE {table} ADD COLUMN value integer;", encoding="utf-8")
+            with TestClient(module.create_app(settings), backend_options=options) as client:
+                assert client.get("/ready").status_code == 200
+                assert conn.execute(
+                    "SELECT count(*) FROM pg_stat_activity WHERE application_name = %s", (name,)
+                ).fetchone() == (0,)
+                assert conn.execute(
+                    "SELECT version FROM dl.schema_migrations ORDER BY version"
+                ).fetchall() == [(first,), (second,)]
+                assert conn.execute(f"SELECT value FROM {table}").fetchall() == []
+        finally:
+            conn.execute(f"DROP TABLE IF EXISTS {table}")
+            conn.execute(
+                "DELETE FROM dl.schema_migrations WHERE version IN (%s, %s)", (first, second)
+            )
 
 
 def test_readiness_hides_database_error_details_and_recovers(application):

@@ -80,9 +80,10 @@ def database_url(test_database):
 
 
 @pytest.fixture
-def client(database_url):
+def client(test_database):
     settings = Settings(
-        database_url=database_url,
+        database_url=test_database.gateway,
+        migration_database_url=test_database.admin,
         session_secret="x" * 40,
         public_base_url="http://testserver",
         app_env="test",

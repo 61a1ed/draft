@@ -182,8 +182,12 @@ These are separate steps:
    services and runtimes, and install PostgreSQL's mTLS configuration. It generates
    the certificates if absent. PostgreSQL listens on standard TCP port `5432`; external access
    requires certificates for `postgres` or `dl_importer`. The local gateway keeps
-   its existing password and continues using `127.0.0.1:5432`. Applying TLS changes
-   restarts PostgreSQL, causing a brief database interruption.
+   its existing password and continues using `127.0.0.1:5432`. Startup migrations
+   use a separate connection as `dl_importer` over the local Unix socket, with
+   peer authentication mapping only the application's OS account to that role.
+   Setup writes `MIGRATION_DATABASE_URL` to the application environment and
+   manages both `pg_hba.conf` and `pg_ident.conf`. Applying PostgreSQL configuration
+   changes restarts PostgreSQL, causing a brief database interruption.
 2. `open-db-port` verifies the running TLS settings and authentication rules over
    verified SSH, then adds permanent public IPv4 TCP `5432` access in Lightsail.
    It changes only the database rule. No local firewall state is saved.
@@ -198,8 +202,16 @@ These are separate steps:
 6. `import-catalog` reads the local CSV and referenced images and writes directly
    through psycopg with the importer certificate. There is no archive upload or
    remote importer process.
-7. `deploy` starts the candidate, checks readiness, switches Caddy and retires the
-   previous release. It prepares the selected revision if needed.
+7. `deploy` starts the candidate, which applies pending migrations as `dl_owner`
+   and closes its privileged connection before opening the ordinary gateway pool.
+   It checks readiness, switches Caddy and retires the previous release. It
+   prepares the selected revision if needed. A migration failure prevents the
+   candidate from becoming ready and leaves the old release active.
+
+Before deploying startup migrations to an existing host, rerun `setup` to install
+the local peer-authentication mapping and add `MIGRATION_DATABASE_URL`. This does
+not reinitialize the database. No migration files are included yet: the current
+schema and grants used by `init-db` are the baseline.
 
 Commit the intended app changes before preparing a release. The default revision
 is `HEAD`; use `--revision FULL_COMMIT_ID` on `prepare`, `init-db`, `import-catalog`
@@ -290,7 +302,10 @@ if abandoning it, stop it explicitly in a server shell:
 sudo systemctl disable --now NAME@FULL_COMMIT_ID.service
 ```
 
-Ordinary releases never initialize, reset or migrate the database. `init-db`
+Ordinary releases apply pending migrations during application startup; they never
+initialize or reset the database. Each migration commits separately, so successful
+migrations remain applied if a later one fails. On retry, startup resumes with
+the pending migrations, and readiness still requires all of them to succeed. `init-db`
 checks its administrator-owned completion record inside PostgreSQL and preserves
 initialized data. Initialization and imports use database advisory locks. If
 initialization stopped after creating the database but before committing that record, it refuses
@@ -451,4 +466,5 @@ local backend environment, and `draft_backend/scripts/deployment_db.py` owns
 database initialization and import.
 The release handoff follows
 [the reference spec](../caddy-uv-systemd-deployment.md). No automatic release or
-shared-asset pruning, backups or database migration runner is included.
+shared-asset pruning or backups are included. Database migrations run automatically
+before application readiness.

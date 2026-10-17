@@ -55,6 +55,7 @@ def child_environments(values, api_port, web_port, database_env=None):
     frontend = os.environ.copy()
     for name in (
         "DATABASE_URL",
+        "MIGRATION_DATABASE_URL",
         "ADMIN_DATABASE_URL",
         "SESSION_SECRET",
         "OIDC_CLIENT_SECRET",
@@ -189,6 +190,8 @@ def run(args):
                 values = read_environment(root / ".env")
             else:
                 postgres.start(processes, pg_bin, root, port)
+            admin = read_environment(root / "admin.env")["ADMIN_DATABASE_URL"]
+            values["MIGRATION_DATABASE_URL"] = make_conninfo(admin, port=port)
             print(
                 f"Database: {root / 'data'}\nResume: python scripts/dev.py "
                 f'--data-dir "{root / "data"}" --pg-bin "{pg_bin}" --db-port {port}',

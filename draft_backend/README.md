@@ -19,6 +19,23 @@ for one-command resets, custom SQL, and isolation choices.
 the deployment permissions. Authentication inserts/updates users using a separate
 role.
 
+The current `sql/schema.sql` and `sql/grants.sql` are the fixed installation
+baseline. Subsequent changes belong in `src/draft_backend/sql_migrations/`;
+there are no migrations yet. Startup applies these files through the separate
+`MIGRATION_DATABASE_URL` connection as `dl_owner`, closes it, then opens the
+ordinary `DATABASE_URL` pool. A failed migration prevents startup and readiness.
+The local launcher supplies both connections. For manual or external launches,
+set `MIGRATION_DATABASE_URL` to a connection allowed to `SET ROLE dl_owner` in
+the same database. Production host setup supplies this connection automatically.
+
+Migration names are ordered case-insensitively: start with
+`a001-description.sql`, `a002-description.sql`, etc. A later timestamp series
+such as `B2026-10-16-120000-description.sql` sorts after the `a` series. Each file
+and its record in `dl.schema_migrations` commit together; earlier successful
+files remain applied if a later one fails. Do not edit or rename applied files.
+Keep the baseline fixed so fresh installations and existing databases apply
+the same migrations. The packaged migration directory describes the SQL rules.
+
 ## Local development and integration tests
 
 Requirements: uv, Python 3.12+, PostgreSQL 16+ binaries, and (for the frontend)

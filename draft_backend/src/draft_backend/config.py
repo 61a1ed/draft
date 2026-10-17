@@ -15,6 +15,7 @@ def flag(name: str, default: bool) -> bool:
 class Settings:
     database_url: str
     session_secret: str
+    migration_database_url: str
     public_base_url: str = "http://127.0.0.1:8000"
     app_env: str = "production"
     test_login_enabled: bool = False
@@ -32,6 +33,8 @@ class Settings:
     def __post_init__(self):
         if not self.database_url:
             raise ValueError("DATABASE_URL is required")
+        if not self.migration_database_url:
+            raise ValueError("MIGRATION_DATABASE_URL is required")
         if len(self.session_secret) < 32:
             raise ValueError("SESSION_SECRET must contain at least 32 characters")
         url = urlsplit(self.public_base_url)
@@ -101,6 +104,7 @@ class Settings:
         return cls(
             database_url=os.environ["DATABASE_URL"],
             session_secret=os.environ["SESSION_SECRET"],
+            migration_database_url=os.getenv("MIGRATION_DATABASE_URL", ""),
             public_base_url=os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000"),
             app_env=os.getenv("APP_ENV", "production"),
             test_login_enabled=flag("TEST_LOGIN_ENABLED", False),

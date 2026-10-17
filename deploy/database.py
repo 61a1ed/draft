@@ -66,7 +66,10 @@ def connection_environment(config, state, action, host=None):
     env = {
         key: value for key, value in os.environ.items()
         if not key.upper().startswith("PG")
-        and key not in {"ADMIN_DATABASE_URL", "DATABASE_URL", "DL_GATEWAY_PASSWORD", "PYTHONPATH"}
+        and key not in {
+            "ADMIN_DATABASE_URL", "DATABASE_URL", "MIGRATION_DATABASE_URL",
+            "DL_GATEWAY_PASSWORD", "PYTHONPATH",
+        }
     }
     env.update({
         "PGHOST": address,
