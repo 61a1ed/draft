@@ -6,6 +6,7 @@ import type { LeagueSnapshot } from '../lib/types'
 import type { OfficialResult, TournamentMatch, TournamentSnapshot } from '../lib/tournamentTypes'
 import { useTournament } from '../lib/useTournament'
 import { Tournament } from './Tournament'
+import { TournamentMatch as MatchDetails } from './TournamentMatch'
 
 vi.mock('../lib/useTournament', () => ({ useTournament: vi.fn() }))
 vi.mock('../lib/api', async (importOriginal) => {
@@ -291,6 +292,15 @@ afterEach(async () => {
 })
 
 describe('tournament publication', () => {
+  it('passes availability navigation through to opened match details', async () => {
+    props.onCompareAvailability = vi.fn()
+    await render()
+    await click(renderer!.root.findAllByProps({ className: 'tournament-fixture' })[0])
+    const match = renderer!.root.findByType(MatchDetails)
+    expect(match.props.matchId).toBe(1000)
+    expect(match.props.onCompareAvailability).toBe(props.onCompareAvailability)
+  })
+
   it('sends the reviewed draft revision and selected rules, with required date and odd-value controls', async () => {
     state = null
     await render()

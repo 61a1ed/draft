@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  CalendarDays,
   Check,
   ChevronDown,
   Clock3,
@@ -29,12 +30,21 @@ import { Catalog, PokemonImage } from './components/Catalog'
 import { Modal } from './components/Modal'
 import { LeagueSetup } from './components/LeagueSetup'
 import { Tournament } from './components/Tournament'
+import { Availability } from './components/Availability'
 
-type View = 'draft' | 'tournament' | 'teams' | 'activity' | 'settings'
+type View = 'draft' | 'tournament' | 'availability' | 'teams' | 'activity' | 'settings'
+
+type AvailabilityContext = {
+  owner: string
+  teamId: number
+  compareTeamId: number
+  date?: string
+}
 type SelectedPick = { item: Draftable; revision: number; teamId: number | null }
 const navItems = [
   { id: 'draft', label: 'Draft room', icon: LayoutGrid },
   { id: 'tournament', label: 'Tournament', icon: Trophy },
+  { id: 'availability', label: 'Availability', icon: CalendarDays },
   { id: 'teams', label: 'Teams & rosters', icon: Users },
   { id: 'activity', label: 'Draft activity', icon: History },
   { id: 'settings', label: 'League settings', icon: Settings2 },
@@ -232,6 +242,10 @@ export default function App() {
   const draft = useDraft()
   const { snapshot, session, catalog, mode } = draft
   const [view, setView] = useState<View>('draft')
+  const [availabilityContext, setAvailabilityContext] = useState<AvailabilityContext | null>(null)
+  const availabilityOwner = `${session?.user.id ?? 0}:${draft.leagueId ?? 0}`
+  const availabilityNavigation =
+    availabilityContext?.owner === availabilityOwner ? availabilityContext : null
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' })
   }, [view])
@@ -283,6 +297,7 @@ export default function App() {
   useEffect(() => {
     setSelected(null)
     setConfirmAction(null)
+    setAvailabilityContext(null)
   }, [draft.leagueId, mode, session?.user.id])
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
   const myTeam = snapshot?.teams.find((team) => team.manager_user_id === session?.user.id)
@@ -430,7 +445,10 @@ export default function App() {
               className={view === id ? 'active' : ''}
               aria-label={label}
               aria-current={view === id ? 'page' : undefined}
-              onClick={() => setView(id)}
+              onClick={() => {
+                if (id === 'availability') setAvailabilityContext(null)
+                setView(id)
+              }}
             >
               <Icon size={18} />
               <span>{label}</span>
@@ -496,7 +514,7 @@ export default function App() {
                 setConfirmAction(null)
                 void draft.refreshData()
               }}
-              title="Refresh leagues, catalog, draft, and tournament"
+              title="Refresh leagues, catalog, draft, tournament, and availability"
             >
               <RefreshCw size={16} />
             </button>
@@ -843,6 +861,33 @@ export default function App() {
                   refreshKey={draft.tournamentRefreshKey}
                   busy={draft.busy}
                   mutate={draft.mutate}
+                  onCompareAvailability={(teamId, compareTeamId, date) => {
+                    setAvailabilityContext({
+                      owner: availabilityOwner,
+                      teamId,
+                      compareTeamId,
+                      date,
+                    })
+                    setView('availability')
+                  }}
+                />
+              )}
+              {view === 'availability' && (
+                <Availability
+                  key={JSON.stringify([
+                    availabilityOwner,
+                    availabilityNavigation?.teamId,
+                    availabilityNavigation?.compareTeamId,
+                    availabilityNavigation?.date,
+                  ])}
+                  snapshot={snapshot}
+                  userId={session!.user.id}
+                  refreshKey={draft.tournamentRefreshKey}
+                  busy={draft.busy}
+                  mutate={draft.mutate}
+                  initialTeamId={availabilityNavigation?.teamId}
+                  initialCompareTeamId={availabilityNavigation?.compareTeamId}
+                  initialDate={availabilityNavigation?.date}
                 />
               )}
               {view === 'settings' && (

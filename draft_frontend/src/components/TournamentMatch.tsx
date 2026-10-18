@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { ExternalLink, RefreshCw } from 'lucide-react'
+import { CalendarDays, ExternalLink, RefreshCw } from 'lucide-react'
 import { api, errorMessage } from '../lib/api'
 import type { LeagueSnapshot, User } from '../lib/types'
 import type {
@@ -24,6 +24,7 @@ interface TournamentMatchProps {
   busy: boolean
   run: (operation: () => Promise<unknown>) => Promise<boolean>
   onClose: () => void
+  onCompareAvailability?: (teamId: number, compareTeamId: number, date?: string) => void
 }
 
 type Names = { a: string; b: string }
@@ -435,6 +436,7 @@ function TournamentMatchContent({
   busy,
   run,
   onClose,
+  onCompareAvailability,
 }: TournamentMatchProps) {
   const { match, loading, error, refresh } = useTournamentMatch({
     matchId,
@@ -566,6 +568,29 @@ function TournamentMatchContent({
         )}
         {match && (
           <>
+            {onCompareAvailability && (
+              <section className="tournament-match-section">
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={busy || pending}
+                  onClick={() =>
+                    onCompareAvailability(
+                      match.team_a_id,
+                      match.team_b_id,
+                      round?.suggested_start_date ?? undefined,
+                    )
+                  }
+                >
+                  <CalendarDays size={16} />
+                  Compare availability
+                </button>
+                <p className="muted">
+                  Find shared free time for these teams. Suggested weeks are flexible; browse any
+                  dates and arrange the match together.
+                </p>
+              </section>
+            )}
             <section className="tournament-match-section">
               <h3>
                 {disposition

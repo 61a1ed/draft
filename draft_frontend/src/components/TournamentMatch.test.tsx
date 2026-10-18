@@ -148,7 +148,7 @@ function tournament(): TournamentSnapshot {
         tiebreak_reason: null,
         created_by: 99,
         created_at: now,
-        suggested_start_date: '2026-10-19',
+        suggested_start_date: suggestedDate,
       },
     ],
     matches: [detail],
@@ -165,6 +165,9 @@ function tournament(): TournamentSnapshot {
 let renderer: ReactTestRenderer | null
 let detail: MatchDetail
 let userId: number
+let suggestedDate: string | null
+let compareAvailability:
+  ((teamId: number, compareTeamId: number, date?: string) => void) | undefined
 let withdrawals: TournamentSnapshot['withdrawals']
 let refresh: ReturnType<typeof vi.fn<() => Promise<void>>>
 let run: ReturnType<typeof vi.fn<(operation: () => Promise<unknown>) => Promise<boolean>>>
@@ -185,6 +188,7 @@ function screen() {
       busy={false}
       run={run}
       onClose={() => undefined}
+      onCompareAvailability={compareAvailability}
     />
   )
 }
@@ -239,6 +243,8 @@ beforeEach(() => {
   renderer = null
   detail = fixture()
   userId = 11
+  suggestedDate = '2026-10-19'
+  compareAvailability = undefined
   withdrawals = []
   refresh = vi.fn().mockResolvedValue(undefined)
   run = vi.fn(async (operation: () => Promise<unknown>) => {
@@ -269,6 +275,24 @@ afterEach(async () => {
 })
 
 describe('TournamentMatch', () => {
+  it('opens both fixture teams at the exact suggested date for a spectator', async () => {
+    userId = 33
+    suggestedDate = '2026-10-21'
+    compareAvailability = vi.fn()
+    await mount()
+    await click('Compare availability')
+    expect(compareAvailability).toHaveBeenCalledWith(1, 2, '2026-10-21')
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('opens availability without a date when the round has no suggested week', async () => {
+    suggestedDate = null
+    compareAvailability = vi.fn()
+    await mount()
+    await click('Compare availability')
+    expect(compareAvailability).toHaveBeenCalledWith(1, 2, undefined)
+  })
+
   it('reports named A/B scores in fixture orientation even for the B manager', async () => {
     userId = 22
     await mount()

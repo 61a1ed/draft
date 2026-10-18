@@ -15,6 +15,7 @@ interface Props {
   refreshKey: number
   busy: boolean
   mutate: (operation: () => Promise<unknown>) => Promise<boolean>
+  onCompareAvailability?: (teamId: number, compareTeamId: number, date?: string) => void
 }
 type Run = Props['mutate']
 type Editor = {
@@ -453,7 +454,15 @@ function ManagementForm({
   )
 }
 
-export function Tournament({ snapshot, userId, users, refreshKey, busy, mutate }: Props) {
+export function Tournament({
+  snapshot,
+  userId,
+  users,
+  refreshKey,
+  busy,
+  mutate,
+  onCompareAvailability,
+}: Props) {
   const { state, loading, error, readError, writeError, clearError, refresh, run } = useTournament({
     leagueId: snapshot.league_id,
     refreshKey,
@@ -872,6 +881,7 @@ export function Tournament({ snapshot, userId, users, refreshKey, busy, mutate }
           busy={busy}
           run={run}
           onClose={() => setMatchId(null)}
+          onCompareAvailability={onCompareAvailability}
         />
       )}
     </div>

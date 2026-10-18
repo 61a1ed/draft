@@ -93,7 +93,12 @@ frontend development.
   tiebreaks with separate records, and selection/publication of the two finalists.
   The champion comes from the official final result. Qualification follows the
   commissioner's announced criteria; displayed records do not automatically seed
-  or select finalists. Availability planning and signed-out spectator pages are deferred.
+  or select finalists. Signed-out spectator pages are deferred.
+- Team availability planning with a dated weekly grid, timezone selection, shared
+  free time, and week copying that preserves local wall times across daylight
+  saving changes. Managers edit their own teams; match details open both teams
+  at the round's suggested week, and any dates can be browsed. Availability is
+  advisory and does not book a match or restrict result reporting.
 - One account SSE stream at `/api/events` per signed-in tab, including accounts
   with no leagues. Assignments appear automatically with a notice; selection
   changes keep the stream open, and removed access selects another league or
@@ -151,6 +156,14 @@ fallbacks if the font service is unavailable.
 - `src/components/`: catalog, roster setup, and accessible modal components.
 - `src/components/Tournament.tsx`, `TournamentMatch.tsx`: tournament overview,
   management, schedule, reporting, and history within the signed-in league shell.
+- `src/components/Availability.tsx`: team schedules, shared availability, window
+  editing, and copying a saved week. Saving retains windows on every date, and
+  copying adds to the destination. Repeated clock times require an explicit
+  occurrence when entered; nonexistent local times are rejected.
+- `src/lib/availabilityTypes.ts`, `availabilityTime.ts`, `useAvailability.ts`:
+  availability contracts, timezone conversion and interval intersection, and
+  revision-aware reads. Availability refreshes from the existing account stream
+  independently of league/tournament revisions; writes are never replayed.
 - `src/lib/api.ts`, `types.ts`: typed backend contract and event client.
 - `src/lib/useDraft.ts`: session, league, request, and stream lifecycle.
 - `src/lib/tournamentTypes.ts`, `useTournament.ts`, `tournamentView.ts`: tournament

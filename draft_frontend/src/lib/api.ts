@@ -27,11 +27,15 @@ import type {
   TournamentSnapshot,
   WithdrawTeamInput,
 } from './tournamentTypes'
+import type {
+  CopyTeamAvailabilityWeekInput,
+  SetTeamAvailabilityInput,
+  TeamAvailabilitySnapshot,
+} from './availabilityTypes'
 
 const errorMessages: Record<string, string> = {
   sign_in_required: 'Your session has ended. Sign in to continue.',
-  stale_revision:
-    'The league or match changed while you were working. Review the latest state and try again.',
+  stale_revision: 'The data changed while you were working. Review the latest state and try again.',
   action_not_permitted: 'This action is not available to you in the current state.',
   point_budget_exceeded: 'This Pokémon costs more than the team’s remaining points.',
   already_exists_or_claimed: 'That Pokémon is already picked, or that manager is already assigned.',
@@ -90,6 +94,13 @@ const errorMessages: Record<string, string> = {
   exactly_two_qualifiers_required: 'Select exactly two eligible finalists.',
   distinct_qualifiers_required: 'Select two different teams for the final.',
   ineligible_qualifier: 'A selected finalist is no longer eligible. Review the entrants.',
+  availability_not_found: 'Save your availability before copying a week.',
+  invalid_time_zone: 'Choose a valid IANA time zone, such as America/Los_Angeles.',
+  invalid_availability: 'Check the time zone, display interval, and availability windows.',
+  invalid_availability_window: 'Each availability window must end after it starts.',
+  invalid_availability_week: 'Choose valid source and destination dates for the week copy.',
+  nonexistent_local_boundary:
+    'A copied time falls in a daylight saving time gap. Adjust that window before copying.',
 }
 
 export class ApiError extends Error {
@@ -230,6 +241,12 @@ export const api = {
     request<TournamentSnapshot>(`/api/leagues/${leagueId}/tournament`, { signal }),
   match: (matchId: number, signal?: AbortSignal) =>
     request<MatchDetail>(`/api/matches/${matchId}`, { signal }),
+  teamAvailability: (teamId: number, signal?: AbortSignal) =>
+    request<TeamAvailabilitySnapshot>(`/api/teams/${teamId}/availability`, { signal }),
+  setTeamAvailability: (input: SetTeamAvailabilityInput) =>
+    rpc<null>('set_team_availability', input),
+  copyTeamAvailabilityWeek: (input: CopyTeamAvailabilityWeekInput) =>
+    rpc<null>('copy_team_availability_week', input),
   publishTournament: (input: PublishTournamentInput) => rpc<null>('publish_tournament', input),
   setRoundSuggestedDate: (input: SetRoundSuggestedDateInput) =>
     rpc<null>('set_round_suggested_date', input),
