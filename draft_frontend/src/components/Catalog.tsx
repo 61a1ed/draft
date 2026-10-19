@@ -144,7 +144,12 @@ export function Catalog({
       <div className="favorites-toolbar">
         <label className="favorites-select">
           <span>
-            <Bookmark size={14} /> Favorites list
+            <span className="favorites-select-label">
+              <Bookmark size={14} /> Favorites list
+            </span>
+            <span className="favorites-status" role="status" aria-atomic="true">
+              {favorites.busy ? 'Saving favorites…' : favorites.loading ? 'Loading favorites…' : ''}
+            </span>
           </span>
           <select
             aria-label="Favorites list"
@@ -307,16 +312,6 @@ export function Catalog({
           <span>In budget</span>
         </button>
       </div>
-      {favorites.loading && (
-        <p className="muted" role="status">
-          Loading favorites…
-        </p>
-      )}
-      {favorites.busy && (
-        <p className="muted" role="status">
-          Saving favorites…
-        </p>
-      )}
       <div className="pokemon-grid">
         {filtered.slice(0, limit).map((item) => {
           const taken = drafted.has(item.id)

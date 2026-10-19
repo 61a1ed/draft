@@ -4366,7 +4366,7 @@ main {
   background: #f8f5fc;
 }
 .favorites-select {
-  flex: 1 1 180px;
+  flex: 1 1 260px;
   min-width: 0;
 }
 .favorites-select > span {
@@ -4377,6 +4377,21 @@ main {
   font-size: 12px;
   font-weight: 600;
   color: #75618c;
+}
+.favorites-select-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.favorites-status {
+  flex: 0 0 17ch;
+  min-height: 1.6em;
+  margin-left: auto;
+  color: #796b87;
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: right;
+  white-space: nowrap;
 }
 .favorites-select select {
   width: 100%;
