@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { CalendarDays, ExternalLink, RefreshCw } from 'lucide-react'
 import { api, errorMessage } from '../lib/api'
+import { teamName } from '../lib/teamPresentation'
 import type { LeagueSnapshot, User } from '../lib/types'
 import type {
   MatchDetail,
@@ -447,7 +448,10 @@ function TournamentMatchContent({
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState('')
   const [success, setSuccess] = useState('')
-  const name = (id: number) => snapshot.teams.find((team) => team.id === id)?.name ?? `Team ${id}`
+  const name = (id: number) => {
+    const team = snapshot.teams.find((item) => item.id === id)
+    return team ? teamName(team) : `Team #${id}`
+  }
   const author = (id: number | null) =>
     users.find((user) => user.id === id)?.display_name ?? `User ${id}`
   const mutate = async (operation: () => Promise<unknown>) => {

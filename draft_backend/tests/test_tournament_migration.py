@@ -110,14 +110,20 @@ def call_as_commissioner(database, query, parameters, *, rollback=False):
         return result
 
 
-def test_packaged_tournament_upgrade_preserves_existing_draft_and_permissions(populated_baseline):
+def test_packaged_tournament_upgrade_preserves_existing_draft_and_permissions(
+    populated_baseline, tmp_path
+):
     database = populated_baseline
+    # This historical upgrade test deliberately checks only the tournament
+    # migration; later packaged migrations may add columns to baseline tables.
+    source = MIGRATION_DIRECTORY / "0001_tournament.sql"
+    (tmp_path / source.name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     with psycopg.connect(database.admin, autocommit=True) as conn:
         before = baseline_rows(conn)
         assert conn.execute("SELECT to_regclass('dl.tournament')").fetchone() == (None,)
         assert conn.execute("SELECT status FROM dl.draft_state").fetchone() == ("completed",)
 
-        applied = migrate(database.admin, MIGRATION_DIRECTORY, schema="dl", role="dl_owner")
+        applied = migrate(database.admin, tmp_path, schema="dl", role="dl_owner")
         assert applied == ["0001_tournament.sql"]
         assert baseline_rows(conn) == before
         ledger = conn.execute(
@@ -178,7 +184,7 @@ def test_packaged_tournament_upgrade_preserves_existing_draft_and_permissions(po
         assert denied.value.sqlstate == "PT409"
         assert baseline_rows(conn) == before
 
-        assert migrate(database.admin, MIGRATION_DIRECTORY, schema="dl", role="dl_owner") == []
+        assert migrate(database.admin, tmp_path, schema="dl", role="dl_owner") == []
         assert conn.execute(
             'SELECT * FROM dl.schema_migrations ORDER BY version COLLATE "C"'
         ).fetchall() == ledger

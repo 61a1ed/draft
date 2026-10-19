@@ -15,7 +15,7 @@ from collections.abc import Mapping
 import httpx
 from authlib.integrations.base_client import OAuthError
 from authlib.integrations.starlette_client import OAuth
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
 from joserfc.errors import JoseError
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import JSONResponse, RedirectResponse
@@ -101,7 +101,7 @@ def install_auth(app: FastAPI) -> None:
     router = APIRouter(tags=["authentication"])
 
     @router.get("/auth/login")
-    async def oidc_login(request: Request):
+    async def oidc_login(request: Request, display_name: str = Query(default="", max_length=80)):
         client = request.app.state.oauth.create_client("oidc")
         if client is None:
             return _oidc_redirect(settings, "oidc_login_not_configured")
@@ -109,6 +109,7 @@ def install_auth(app: FastAPI) -> None:
         for key in list(request.session):
             if key.startswith("_state_oidc_"):
                 del request.session[key]
+        request.session["signup_display_name"] = display_name.strip()
         callback = settings.public_base_url.rstrip("/") + settings.oidc_callback_path
         try:
             response = await client.authorize_redirect(request, callback)
@@ -144,7 +145,8 @@ def install_auth(app: FastAPI) -> None:
         ):
             return _oidc_redirect(settings, "oidc_identity_invalid")
         name = claims.get("name")
-        display_name = name.strip() if isinstance(name, str) and name.strip() else "User"
+        provider_name = name.strip() if isinstance(name, str) and name.strip() else "User"
+        display_name = request.session.pop("signup_display_name", "") or provider_name
         user = await request.app.state.db.register_identity(issuer, subject, display_name)
         _login(request, user)
         return _oidc_redirect(settings)

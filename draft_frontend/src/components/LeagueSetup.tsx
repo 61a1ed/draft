@@ -1,18 +1,24 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowDown, ArrowUp, Check, Plus, Save, Settings2, Trash2, Users } from 'lucide-react'
 import { api } from '../lib/api'
+import { teamColor, teamName } from '../lib/teamPresentation'
 import type { LeagueSnapshot, Team, User } from '../lib/types'
+import { TeamMetadata } from './TeamMetadata'
 
 interface LeagueSetupProps {
   snapshot: LeagueSnapshot
   users: User[]
+  userId: number
   busy: boolean
   onMutation: (operation: () => Promise<unknown>) => Promise<unknown>
+  onStartDraft?: () => void
 }
 
 type MutationHandler = LeagueSetupProps['onMutation']
 
-function LeagueSettings({ snapshot, busy, onMutation }: Omit<LeagueSetupProps, 'users'>) {
+type SettingsProps = Pick<LeagueSetupProps, 'snapshot' | 'busy' | 'onMutation'>
+
+function LeagueSettings({ snapshot, busy, onMutation }: SettingsProps) {
   const [name, setName] = useState(snapshot.league.name)
   const [rosterSize, setRosterSize] = useState(String(snapshot.league.roster_size))
   const [pickSeconds, setPickSeconds] = useState(String(snapshot.league.pick_seconds))
@@ -98,11 +104,11 @@ function TeamEditor({ team, snapshot, users, busy, onMutation }: TeamEditorProps
 
   const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (busy || !name.trim() || !manager) return
+    if (busy || !manager) return
     const input = {
       p_league: snapshot.league_id,
       p_revision: snapshot.revision,
-      p_name: name.trim(),
+      p_name: team ? team.name : name.trim() || null,
       p_manager: Number(manager),
       p_point_budget: Number(budget),
     }
@@ -130,17 +136,18 @@ function TeamEditor({ team, snapshot, users, busy, onMutation }: TeamEditorProps
     <div className="team-editor">
       <form onSubmit={save}>
         <fieldset disabled={busy} className="form-fieldset">
-          <legend className="team-editor-title">{team ? team.name : 'Add a team'}</legend>
+          <legend className="team-editor-title">{team ? teamName(team) : 'Add a team'}</legend>
           <div className="form-grid team-form-grid">
-            <label className="field">
-              <span>Team name</span>
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-                pattern=".*\S.*"
-              />
-            </label>
+            {!team && (
+              <label className="field initial-team-name">
+                <span>Team name (optional)</span>
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Their manager can choose this later"
+                />
+              </label>
+            )}
             <label className="field">
               <span>Manager</span>
               <select value={manager} onChange={(event) => setManager(event.target.value)} required>
@@ -178,7 +185,7 @@ function TeamEditor({ team, snapshot, users, busy, onMutation }: TeamEditorProps
               disabled={!manager || (!team && availableUsers.length === 0)}
             >
               {team ? <Save size={16} aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}
-              {team ? 'Save team' : 'Add team'}
+              {team ? 'Save manager & budget' : 'Add team'}
             </button>
             {team && !confirmRemove && (
               <button
@@ -202,8 +209,8 @@ function TeamEditor({ team, snapshot, users, busy, onMutation }: TeamEditorProps
       {team && confirmRemove && (
         <div className="confirm-removal" role="alert">
           <p>
-            Remove <strong>{team.name}</strong> from this league? You can add the team again during
-            setup.
+            Remove <strong>{teamName(team)}</strong> from this league? You can add the team again
+            during setup.
           </p>
           <div className="form-actions">
             <button type="button" className="button danger" disabled={busy} onClick={remove}>
@@ -224,7 +231,12 @@ function TeamEditor({ team, snapshot, users, busy, onMutation }: TeamEditorProps
   )
 }
 
-function DraftOrder({ snapshot, busy, onMutation }: Omit<LeagueSetupProps, 'users'>) {
+function DraftOrder({
+  snapshot,
+  busy,
+  onMutation,
+  onStartDraft,
+}: SettingsProps & Pick<LeagueSetupProps, 'onStartDraft'>) {
   const [order, setOrder] = useState(() =>
     [...snapshot.teams]
       .sort(
@@ -234,6 +246,8 @@ function DraftOrder({ snapshot, busy, onMutation }: Omit<LeagueSetupProps, 'user
   )
   const teamsById = new Map(snapshot.teams.map((team) => [team.id, team]))
   const isSaved = order.every((id, index) => teamsById.get(id)?.draft_position === index + 1)
+  const unfinishedTeams = snapshot.teams.filter((team) => !team.metadata_complete)
+  const canStart = snapshot.actions.some((action) => action.kind === 'start')
 
   const move = (index: number, offset: -1 | 1) => {
     setOrder((previous) => {
@@ -263,12 +277,12 @@ function DraftOrder({ snapshot, busy, onMutation }: Omit<LeagueSetupProps, 'user
             return (
               <li key={id}>
                 <span className="order-number">{index + 1}</span>
-                <span className="order-team-name">{team.name}</span>
+                <span className="order-team-name">{teamName(team)}</span>
                 <div className="order-controls">
                   <button
                     type="button"
                     className="button icon-button secondary"
-                    aria-label={`Move ${team.name} up`}
+                    aria-label={`Move ${teamName(team)} up`}
                     disabled={busy || index === 0}
                     onClick={() => move(index, -1)}
                   >
@@ -277,7 +291,7 @@ function DraftOrder({ snapshot, busy, onMutation }: Omit<LeagueSetupProps, 'user
                   <button
                     type="button"
                     className="button icon-button secondary"
-                    aria-label={`Move ${team.name} down`}
+                    aria-label={`Move ${teamName(team)} down`}
                     disabled={busy || index === order.length - 1}
                     onClick={() => move(index, 1)}
                   >
@@ -312,19 +326,84 @@ function DraftOrder({ snapshot, busy, onMutation }: Omit<LeagueSetupProps, 'user
       {!isSaved && order.length >= 2 && (
         <p className="muted">Save this order before starting the draft.</p>
       )}
+      <div className="setup-readiness">
+        <h3>Team setup</h3>
+        {unfinishedTeams.length ? (
+          <>
+            <p className="muted">
+              {unfinishedTeams.length} of {snapshot.teams.length} teams still need a name or color.
+              Each manager can finish their team in League settings.
+            </p>
+            <ul>
+              {unfinishedTeams.map((team) => (
+                <li key={team.id}>{teamName(team)}</li>
+              ))}
+            </ul>
+          </>
+        ) : snapshot.teams.length > 0 ? (
+          <p className="muted">All teams have a saved name and color.</p>
+        ) : null}
+        {onStartDraft && (
+          <button
+            type="button"
+            className="button primary"
+            disabled={busy || !canStart || !isSaved}
+            onClick={() => {
+              if (!busy && canStart && isSaved) onStartDraft()
+            }}
+          >
+            Start draft
+          </button>
+        )}
+      </div>
     </section>
   )
 }
 
-export function LeagueSetup({ snapshot, users, busy, onMutation }: LeagueSetupProps) {
+export function LeagueSetup({
+  snapshot,
+  users,
+  userId,
+  busy,
+  onMutation,
+  onStartDraft,
+}: LeagueSetupProps) {
   const canConfigure = snapshot.actions.some((action) => action.kind === 'configure')
   const league = snapshot.league
   const orderKey = snapshot.teams.map((team) => `${team.id}:${team.draft_position}`).join(',')
   const userNames = new Map(users.map((user) => [user.id, user.display_name]))
+  const ownTeam = snapshot.teams.find((team) => team.manager_user_id === userId)
+  const yourTeam = (
+    <section className="card your-team-section" aria-labelledby="your-team-heading">
+      <div className="section-title">
+        <h2 id="your-team-heading">
+          <Users size={18} aria-hidden="true" />
+          Your team
+        </h2>
+      </div>
+      {ownTeam ? (
+        <>
+          {snapshot.state.status === 'setup' && (
+            <p className="muted">Choose your team name and color before the draft begins.</p>
+          )}
+          <TeamMetadata
+            key={`${league.id}:${userId}:${ownTeam.id}`}
+            team={ownTeam}
+            snapshot={snapshot}
+            busy={busy}
+            onMutation={onMutation}
+          />
+        </>
+      ) : (
+        <p className="muted">You are not managing a team in this league.</p>
+      )}
+    </section>
+  )
 
   if (!canConfigure) {
     return (
       <div className="setup-layout">
+        {yourTeam}
         <section className="card" aria-labelledby="league-settings-heading">
           <div className="section-title">
             <h2 id="league-settings-heading">
@@ -370,10 +449,24 @@ export function LeagueSetup({ snapshot, users, busy, onMutation }: LeagueSetupPr
                 <li key={team.id}>
                   <span className="order-number">{team.draft_position ?? '—'}</span>
                   <div className="order-team-name">
-                    <strong>{team.name}</strong>
+                    <strong>
+                      {teamColor(team.color_rgb) && (
+                        <span
+                          className="team-color-dot"
+                          style={{ backgroundColor: teamColor(team.color_rgb)! }}
+                          aria-hidden="true"
+                        />
+                      )}
+                      {teamName(team)}
+                    </strong>
                     <p className="muted">
                       {userNames.get(team.manager_user_id) ?? `Manager #${team.manager_user_id}`}
                     </p>
+                    {snapshot.state.status === 'setup' && (
+                      <p className="muted">
+                        {team.metadata_complete ? 'Ready for draft' : 'Needs a name and color'}
+                      </p>
+                    )}
                   </div>
                   <span className="muted">{team.point_budget} pts</span>
                 </li>
@@ -387,6 +480,7 @@ export function LeagueSetup({ snapshot, users, busy, onMutation }: LeagueSetupPr
 
   return (
     <div className="setup-layout">
+      {yourTeam}
       <div className="setup-main">
         <section className="card" aria-labelledby="league-settings-heading">
           <div className="section-title">
@@ -412,17 +506,30 @@ export function LeagueSetup({ snapshot, users, busy, onMutation }: LeagueSetupPr
             </h2>
             <span className="muted">{snapshot.teams.length} teams</span>
           </div>
-          <p className="muted">Each manager can have one team.</p>
+          <p className="muted">
+            Add each manager now; they can choose their team name and color later. Each manager can
+            have one team.
+          </p>
           <div className="team-editors">
             {snapshot.teams.map((team) => (
-              <TeamEditor
-                key={`${team.id}:${team.name}:${team.manager_user_id}:${team.point_budget}`}
-                team={team}
-                snapshot={snapshot}
-                users={users}
-                busy={busy}
-                onMutation={onMutation}
-              />
+              <div key={team.id} className="team-management-entry">
+                <TeamEditor
+                  key={`${team.id}:${team.manager_user_id}:${team.point_budget}`}
+                  team={team}
+                  snapshot={snapshot}
+                  users={users}
+                  busy={busy}
+                  onMutation={onMutation}
+                />
+                {team.id !== ownTeam?.id && (
+                  <TeamMetadata
+                    team={team}
+                    snapshot={snapshot}
+                    busy={busy}
+                    onMutation={onMutation}
+                  />
+                )}
+              </div>
             ))}
             <TeamEditor
               key={`new:${league.id}`}
@@ -439,6 +546,7 @@ export function LeagueSetup({ snapshot, users, busy, onMutation }: LeagueSetupPr
         snapshot={snapshot}
         busy={busy}
         onMutation={onMutation}
+        onStartDraft={onStartDraft}
       />
     </div>
   )

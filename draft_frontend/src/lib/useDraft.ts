@@ -365,7 +365,7 @@ export function useDraft() {
 
   const draftAction = async (kind: 'start' | 'pick' | 'undo', id?: number, chargePoints = true) => {
     const current = currentSnapshot.current
-    if (!current) return
+    if (!current) return false
     // Use the turn the UI rendered, never silently move an action to a newer turn.
     if (
       !snapshot ||
@@ -373,10 +373,10 @@ export function useDraft() {
       snapshot.revision !== current.revision
     ) {
       setError('The draft changed. Review the latest turn before making this selection.')
-      return
+      return false
     }
     const revision = { p_league: snapshot.league_id, p_revision: snapshot.revision }
-    await mutate(() =>
+    return mutate(() =>
       kind === 'pick'
         ? api.draftAction({
             ...revision,

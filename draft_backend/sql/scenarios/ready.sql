@@ -33,8 +33,8 @@ WITH created AS (
 )
 INSERT INTO dl_test.scenario (slug, league_id) SELECT 'ready', id FROM created;
 
-INSERT INTO dl.team (league_id, name, manager_user_id, draft_position, point_budget)
-SELECT f.league_id, v.name, u.id, v.position, v.budget
+INSERT INTO dl.team (league_id, name, manager_user_id, draft_position, point_budget, color_rgb)
+SELECT f.league_id, v.name, u.id, v.position, v.budget, 0
 FROM (VALUES
     ('alice', 'Alice - Ember', 1, 100),
     ('bob', 'Bob - Tide', 2, 100),

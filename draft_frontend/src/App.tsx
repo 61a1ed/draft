@@ -26,6 +26,7 @@ import {
 import { api, ApiError, errorMessage } from './lib/api'
 import { useDraft } from './lib/useDraft'
 import type { Draftable, LeagueSnapshot, Session, Team } from './lib/types'
+import { teamAvatarStyle, teamName } from './lib/teamPresentation'
 import { Catalog, PokemonImage } from './components/Catalog'
 import { Modal } from './components/Modal'
 import { LeagueSetup } from './components/LeagueSetup'
@@ -112,14 +113,14 @@ function TeamRoster({
   return (
     <section className={`card roster-panel ${compact ? 'compact' : ''}`}>
       <div className="roster-heading">
-        <span className={`team-avatar team-color-${(team.draft_position ?? 1) % 4}`}>
-          {initials(team.name)}
+        <span className="team-avatar" style={teamAvatarStyle(team.color_rgb)}>
+          {initials(teamName(team))}
         </span>
         <div>
           <span className="eyebrow">
             {team.manager_user_id === userId ? 'YOUR TEAM' : `TEAM ${team.draft_position ?? '—'}`}
           </span>
-          <h3>{team.name}</h3>
+          <h3>{teamName(team)}</h3>
         </div>
       </div>
       <div className="budget-heading">
@@ -242,6 +243,18 @@ export default function App() {
   const draft = useDraft()
   const { snapshot, session, catalog, mode } = draft
   const [view, setView] = useState<View>('draft')
+  const initialViewOwner = useRef('')
+  useEffect(() => {
+    if (!snapshot || !session) {
+      initialViewOwner.current = ''
+      return
+    }
+    if (snapshot.league_id !== draft.leagueId) return
+    const owner = `${session.user.id}:${snapshot.league_id}`
+    if (initialViewOwner.current === owner) return
+    initialViewOwner.current = owner
+    setView(snapshot.state.status === 'setup' ? 'settings' : 'draft')
+  }, [snapshot, draft.leagueId, session])
   const [availabilityContext, setAvailabilityContext] = useState<AvailabilityContext | null>(null)
   const availabilityOwner = `${session?.user.id ?? 0}:${draft.leagueId ?? 0}`
   const availabilityNavigation =
@@ -367,14 +380,23 @@ export default function App() {
             Try again
           </button>
         ) : (
-          <button
-            className="button primary"
-            disabled={draft.busy}
-            onClick={() => window.location.assign('/auth/login')}
-          >
-            Sign in
-            <ArrowRight size={16} />
-          </button>
+          <form className="sign-in-form" action="/auth/login" method="get">
+            <label className="field">
+              Display name (optional)
+              <input
+                name="display_name"
+                maxLength={80}
+                autoComplete="nickname"
+                aria-describedby="display-name-hint"
+                disabled={draft.busy}
+              />
+            </label>
+            <p id="display-name-hint">For new accounts. Leave blank to use your Google name.</p>
+            <button className="button primary" disabled={draft.busy}>
+              Sign in
+              <ArrowRight size={16} />
+            </button>
+          </form>
         )}
         {import.meta.env.DEV && import.meta.env.VITE_ENABLE_TEST_LOGIN === 'true' && (
           <>
@@ -452,7 +474,12 @@ export default function App() {
             >
               <Icon size={18} />
               <span>{label}</span>
-              {id === 'draft' && <span className="nav-dot" />}
+              {id === 'draft' && snapshot?.state.status === 'drafting' && (
+                <span className="nav-dot" />
+              )}
+              {id === 'settings' && myTeam && !myTeam.metadata_complete && (
+                <span className="nav-dot" aria-label="Team setup needed" />
+              )}
             </button>
           ))}
         </nav>
@@ -631,11 +658,13 @@ export default function App() {
                           ? 'Draft not started'
                           : snapshot.state.status === 'completed'
                             ? 'Draft complete'
-                            : (activeTeam?.name ?? 'Next team')}
+                            : activeTeam
+                              ? teamName(activeTeam)
+                              : 'Next team'}
                       </h2>
                       <p>
                         {snapshot.state.status === 'setup' ? (
-                          'Add at least two teams and save the draft order before starting.'
+                          'Complete team names, colors, and draft order in League settings before starting.'
                         ) : snapshot.state.status === 'completed' ? (
                           `${snapshot.state.active_pick_count} of ${snapshot.state.required_pick_count} picks completed.`
                         ) : (
@@ -739,12 +768,10 @@ export default function App() {
                             <span className="order-number">
                               {String(team.draft_position ?? index + 1).padStart(2, '0')}
                             </span>
-                            <span
-                              className={`tiny-avatar team-color-${(team.draft_position ?? 1) % 4}`}
-                            >
-                              {initials(team.name)}
+                            <span className="tiny-avatar" style={teamAvatarStyle(team.color_rgb)}>
+                              {initials(teamName(team))}
                             </span>
-                            <strong>{team.name}</strong>
+                            <strong>{teamName(team)}</strong>
                             {team.id === activeTeam?.id ? (
                               <Radio size={14} />
                             ) : (
@@ -826,7 +853,7 @@ export default function App() {
                           <div className="activity-detail">
                             <strong>{item?.name ?? `Pokémon ${pick.draftable_id}`}</strong>
                             <span>
-                              {team?.name ?? 'Team'}
+                              {team ? teamName(team) : 'Team'}
                               <span>·</span>Round {round + 1}
                             </span>
                           </div>
@@ -892,10 +919,15 @@ export default function App() {
               )}
               {view === 'settings' && (
                 <LeagueSetup
+                  key={`${session!.user.id}:${snapshot.league_id}`}
                   snapshot={snapshot}
+                  userId={session!.user.id}
                   users={draft.users}
                   busy={draft.busy}
                   onMutation={draft.mutate}
+                  onStartDraft={() =>
+                    setConfirmAction({ kind: 'start', revision: snapshot.revision })
+                  }
                 />
               )}
             </>
@@ -959,7 +991,7 @@ export default function App() {
           </div>
           <div className="pick-summary">
             <span>
-              Drafting for<strong>{activeTeam?.name ?? 'No active turn'}</strong>
+              Drafting for<strong>{activeTeam ? teamName(activeTeam) : 'No active turn'}</strong>
             </span>
             <span>
               Points after pick
@@ -1030,7 +1062,7 @@ export default function App() {
         >
           <p className="modal-description">
             {confirmAction.kind === 'start'
-              ? `Start ${snapshot.league.name} with ${snapshot.teams.length} teams and ${snapshot.league.roster_size} Pokémon per roster. League settings will be locked.`
+              ? `Start ${snapshot.league.name} with ${snapshot.teams.length} teams and ${snapshot.league.roster_size} Pokémon per roster. Only saved team details and draft order will be used. Team names, colors, and league settings will be locked.`
               : 'The most recent active pick will be removed from its team and its original point cost refunded. The selection will stay in the draft history.'}
           </p>
           <p className="muted">
@@ -1051,7 +1083,9 @@ export default function App() {
                 confirmAction.revision !== snapshot.revision
               }
               onClick={async () => {
-                await draft.draftAction(confirmAction.kind)
+                const kind = confirmAction.kind
+                const succeeded = await draft.draftAction(kind)
+                if (succeeded && kind === 'start') setView('draft')
                 setConfirmAction(null)
               }}
             >

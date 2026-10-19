@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -127,6 +128,30 @@ def test_fresh_runs_unique_and_retained(workspace, monkeypatch):
         connection = dev.conninfo_to_dict(values["MIGRATION_DATABASE_URL"])
         assert connection["user"] == "postgres"
         assert connection["port"] == "55440"
+
+
+def test_seed_migrates_before_loading_current_scenarios(tmp_path, monkeypatch):
+    admin = "postgresql://unused-admin"
+    monkeypatch.setattr(dev, "read_environment", lambda _: {"ADMIN_DATABASE_URL": admin})
+    monkeypatch.setattr(dev.psycopg, "connect", MagicMock())
+    monkeypatch.setattr(dev, "import_catalog", Mock())
+    migration = Mock(return_value=["0002_team_metadata.sql"])
+    monkeypatch.setattr(dev, "migrate", migration)
+    database = dev.scenarios.ScenarioDatabase(tmp_path, admin)
+    monkeypatch.setattr(dev.scenarios, "prepare", lambda root: database)
+
+    def load_scenarios(selected):
+        # A fresh bootstrap lacks color_rgb until migrations finish. Check at
+        # fixture-load time, since migrating later at API startup is too late.
+        assert selected is database
+        migration.assert_called_once_with(
+            admin, dev.MIGRATION_DIRECTORY, schema="dl", role="dl_owner",
+        )
+
+    load = Mock(side_effect=load_scenarios)
+    monkeypatch.setattr(dev.scenarios, "apply", load)
+    dev.seed(tmp_path, ([], {}))
+    load.assert_called_once_with(database)
 
 
 @pytest.mark.parametrize("override_port", [None, 55442])

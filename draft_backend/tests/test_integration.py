@@ -29,7 +29,14 @@ def snapshot(client, league_id):
     return response.json()
 
 
-def configure_league(client, alice, bob, carol):
+def complete_fixture_colors(test_database, league_id):
+    # These workflows focus on draft revisions and budgets. Supply fixture colors
+    # directly so their existing revision assertions stay focused on those RPCs.
+    with psycopg.connect(test_database.admin) as conn:
+        conn.execute("UPDATE dl.team SET color_rgb = 0 WHERE league_id = %s", (league_id,))
+
+
+def configure_league(client, alice, bob, carol, test_database):
     name = "Integration " + uuid4().hex
     league_id = rpc(client, "create_league", p_name=name, p_roster_size=2)
     state = snapshot(client, league_id)
@@ -111,12 +118,13 @@ def configure_league(client, alice, bob, carol):
         p_revision=6,
         p_teams=[team_a, team_b],
     )
+    complete_fixture_colors(test_database, league_id)
     assert snapshot(client, league_id)["state"]["can_start"] is True
 
     return league_id, team_a, team_b
 
 
-def test_draft_workflow_and_database_enforced_access(client):
+def test_draft_workflow_and_database_enforced_access(client, test_database):
     assert client.get("/api/leagues").status_code == 200
     alice = login(client, "alice")
     users_response = client.get("/api/users")
@@ -129,7 +137,7 @@ def test_draft_workflow_and_database_enforced_access(client):
     assert len(catalog) >= 4
     players = [row["id"] for row in catalog[:4]]
 
-    league_id, team_a, team_b = configure_league(client, alice, bob, carol)
+    league_id, team_a, team_b = configure_league(client, alice, bob, carol, test_database)
 
     # A removed manager can still read all data, but cannot mutate it.
     login(client, "carol")
@@ -261,15 +269,15 @@ def test_draft_workflow_and_database_enforced_access(client):
     }).status_code == 401
 
 
-def test_oidc_registration_is_idempotent_and_updates_display_name(client):
+def test_oidc_registration_is_idempotent_and_preserves_display_name(client):
     subject = "integration-oidc-" + uuid4().hex
     first = client.portal.call(
-        client.app.state.db.register_identity, "https://id.example", subject, "First name"
+        client.app.state.db.register_identity, "https://id.example", subject, "Chosen display name"
     )
     second = client.portal.call(
-        client.app.state.db.register_identity, "https://id.example", subject, "Updated name"
+        client.app.state.db.register_identity, "https://id.example", subject, "Google account name"
     )
-    assert second == {"id": first["id"], "display_name": "Updated name"}
+    assert second == {"id": first["id"], "display_name": "Chosen display name"}
     other = client.portal.call(
         client.app.state.db.register_identity, "https://other.example", subject, "Other user"
     )
@@ -307,7 +315,7 @@ def test_api_role_cannot_bypass_rpc_boundary(database_url, query):
         assert claims in (None, "")
 
 
-def create_two_team_league(client, *, name, roster_size, budgets):
+def create_two_team_league(client, test_database, *, name, roster_size, budgets):
     alice = login(client, "alice")
     bob = next(u for u in client.get("/api/users").json() if u["display_name"] == "Bob")
     league = rpc(client, "create_league", p_name=name, p_roster_size=roster_size)
@@ -323,11 +331,14 @@ def create_two_team_league(client, *, name, roster_size, budgets):
         )
         for revision, (user, budget) in enumerate(zip((alice, bob), budgets, strict=True))
     ]
+    complete_fixture_colors(test_database, league)
     return league, *teams
 
 
-def test_point_budgets_exact_limit_rejection_commissioner_and_undo(client):
-    league, a, b = create_two_team_league(client, name="Points", roster_size=2, budgets=(0, 1))
+def test_point_budgets_exact_limit_rejection_commissioner_and_undo(client, test_database):
+    league, a, b = create_two_team_league(
+        client, test_database, name="Points", roster_size=2, budgets=(0, 1)
+    )
     bob = next(u for u in client.get("/api/users").json() if u["display_name"] == "Bob")
     catalog = client.get("/api/draftables").json()
     by_cost = {d["point_cost"]: d for d in catalog}
@@ -399,8 +410,10 @@ def test_point_budgets_exact_limit_rejection_commissioner_and_undo(client):
     assert balances()[b] == (2, 2, 0)
 
 
-def test_only_commissioner_can_make_free_picks(client):
-    league, a, b = create_two_team_league(client, name="Free picks", roster_size=1, budgets=(0, 0))
+def test_only_commissioner_can_make_free_picks(client, test_database):
+    league, a, b = create_two_team_league(
+        client, test_database, name="Free picks", roster_size=1, budgets=(0, 0)
+    )
     players = [d["id"] for d in client.get("/api/draftables").json() if d["point_cost"] > 0]
     rpc(client, "set_draft_order", p_league=league, p_revision=2, p_teams=[a, b])
 

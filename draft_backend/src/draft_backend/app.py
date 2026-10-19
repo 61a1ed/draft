@@ -25,6 +25,7 @@ MIGRATION_DIRECTORY = Path(__file__).with_name("sql_migrations")
 ID = Annotated[int, Field(strict=True, gt=0, le=2147483647)]
 Revision = Annotated[int, Field(strict=True, ge=0, le=2147483647)]
 Points = Annotated[int, Field(strict=True, ge=0, le=2147483647)]
+ColorRGB = Annotated[int, Field(strict=True, ge=0, le=16777215)]
 Name = Annotated[str, Field(min_length=1)]
 User = Annotated[int, Depends(require_user)]
 Reader = Annotated[int | None, Depends(optional_user)]
@@ -74,7 +75,7 @@ class UpdateLeague(LeagueRevision):
 
 
 class AddTeam(LeagueRevision):
-    p_name: Name
+    p_name: Name | None = None
     p_manager: ID
     p_point_budget: Points
 
@@ -84,9 +85,14 @@ class TeamRevision(LeagueRevision):
 
 
 class UpdateTeam(TeamRevision):
-    p_name: Name
+    p_name: Name | None
     p_manager: ID
     p_point_budget: Points
+
+
+class SetTeamMetadata(TeamRevision):
+    p_name: Name
+    p_color_rgb: ColorRGB
 
 
 class DraftOrder(LeagueRevision):
@@ -97,6 +103,27 @@ class DraftAction(LeagueRevision):
     p_kind: Literal["start", "pick", "undo"]
     p_draftable: ID | None = None
     p_charge_points: Annotated[bool, Field(strict=True)] = True
+
+
+class CreateFavoritesList(Input):
+    p_name: Name
+
+
+class FavoritesListRevision(Input):
+    p_list: ID
+    p_revision: Revision
+
+
+class RenameFavoritesList(FavoritesListRevision):
+    p_name: Name
+
+
+class FavoritesEntry(FavoritesListRevision):
+    p_draftable: ID
+
+
+class FavoritesOrder(FavoritesListRevision):
+    p_draftables: list[ID]
 
 
 class PublishTournament(Input):
@@ -321,6 +348,33 @@ def create_app(settings: Settings | None = None):
             "'/images/' || image_hash AS image_url FROM dl.draftable ORDER BY id",
         )
 
+    # TODO FAVORITES READ PRIVACY: Both endpoints deliberately allow anonymous
+    # and other-account reads for now. owner_user_id is only a browsing filter,
+    # NOT authorization. Add owner-only read checks together with database
+    # restrictions on BOTH favorites tables and the snapshot view; see 0003.
+    @app.get("/api/favorites-lists", tags=["reads"])
+    async def favorites_lists(
+        user: Reader,
+        owner_user_id: Annotated[int | None, Field(gt=0, le=2147483647)] = None,
+    ):
+        query = "SELECT id, owner_user_id, name, revision FROM dl.favorites_list"
+        params = ()
+        if owner_user_id is not None:
+            query += " WHERE owner_user_id = %s"
+            params = (owner_user_id,)
+        return await app.state.db.read(user, query + " ORDER BY id", params)
+
+    @app.get("/api/favorites-lists/{list_id}", tags=["reads"])
+    async def favorites_list(
+        list_id: Annotated[int, Field(gt=0, le=2147483647)], user: Reader,
+    ):
+        rows = await app.state.db.read(
+            user, "SELECT * FROM dl.favorites_list_snapshot WHERE id = %s", (list_id,),
+        )
+        if not rows:
+            raise HTTPException(404, "favorites_list_not_found")
+        return rows[0]
+
     @app.api_route("/images/{image_hash}", methods=["GET", "HEAD"], tags=["images"])
     async def image(request: Request, image_hash: str):
         if not re.fullmatch(r"[0-9a-f]{64}", image_hash):
@@ -397,6 +451,9 @@ def create_app(settings: Settings | None = None):
         )
         if function in {
             "update_league", "update_team", "remove_team", "set_draft_order",
+            "set_team_metadata",
+            "rename_favorites_list", "delete_favorites_list", "add_favorites_entry",
+            "remove_favorites_entry", "set_favorites_order",
             "publish_tournament", "set_round_suggested_date", "set_team_availability",
             "copy_team_availability_week", "set_match_vod", "withdraw_team",
         }:
@@ -419,6 +476,10 @@ def create_app(settings: Settings | None = None):
     async def update_team(body: UpdateTeam, user: User):
         return await rpc(user, "update_team", body)
 
+    @app.post("/api/rpc/set_team_metadata", tags=["SQL functions"])
+    async def set_team_metadata(body: SetTeamMetadata, user: User):
+        return await rpc(user, "set_team_metadata", body)
+
     @app.post("/api/rpc/remove_team", tags=["SQL functions"])
     async def remove_team(body: TeamRevision, user: User):
         return await rpc(user, "remove_team", body)
@@ -430,6 +491,30 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/rpc/draft_action", tags=["SQL functions"])
     async def draft_action(body: DraftAction, user: User):
         return await rpc(user, "draft_action", body)
+
+    @app.post("/api/rpc/create_favorites_list", tags=["SQL functions"])
+    async def create_favorites_list(body: CreateFavoritesList, user: User):
+        return await rpc(user, "create_favorites_list", body)
+
+    @app.post("/api/rpc/rename_favorites_list", tags=["SQL functions"])
+    async def rename_favorites_list(body: RenameFavoritesList, user: User):
+        return await rpc(user, "rename_favorites_list", body)
+
+    @app.post("/api/rpc/delete_favorites_list", tags=["SQL functions"])
+    async def delete_favorites_list(body: FavoritesListRevision, user: User):
+        return await rpc(user, "delete_favorites_list", body)
+
+    @app.post("/api/rpc/add_favorites_entry", tags=["SQL functions"])
+    async def add_favorites_entry(body: FavoritesEntry, user: User):
+        return await rpc(user, "add_favorites_entry", body)
+
+    @app.post("/api/rpc/remove_favorites_entry", tags=["SQL functions"])
+    async def remove_favorites_entry(body: FavoritesEntry, user: User):
+        return await rpc(user, "remove_favorites_entry", body)
+
+    @app.post("/api/rpc/set_favorites_order", tags=["SQL functions"])
+    async def set_favorites_order(body: FavoritesOrder, user: User):
+        return await rpc(user, "set_favorites_order", body)
 
     @app.post("/api/rpc/publish_tournament", tags=["SQL functions"])
     async def publish_tournament(body: PublishTournament, user: User):

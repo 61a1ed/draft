@@ -187,8 +187,12 @@ def published_tournament(client):
     teams = {}
     revision = 0
     for name in ["alice", "bob", "carol"]:
-        teams[rpc(client, "add_team", p_league=league, p_revision=revision,
-                  p_name=name, p_manager=users[name], p_point_budget=100)] = name
+        team = rpc(client, "add_team", p_league=league, p_revision=revision,
+                   p_manager=users[name], p_point_budget=100)
+        teams[team] = name
+        revision += 1
+        rpc(client, "set_team_metadata", p_league=league, p_revision=revision,
+            p_team=team, p_name=name, p_color_rgb=0)
         revision += 1
     rpc(client, "set_draft_order", p_league=league, p_revision=revision, p_teams=list(teams))
     revision += 1

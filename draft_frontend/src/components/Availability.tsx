@@ -13,6 +13,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { teamName } from '../lib/teamPresentation'
 import type { LeagueSnapshot, Team } from '../lib/types'
 import type { AvailabilityWindowInput, TeamAvailabilitySnapshot } from '../lib/availabilityTypes'
 import { useAvailability } from '../lib/useAvailability'
@@ -190,7 +191,7 @@ function Week({
       <div className="availability-calendar-heading">
         <div>
           <span className="eyebrow">{compare ? 'FIND A TIME TO PLAY' : 'WEEKLY AVAILABILITY'}</span>
-          <h3>{compare ? `${team.name} + ${compare.team.name}` : team.name}</h3>
+          <h3>{compare ? `${teamName(team)} + ${teamName(compare.team)}` : teamName(team)}</h3>
         </div>
         <span className="availability-total">
           <Clock3 size={15} />
@@ -216,9 +217,9 @@ function Week({
             {compare && (
               <details className="availability-individual">
                 <summary>Team windows</summary>
-                <strong>{team.name}</strong>
+                <strong>{teamName(team)}</strong>
                 <Windows windows={windowsForDate(available, date, zone)} zone={zone} date={date} />
-                <strong>{compare.team.name}</strong>
+                <strong>{teamName(compare.team)}</strong>
                 <Windows windows={windowsForDate(other, date, zone)} zone={zone} date={date} />
               </details>
             )}
@@ -268,7 +269,7 @@ function Comparison({
       {read.error && (
         <div className="error-banner" role="alert">
           <span>
-            {compareTeam.name}: {read.error}
+            {teamName(compareTeam)}: {read.error}
           </span>
           <button
             className="button secondary"
@@ -281,7 +282,7 @@ function Comparison({
       )}
       {read.loading && (
         <p className="muted" role="status">
-          Updating {compareTeam.name}’s availability…
+          Updating {teamName(compareTeam)}’s availability…
         </p>
       )}
       {read.state && (
@@ -294,7 +295,7 @@ function Comparison({
             compare={{ team: compareTeam, state: read.state }}
           />
           {!read.state.availability && (
-            <p className="muted">{compareTeam.name} has not shared availability yet.</p>
+            <p className="muted">{teamName(compareTeam)} has not shared availability yet.</p>
           )}
         </>
       )}
@@ -475,7 +476,7 @@ function EditAvailability({
       onSaved()
   }
   return (
-    <Modal title={`Edit ${team.name} availability`} onClose={onClose}>
+    <Modal title={`Edit ${teamName(team)} availability`} onClose={onClose}>
       <form className="availability-editor" onSubmit={(event) => void save(event)}>
         <p className="muted">
           Manage saved times across all dates. Changing the time zone preserves the actual times.
@@ -719,7 +720,7 @@ function CopyWeek({
       onSaved(target)
   }
   return (
-    <Modal title={`Copy ${team.name}’s week`} onClose={onClose}>
+    <Modal title={`Copy ${teamName(team)}’s week`} onClose={onClose}>
       <form className="availability-editor" onSubmit={(event) => void submit(event)}>
         <p className="muted">
           Copy seven days of saved availability using local clock times in <strong>{zone}</strong>.
@@ -917,7 +918,7 @@ function TeamAvailability({
             <div className="availability-empty-note">
               <CalendarDays size={20} />
               <p>
-                <strong>{team.name} has not shared availability yet.</strong>
+                <strong>{teamName(team)} has not shared availability yet.</strong>
                 <span>
                   {owns
                     ? 'Add the times you can play, then compare with another team.'
@@ -1042,7 +1043,7 @@ export function Availability(props: Props) {
               >
                 {snapshot.teams.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.name}
+                    {teamName(item)}
                     {item.manager_user_id === userId ? ' (your team)' : ''}
                   </option>
                 ))}
@@ -1061,7 +1062,7 @@ export function Availability(props: Props) {
                   .filter((item) => item.id !== team.id)
                   .map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.name}
+                      {teamName(item)}
                     </option>
                   ))}
               </select>

@@ -103,6 +103,64 @@ describe('backend API contract', () => {
     expect(fetch.mock.calls[1][1].headers).toEqual({ 'X-CSRF-Token': session.csrf_token })
   })
 
+  it('saves team metadata with a numeric black color, the exact revision, and session CSRF token', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(json(session))
+      .mockResolvedValueOnce(json({ result: null }))
+    vi.stubGlobal('fetch', fetch)
+    const { api } = await import('./api')
+    const input = {
+      p_league: 3,
+      p_revision: 4,
+      p_team: 6,
+      p_name: 'Midnight',
+      p_color_rgb: 0,
+    }
+
+    expect(await api.setTeamMetadata(input)).toEqual({ result: null })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch.mock.calls[1]).toEqual([
+      '/api/rpc/set_team_metadata',
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrf_token },
+        body: JSON.stringify(input),
+      },
+    ])
+  })
+
+  it.each([
+    ['stale_revision', 409],
+    ['invalid_team_metadata', 400],
+  ] as const)(
+    'preserves a team metadata %s error without retrying the write',
+    async (code, status) => {
+      const fetch = vi
+        .fn()
+        .mockResolvedValueOnce(json(session))
+        .mockResolvedValueOnce(json({ detail: code }, status))
+      vi.stubGlobal('fetch', fetch)
+      const { api } = await import('./api')
+      const input = {
+        p_league: 3,
+        p_revision: 4,
+        p_team: 6,
+        p_name: 'Midnight',
+        p_color_rgb: 0,
+      }
+
+      const write = api.setTeamMetadata(input)
+      await expect(write).rejects.toMatchObject({ code, status })
+      if (code === 'invalid_team_metadata') {
+        await expect(write).rejects.toThrow('Enter a team name and choose a valid team color.')
+      }
+      expect(fetch).toHaveBeenCalledTimes(2)
+      expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual(input)
+    },
+  )
+
   it('preserves stale-revision conflicts and never retries or substitutes the revision', async () => {
     const fetch = vi
       .fn()

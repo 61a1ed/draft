@@ -176,6 +176,14 @@ def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
             )
             await tab1.invalidated()
             await tab2.invalidated()
+            # Complete this stream fixture without changing the draft revisions
+            # whose delivery and reconnect behavior this test exercises.
+            async with await psycopg.AsyncConnection.connect(test_database.admin) as conn:
+                await conn.execute(
+                    "UPDATE dl.team SET color_rgb = 0 WHERE league_id = %s", (league,),
+                )
+            await tab1.invalidated()
+            await tab2.invalidated()
             await rpc(commissioner, "draft_action", p_league=league, p_revision=6, p_kind="start")
             await tab1.invalidated()
             await tab2.invalidated()

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ArrowRight, CalendarDays, Check, Flag, RefreshCw, Swords, Trophy } from 'lucide-react'
 import { api } from '../lib/api'
+import { teamName } from '../lib/teamPresentation'
 import type { LeagueSnapshot, Team, User } from '../lib/types'
 import type { StageRecord, TournamentSnapshot } from '../lib/tournamentTypes'
 import { useTournament } from '../lib/useTournament'
@@ -23,8 +24,10 @@ type Editor = {
   revision: number
   roundId?: number
 }
-const teamName = (teams: Team[], id: number) =>
-  teams.find((team) => team.id === id)?.name ?? `Team ${id}`
+const lookupTeamName = (teams: Team[], id: number) => {
+  const team = teams.find((item) => item.id === id)
+  return team ? teamName(team) : `Team #${id}`
+}
 
 function Records({
   records,
@@ -38,7 +41,7 @@ function Records({
   const ordered = [...records].sort(
     (a, b) =>
       b.series_wins - a.series_wins ||
-      teamName(teams, a.team_id).localeCompare(teamName(teams, b.team_id)),
+      lookupTeamName(teams, a.team_id).localeCompare(lookupTeamName(teams, b.team_id)),
   )
   return (
     <div className="tournament-table-scroll">
@@ -59,7 +62,7 @@ function Records({
           {ordered.map((record) => (
             <tr key={record.team_id}>
               <th scope="row">
-                <span>{teamName(teams, record.team_id)}</span>
+                <span>{lookupTeamName(teams, record.team_id)}</span>
                 {record.withdrawn && <small>Withdrawn</small>}
                 {qualifiers.includes(record.team_id) && (
                   <small className="tournament-qualified">Finalist</small>
@@ -330,7 +333,7 @@ function ManagementForm({
                 <option value="">Choose a team</option>
                 {eligible.map((team) => (
                   <option key={team.id} value={team.id}>
-                    {team.name}
+                    {teamName(team)}
                   </option>
                 ))}
               </select>
@@ -354,7 +357,7 @@ function ManagementForm({
                       checked={selected.includes(team.id)}
                       onChange={() => toggle(team.id)}
                     />
-                    <span>{team.name}</span>
+                    <span>{teamName(team)}</span>
                   </label>
                 ))}
               </fieldset>
@@ -410,7 +413,7 @@ function ManagementForm({
               <Trophy size={20} />
               <div>
                 <strong>
-                  {selected.map((id) => teamName(snapshot.teams, id)).join(' vs ') ||
+                  {selected.map((id) => lookupTeamName(snapshot.teams, id)).join(' vs ') ||
                     'Choose two finalists'}{' '}
                   · best of {current.final?.best_of}
                 </strong>
@@ -527,7 +530,7 @@ export function Tournament({
   const finalResult = state.official_results.find((result) => result.match_id === finalMatch?.id)
   const champion =
     finalMatch && finalResult
-      ? teamName(
+      ? lookupTeamName(
           snapshot.teams,
           finalResult.winner_side === 'a' ? finalMatch.team_a_id : finalMatch.team_b_id,
         )
@@ -591,7 +594,7 @@ export function Tournament({
           <h2>
             {champion ??
               (advance.finalPublished
-                ? qualifiers.map((id) => teamName(snapshot.teams, id)).join(' vs ')
+                ? qualifiers.map((id) => lookupTeamName(snapshot.teams, id)).join(' vs ')
                 : 'Round robin')}
           </h2>
           <p>
@@ -801,18 +804,18 @@ export function Tournament({
                         key={match.id}
                         aria-label={
                           result?.outcome_kind === 'forfeit'
-                            ? `${teamName(snapshot.teams, match.team_a_id)} vs ${teamName(snapshot.teams, match.team_b_id)}. ${teamName(snapshot.teams, result.winner_side === 'a' ? match.team_a_id : match.team_b_id)} wins by forfeit. ${status.label}`
+                            ? `${lookupTeamName(snapshot.teams, match.team_a_id)} vs ${lookupTeamName(snapshot.teams, match.team_b_id)}. ${lookupTeamName(snapshot.teams, result.winner_side === 'a' ? match.team_a_id : match.team_b_id)} wins by forfeit. ${status.label}`
                             : undefined
                         }
                         onClick={() => setMatchId(match.id)}
                       >
                         <span className={result?.winner_side === 'a' ? 'tournament-winner' : ''}>
-                          {teamName(snapshot.teams, match.team_a_id)}
+                          {lookupTeamName(snapshot.teams, match.team_a_id)}
                           {myTeam?.id === match.team_a_id && <small>Your team</small>}
                         </span>
                         <strong className="tournament-score">{score}</strong>
                         <span className={result?.winner_side === 'b' ? 'tournament-winner' : ''}>
-                          {teamName(snapshot.teams, match.team_b_id)}
+                          {lookupTeamName(snapshot.teams, match.team_b_id)}
                           {myTeam?.id === match.team_b_id && <small>Your team</small>}
                         </span>
                         <span className={`tournament-status ${status.tone}`}>{status.label}</span>
@@ -823,8 +826,8 @@ export function Tournament({
                 </div>
                 {!!byes.length && (
                   <p className="tournament-bye">
-                    Bye: {byes.map((id) => teamName(snapshot.teams, id)).join(', ')} · no result or
-                    win awarded
+                    Bye: {byes.map((id) => lookupTeamName(snapshot.teams, id)).join(', ')} · no
+                    result or win awarded
                   </p>
                 )}
                 {round.purpose === 'tiebreak' && (
@@ -846,7 +849,7 @@ export function Tournament({
           <h3>Withdrawals</h3>
           {state.withdrawals.map((withdrawal) => (
             <div key={withdrawal.team_id}>
-              <strong>{teamName(snapshot.teams, withdrawal.team_id)}</strong>
+              <strong>{lookupTeamName(snapshot.teams, withdrawal.team_id)}</strong>
               <p>{withdrawal.reason}</p>
               <small>
                 {users.find((user) => user.id === withdrawal.decided_by)?.display_name ??

@@ -32,9 +32,10 @@ npm run dev
 ```
 
 Open **http://127.0.0.1:5173** and sign in. The frontend restores valid sessions
-automatically. Signed-out visitors see a welcome page with **Sign in**, which
-starts authentication directly. A failed session check shows **Try again**;
-sign-in errors appear inline on the welcome page.
+automatically. Signed-out visitors can enter an optional **Display name** before
+selecting **Sign in**. New accounts use that name, or their Google name when left
+blank; returning accounts keep their saved display name. A failed session check
+shows **Try again**; sign-in errors appear inline on the welcome page.
 Catalog images are served by the backend through `/images`, with no copied
 Pokémon image library in `public/`. Watchlists are stored locally per user.
 
@@ -81,6 +82,15 @@ frontend development.
 
 - League creation; commissioner settings, team manager/budget changes, removal,
   and explicit draft-order saving before the draft starts.
+- Setup leagues open in **League settings**, with **Your team** first. Assigned
+  managers choose a name and color there, including commissioners who also play.
+  Team assignment can leave the name blank; managers finish their details later.
+  Commissioners can complete other teams' details, see unfinished teams, and start
+  the draft from settings once all prerequisites are met. Names and colors lock at
+  draft start; the Draft room displays them without an editor.
+- Team colors use saved RGB values with readable avatar text; unnamed teams have
+  a stable label. Metadata edits retain their original revision until saved or
+  explicitly reloaded after a conflict; live updates do not replace unsaved input.
 - Catalog search, point sorting, affordability filter, availability, and watchlists.
 - Pick confirmation showing the target team and resulting budget; optional
   commissioner point waiver; undo with revision protection.

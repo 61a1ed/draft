@@ -221,7 +221,7 @@ class Database:
     async def register_identity(
         self, issuer: str, subject: str, display_name: str
     ) -> dict[str, Any]:
-        """Call only with the verified issuer and subject from an ID token; registration is open."""
+        """Register a verified identity, preserving its chosen name on subsequent sign-ins."""
         async with self.pool.connection() as conn:
             async with conn.transaction():
                 await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ WRITE")
@@ -231,7 +231,7 @@ class Database:
                     INSERT INTO dl.app_user (issuer, subject, display_name)
                     VALUES (%s, %s, %s)
                     ON CONFLICT (issuer, subject) DO UPDATE
-                    SET display_name = EXCLUDED.display_name
+                    SET display_name = dl.app_user.display_name
                     RETURNING id, display_name
                     """,
                     (issuer, subject, display_name),

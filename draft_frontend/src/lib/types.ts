@@ -53,7 +53,12 @@ export interface DraftState {
 export interface Team {
   id: number
   league_id: number
-  name: string
+  name: string | null
+  /** Opaque sRGB encoded as 0xRRGGBB; zero is a valid black color. */
+  color_rgb: number | null
+  metadata_complete: boolean
+  /** Whether the current account may edit this team's name and color. */
+  can_set_metadata: boolean
   manager_user_id: number
   draft_position: number | null
   point_budget: number
@@ -127,7 +132,7 @@ export interface UpdateLeagueInput extends LeagueRevision {
 }
 
 export interface AddTeamInput extends LeagueRevision {
-  p_name: string
+  p_name?: string | null
   p_manager: number
   p_point_budget: number
 }
@@ -137,9 +142,14 @@ export interface TeamRevision extends LeagueRevision {
 }
 
 export interface UpdateTeamInput extends TeamRevision {
-  p_name: string
+  p_name: string | null
   p_manager: number
   p_point_budget: number
+}
+
+export interface SetTeamMetadataInput extends TeamRevision {
+  p_name: string
+  p_color_rgb: number
 }
 
 export interface SetDraftOrderInput extends LeagueRevision {

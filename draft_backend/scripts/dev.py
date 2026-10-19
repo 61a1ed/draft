@@ -16,6 +16,9 @@ from urllib.request import urlopen
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from draft_backend.app import MIGRATION_DIRECTORY
+from draft_backend.migrations import migrate
+
 if __package__:
     from . import postgres, scenarios
     from .bootstrap import PROJECT
@@ -36,6 +39,8 @@ FRONTEND = PROJECT.parent / "draft_frontend"
 def seed(root, catalog):
     pokemon, images = catalog
     admin = read_environment(root / "admin.env")["ADMIN_DATABASE_URL"]
+    # Scenarios use the current schema before the API's startup migration runs.
+    migrate(admin, MIGRATION_DIRECTORY, schema="dl", role="dl_owner")
     with psycopg.connect(admin) as conn:
         conn.execute((PROJECT / "sql/test_users.sql").read_text(encoding="utf-8"))
     import_catalog(admin, pokemon, images)

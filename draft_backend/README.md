@@ -22,7 +22,10 @@ role.
 The current `sql/schema.sql` and `sql/grants.sql` are the fixed installation
 baseline. Subsequent changes belong in `src/draft_backend/sql_migrations/`;
 `0001_tournament.sql` adds tournament storage, rules, public projections, and
-permissions. Startup applies these files through the separate
+permissions. `0002_team_metadata.sql` adds manager-owned team names and RGB colors,
+and requires complete team metadata before draft start. `0003_favorites.sql` adds
+account-owned catalog favorites lists, ordered entries, and controlled writes.
+Startup applies these files through the separate
 `MIGRATION_DATABASE_URL` connection as `dl_owner`, closes it, then opens the
 ordinary `DATABASE_URL` pool. A failed migration prevents startup and readiness.
 The local launcher supplies both connections. For manual or external launches,
@@ -94,8 +97,11 @@ Visit `/auth/login`. The server performs the authorization-code flow and
 validates state, nonce, signature, issuer, audience, and expiry through Authlib.
 Any valid account from the configured issuer can register. The first login creates
 an `app_user` identified by the verified `(issuer, subject)` pair; subsequent
-logins update its display name. Different issuers never share identities, even
-when their subjects match. Only `openid profile` is requested; provider tokens
+logins preserve its display name. The optional `display_name` query parameter on
+`/auth/login` sets the name for a new account (up to 80 characters, trimmed).
+Leaving it blank uses the provider's name, or `User` when no name is available.
+Different issuers never share identities, even when their subjects match.
+Only `openid profile` is requested; provider tokens
 are not stored in the session. Local fixtures use issuer `urn:draft:test` and
 subjects `alice`, `bob`, and `carol`.
 
@@ -156,6 +162,8 @@ Writes and the account notification stream require a session:
 |---|---|
 | `GET /api/users` | Array of `{id, display_name}`; no login identities |
 | `GET /api/draftables` | Global catalog array |
+| `GET /api/favorites-lists` | List headers ordered by ID; optional `owner_user_id` query filter |
+| `GET /api/favorites-lists/{id}` | List header and ordered `{draftable_id, ordinal}` entries |
 | `GET /images/{hash}` / `HEAD /images/{hash}` | Public PNG image; no session required |
 | `GET /api/leagues` | Array of all leagues |
 | `GET /api/leagues/{id}` | One `dl.league_snapshot` row; actions personalized to the signed-in user |
@@ -179,8 +187,9 @@ argument names. Unknown fields are rejected. There is no arbitrary-SQL endpoint.
 |---|---|---|
 | `create_league` | `p_name`, `p_roster_size`, `p_pick_seconds` (default 60) | League ID |
 | `update_league` | `p_league`, `p_revision`, `p_name`, `p_roster_size`, `p_pick_seconds` | null |
-| `add_team` | `p_league`, `p_revision`, `p_name`, `p_manager`, `p_point_budget` | Team ID |
-| `update_team` | `p_league`, `p_revision`, `p_team`, `p_name`, `p_manager`, `p_point_budget` | null |
+| `add_team` | `p_league`, `p_revision`, `p_name` (default null), `p_manager`, `p_point_budget` | Team ID |
+| `update_team` | `p_league`, `p_revision`, `p_team`, `p_name` (nullable), `p_manager`, `p_point_budget` | null |
+| `set_team_metadata` | `p_league`, `p_revision`, `p_team`, `p_name`, `p_color_rgb` | null |
 | `remove_team` | `p_league`, `p_revision`, `p_team` | null |
 | `set_draft_order` | `p_league`, `p_revision`, `p_teams` (array of team IDs) | null |
 | `draft_action` | `p_league`, `p_revision`, `p_kind`, `p_draftable` (default null), `p_charge_points` (default true) | Pick ID or null |
@@ -204,6 +213,108 @@ automatically retries a `stale_revision` error. After 409, the frontend should
 fetch the current snapshot and decide what to do. Lost HTTP responses have no
 idempotency-key mechanism; refresh before repeating a write whose outcome is
 unknown, especially `create_league`.
+
+## Catalog favorites
+
+**BIG TODO — FAVORITES READ RESTRICTIONS ARE NOT IMPLEMENTED.** Lists and their
+entries are currently public, including to anonymous users and other managers.
+The owner filter is a convenience, not authorization. Before treating draft
+priorities as private, revoke public reads on both favorites tables and the
+snapshot view, enforce owner-only database reads, and authorize both HTTP read
+endpoints. Owner-only writes do not make the stored lists private.
+
+Favorites belong to an `app_user` account and can be prepared before joining any
+league, reused across drafts, and edited during a draft. They do not reserve a
+draftable or change draft permissions. Picking an item does not remove it from
+favorites; availability and affordability still come from each league's state.
+
+`dl.favorites_list` stores `id`, `owner_user_id`, `name`, and `revision`.
+`dl.favorites_entry` stores `favorites_list_id`, `draftable_id`, and `ordinal`.
+Each draftable appears at most once per list, but may appear in multiple lists.
+List names are trimmed and must contain non-whitespace text; duplicate names are
+allowed. Empty lists are valid. Deleting a list cascades to its entries, while
+referenced draftables cannot be deleted without first resolving their references.
+
+`GET /api/favorites-lists?owner_user_id=42` returns headers for that account;
+omitting the filter returns all headers. `GET /api/favorites-lists/{id}` returns
+one consistent `dl.favorites_list_snapshot` with the header fields and an `entries`
+array sorted by ordinal (or `[]` for an empty list). Missing lists return 404 with
+`favorites_list_not_found`. Join entry IDs to the separately fetched catalog for
+names, prices, and images.
+
+All writes use the existing login, CSRF, SERIALIZABLE transaction, and error
+handling conventions. The server derives the owner from the session at creation;
+only that owner may subsequently edit or delete the list. Commissioners have no
+special access to other accounts' favorites writes.
+
+| Function | JSON arguments | `result` |
+|---|---|---|
+| `create_favorites_list` | `p_name` | List ID |
+| `rename_favorites_list` | `p_list`, `p_revision`, `p_name` | null |
+| `delete_favorites_list` | `p_list`, `p_revision` | null |
+| `add_favorites_entry` | `p_list`, `p_revision`, `p_draftable` | null |
+| `remove_favorites_entry` | `p_list`, `p_revision`, `p_draftable` | null |
+| `set_favorites_order` | `p_list`, `p_revision`, `p_draftables` (ordered array of IDs) | null |
+
+Creation starts at revision 0. Every successful rename, add, remove, or reorder
+increments that list's revision once, even when a rename or reorder leaves the
+same values. Deletion checks the revision and removes the list. Failed writes
+leave both entries and revision unchanged. Concurrent edits with the same viewed
+revision cannot both succeed; refetch after `stale_revision`. League revisions
+are independent and never change when favorites change.
+
+Adding appends after the largest ordinal; adding a duplicate returns 409 with
+`already_exists_or_claimed`. Removing an absent entry returns 404 with
+`favorites_entry_not_found`. Removal may leave gaps in the positive, unique
+ordinals. Reordering must supply every current draftable exactly once and assigns
+positions 1 through N atomically; `[]` is valid for an empty list. Duplicated,
+missing, or extra IDs return 400 with `order_must_contain_every_draftable_once`.
+Blank names return 400 with `invalid_favorites_name` (empty strings are rejected
+by HTTP shape validation with 422).
+
+Committed list and entry changes wake the owner's existing account event stream.
+Entry/header notifications in one transaction coalesce into one empty wake-up;
+rollback emits none. Direct administrative edits also notify affected owners,
+but must maintain the list's revision in the same transaction. Frontend favorites
+display and refresh handling are future work.
+
+## Team names and colors
+
+The commissioner assigns each team a manager and point budget with `add_team`.
+Its optional `p_name` defaults to null; new teams have a null `color_rgb` until
+their manager or commissioner saves metadata. One account still manages at most
+one team per league. There are no additional player/trainer roles.
+
+`set_team_metadata` saves a name and color together. The current manager may
+save their own team's metadata, and the commissioner may save any team's metadata,
+only before the draft starts. Names are trimmed and must not be blank. Colors
+are strict JSON integers from 0 through 16,777,215, encoding opaque sRGB as
+`0xRRGGBB`. Black is 0, red is 16,711,680, and white is 16,777,215. Null, booleans,
+fractional numbers, and hex strings are not valid color inputs. There is no
+transparency, palette restriction, or uniqueness rule for names or colors.
+
+The operation uses the league revision, increments it once on success, and
+notifies league accounts through the existing committed invalidations. Repeated
+saves are allowed during setup; there is no one-time submission or approval state.
+Stale requests fail without replacing current choices. The commissioner-only
+`update_team` still replaces name, manager, and budget together; it accepts a null
+name for an unfinished team and preserves the color. Reassignment preserves
+metadata and transfers manager editing permission immediately.
+
+Each team in `GET /api/leagues/{id}` includes nullable `name` and `color_rgb`,
+derived `metadata_complete`, and personalized `can_set_metadata` booleans. Anonymous
+readers always receive `can_set_metadata: false`. Clients must render a fallback
+label for null names, convert numeric colors to six-digit hex for CSS, and test
+for null rather than treating the valid value 0 as missing.
+
+`state.can_start` additionally requires a name and color for every team. The
+commissioner may fill in missing choices. Draft start freezes names and colors
+for everyone; undoing picks does not reopen setup. The migration preserves
+existing names and backfills every existing team to black. This is a one-time
+backfill, not a default for teams created afterward. The frontend's League settings
+starts with a Your team form for assigned managers, including commissioners who
+also play. Commissioners can complete other teams' details below it. Saved colors
+appear in team avatars, and setup readiness identifies unfinished teams.
 
 ## Tournaments
 
@@ -375,7 +486,8 @@ as the same event, and sends idle keep-alive comments every 15 seconds.
 
 SQL determines recipients. League creation and changes notify the commissioner
 and current managers. Team changes also notify former managers, including those
-who just lost their last team. Notifications have empty payloads and are delivered
+who just lost their last team. Favorites changes notify the list owner.
+Notifications have empty payloads and are delivered
 only after commit. The triggers cover direct SQL edits as well as the public SQL
 functions used by HTTP. Direct administrative edits must still preserve draft
 invariants and increment the league revision in the same transaction.

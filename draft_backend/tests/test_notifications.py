@@ -84,6 +84,9 @@ def test_sql_rpc_membership_and_draft_changes_notify_exact_accounts(notification
     assert_wakes(state, commissioner, manager, other)
     call(state, "SELECT dl.set_draft_order(%s, 6, %s)", (league, [first, second]))
     assert_wakes(state, commissioner, manager, other)
+    # Supply fixture colors without shifting the draft revision assertions.
+    state.admin.execute("UPDATE dl.team SET color_rgb = 0 WHERE league_id = %s", (league,))
+    assert_wakes(state, commissioner, manager, other)
     call(state, "SELECT dl.draft_action(%s, 7, 'start')", (league,))
     assert_wakes(state, commissioner, manager, other)
     draftable = state.admin.execute("SELECT min(id) FROM dl.draftable").fetchone()[0]

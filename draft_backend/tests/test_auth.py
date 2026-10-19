@@ -182,6 +182,74 @@ def test_oidc_login_redirects_to_provider_with_configured_callback():
     assert provider.authorize_redirect.await_args.args[1] == ("https://draft.example/auth/callback")
 
 
+@pytest.mark.parametrize(
+    "display_name, provider_name, expected",
+    [
+        ("  Coach & Pikachu / 雪 ⚡  ", "Google name", "Coach & Pikachu / 雪 ⚡"),
+        ("A" * 80, "Google name", "A" * 80),
+        ("", " Google name ", "Google name"),
+        ("   ", "Google name", "Google name"),
+        ("", None, "User"),
+    ],
+)
+def test_signup_display_name_survives_provider_redirect(display_name, provider_name, expected):
+    from starlette.responses import RedirectResponse
+
+    app = make_app()
+    provider = SimpleNamespace(
+        authorize_redirect=AsyncMock(return_value=RedirectResponse("https://id.example/")),
+        authorize_access_token=AsyncMock(return_value={
+            "id_token": "verified",
+            "userinfo": {"iss": "https://id.example", "sub": "alice", "name": provider_name},
+        }),
+    )
+    app.state.oauth = SimpleNamespace(create_client=lambda _: provider)
+    user = {"id": 7, "display_name": expected}
+    app.state.db.register_identity.return_value = user
+    app.state.db.user.return_value = user
+    with TestClient(app) as client:
+        response = client.get(
+            "/auth/login", params={"display_name": display_name}, follow_redirects=False
+        )
+        assert response.headers["location"] == "https://id.example/"
+        # The choice stays in the signed session, not the provider's authorization parameters.
+        assert provider.authorize_redirect.await_args.kwargs == {}
+        assert client.get("/auth/callback", follow_redirects=False).status_code == 303
+        assert client.get("/auth/me").json()["user"] == user
+    app.state.db.register_identity.assert_awaited_once_with("https://id.example", "alice", expected)
+
+
+def test_restarting_signin_discards_abandoned_display_name():
+    from starlette.responses import RedirectResponse
+
+    app = make_app()
+    provider = SimpleNamespace(
+        authorize_redirect=AsyncMock(return_value=RedirectResponse("https://id.example/")),
+        authorize_access_token=AsyncMock(return_value={
+            "id_token": "verified",
+            "userinfo": {"iss": "https://id.example", "sub": "alice", "name": "Google name"},
+        }),
+    )
+    app.state.oauth = SimpleNamespace(create_client=lambda _: provider)
+    with TestClient(app) as client:
+        client.get("/auth/login", params={"display_name": "Abandoned name"}, follow_redirects=False)
+        client.get("/auth/login", follow_redirects=False)
+        client.get("/auth/callback", follow_redirects=False)
+    app.state.db.register_identity.assert_awaited_once_with(
+        "https://id.example", "alice", "Google name"
+    )
+
+
+def test_signup_rejects_display_names_over_80_characters():
+    app = make_app()
+    provider = SimpleNamespace(authorize_redirect=AsyncMock())
+    app.state.oauth = SimpleNamespace(create_client=lambda _: provider)
+    with TestClient(app) as client:
+        assert client.get("/auth/login", params={"display_name": "A" * 81}).status_code == 422
+    provider.authorize_redirect.assert_not_awaited()
+    app.state.db.register_identity.assert_not_awaited()
+
+
 def test_custom_oidc_callback_is_both_redirect_uri_and_callback_route():
     from starlette.responses import RedirectResponse
 

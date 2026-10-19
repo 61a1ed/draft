@@ -54,8 +54,8 @@ class Tournament:
             self.teams = [
                 conn.execute(
                     "INSERT INTO dl.team "
-                    "(league_id, name, manager_user_id, draft_position, point_budget) "
-                    "VALUES (%s, %s, %s, %s, 100) RETURNING id",
+                    "(league_id, name, manager_user_id, draft_position, point_budget, color_rgb) "
+                    "VALUES (%s, %s, %s, %s, 100, 0) RETURNING id",
                     (self.league, f"Team {i}", user, i + 1),
                 ).fetchone()[0]
                 for i, user in enumerate(self.users[:-1])
