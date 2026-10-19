@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  Bookmark,
   CalendarDays,
   Check,
   ChevronDown,
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError, errorMessage } from './lib/api'
 import { useDraft } from './lib/useDraft'
+import { useFavorites } from './lib/useFavorites'
 import type { Draftable, LeagueSnapshot, Session, Team } from './lib/types'
 import { teamAvatarStyle, teamName } from './lib/teamPresentation'
 import { Catalog, PokemonImage } from './components/Catalog'
@@ -33,7 +35,7 @@ import { LeagueSetup } from './components/LeagueSetup'
 import { Tournament } from './components/Tournament'
 import { Availability } from './components/Availability'
 
-type View = 'draft' | 'tournament' | 'availability' | 'teams' | 'activity' | 'settings'
+type View = 'draft' | 'catalog' | 'tournament' | 'availability' | 'teams' | 'activity' | 'settings'
 
 type AvailabilityContext = {
   owner: string
@@ -44,6 +46,7 @@ type AvailabilityContext = {
 type SelectedPick = { item: Draftable; revision: number; teamId: number | null }
 const navItems = [
   { id: 'draft', label: 'Draft room', icon: LayoutGrid },
+  { id: 'catalog', label: 'Catalog & favorites', icon: Bookmark },
   { id: 'tournament', label: 'Tournament', icon: Trophy },
   { id: 'availability', label: 'Availability', icon: CalendarDays },
   { id: 'teams', label: 'Teams & rosters', icon: Users },
@@ -242,6 +245,33 @@ function TestSignIn({
 export default function App() {
   const draft = useDraft()
   const { snapshot, session, catalog, mode } = draft
+  const favorites = useFavorites({
+    userId: mode === 'live' ? (session?.user.id ?? null) : null,
+    refreshKey: draft.tournamentRefreshKey,
+    mutate: draft.mutate,
+  })
+  const workspaceBusy = draft.busy || favorites.busy
+  const legacyOwner = mode === 'live' ? (session?.user.id ?? null) : null
+  const [legacySaved, setLegacySaved] = useState<{ owner: number | null; ids: number[] }>({
+    owner: null,
+    ids: [],
+  })
+  useEffect(() => {
+    let ids: number[] = []
+    if (legacyOwner !== null) {
+      try {
+        const saved: unknown = JSON.parse(
+          localStorage.getItem(`draft-club:watchlist:live:${legacyOwner}`) ?? '[]',
+        )
+        if (Array.isArray(saved))
+          ids = [...new Set(saved.filter((id): id is number => Number.isInteger(id) && id > 0))]
+      } catch {
+        /* Browser storage may be unavailable. Account favorites remain usable. */
+      }
+    }
+    setLegacySaved({ owner: legacyOwner, ids })
+  }, [legacyOwner])
+  const legacyWatchlist = legacySaved.owner === legacyOwner ? legacySaved.ids : []
   const [view, setView] = useState<View>('draft')
   const initialViewOwner = useRef('')
   useEffect(() => {
@@ -253,7 +283,9 @@ export default function App() {
     const owner = `${session.user.id}:${snapshot.league_id}`
     if (initialViewOwner.current === owner) return
     initialViewOwner.current = owner
-    setView(snapshot.state.status === 'setup' ? 'settings' : 'draft')
+    setView((current) =>
+      current === 'catalog' ? current : snapshot.state.status === 'setup' ? 'settings' : 'draft',
+    )
   }, [snapshot, draft.leagueId, session])
   const [availabilityContext, setAvailabilityContext] = useState<AvailabilityContext | null>(null)
   const availabilityOwner = `${session?.user.id ?? 0}:${draft.leagueId ?? 0}`
@@ -283,30 +315,6 @@ export default function App() {
   } | null>(null)
   const closeTestSignIn = useCallback(() => setTestSignIn(false), [])
   const [chargePoints, setChargePoints] = useState(true)
-  const [watchlist, setWatchlist] = useState<number[]>([])
-  const watchKey = `draft-club:watchlist:${mode}:${session?.user.id ?? 0}`
-  useEffect(() => {
-    try {
-      const saved: unknown = JSON.parse(localStorage.getItem(watchKey) ?? '[]')
-      setWatchlist(
-        Array.isArray(saved) ? saved.filter((id): id is number => Number.isInteger(id)) : [],
-      )
-    } catch {
-      setWatchlist([])
-    }
-  }, [watchKey])
-  const toggleWatch = (id: number) =>
-    setWatchlist((previous) => {
-      const next = previous.includes(id)
-        ? previous.filter((value) => value !== id)
-        : [...previous, id]
-      try {
-        localStorage.setItem(watchKey, JSON.stringify(next))
-      } catch {
-        /* The watchlist still works for this tab. */
-      }
-      return next
-    })
   useEffect(() => {
     setSelected(null)
     setConfirmAction(null)
@@ -337,10 +345,12 @@ export default function App() {
     activeTeam &&
     cost <= activeTeam.points_remaining
   const openPick = (item: Draftable) => {
-    if (snapshot) {
-      setSelected({ item, revision: snapshot.revision, teamId: snapshot.state.next_team_id })
-      setChargePoints(true)
-    }
+    setSelected({
+      item,
+      revision: snapshot?.revision ?? -1,
+      teamId: snapshot?.state.next_team_id ?? null,
+    })
+    setChargePoints(true)
   }
 
   if (mode === 'loading')
@@ -373,7 +383,7 @@ export default function App() {
         {draft.sessionCheckFailed ? (
           <button
             className="button primary"
-            disabled={draft.busy}
+            disabled={workspaceBusy}
             onClick={() => void draft.connect().catch(() => {})}
           >
             <RefreshCw size={16} />
@@ -388,11 +398,11 @@ export default function App() {
                 maxLength={80}
                 autoComplete="nickname"
                 aria-describedby="display-name-hint"
-                disabled={draft.busy}
+                disabled={workspaceBusy}
               />
             </label>
             <p id="display-name-hint">For new accounts. Leave blank to use your Google name.</p>
-            <button className="button primary" disabled={draft.busy}>
+            <button className="button primary" disabled={workspaceBusy}>
               Sign in
               <ArrowRight size={16} />
             </button>
@@ -402,7 +412,7 @@ export default function App() {
           <>
             <button
               className="button text-button"
-              disabled={draft.busy}
+              disabled={workspaceBusy}
               onClick={() => setTestSignIn(true)}
             >
               Use a test account
@@ -441,7 +451,7 @@ export default function App() {
             <select
               aria-label="Choose league"
               value={draft.leagueId ?? ''}
-              disabled={draft.busy}
+              disabled={workspaceBusy}
               onChange={(event) => {
                 draft.selectLeague(Number(event.target.value))
                 setView('draft')
@@ -483,7 +493,7 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <button className="new-league" disabled={draft.busy} onClick={() => setCreate(true)}>
+        <button className="new-league" disabled={workspaceBusy} onClick={() => setCreate(true)}>
           <Plus size={16} />
           Create a league
         </button>
@@ -502,7 +512,7 @@ export default function App() {
             <button
               className="icon-button"
               aria-label="Sign out"
-              disabled={draft.busy}
+              disabled={workspaceBusy}
               onClick={() => void draft.logout()}
             >
               <LogOut size={16} />
@@ -534,14 +544,14 @@ export default function App() {
             <span className="topbar-divider" />
             <button
               className="icon-button"
-              disabled={draft.busy}
+              disabled={workspaceBusy}
               aria-label="Refresh all data"
               onClick={() => {
                 setSelected(null)
                 setConfirmAction(null)
                 void draft.refreshData()
               }}
-              title="Refresh leagues, catalog, draft, tournament, and availability"
+              title="Refresh leagues, catalog, favorites, draft, tournament, and availability"
             >
               <RefreshCw size={16} />
             </button>
@@ -557,7 +567,7 @@ export default function App() {
               <select
                 aria-label="Choose league on mobile"
                 value={draft.leagueId ?? ''}
-                disabled={draft.busy}
+                disabled={workspaceBusy}
                 onChange={(event) => {
                   draft.selectLeague(Number(event.target.value))
                   setView('draft')
@@ -577,7 +587,7 @@ export default function App() {
             <button
               className="icon-button"
               aria-label="Create a league on mobile"
-              disabled={draft.busy}
+              disabled={workspaceBusy}
               onClick={() => setCreate(true)}
             >
               <Plus size={18} />
@@ -585,7 +595,7 @@ export default function App() {
             <button
               className="icon-button"
               aria-label="Sign out on mobile"
-              disabled={draft.busy}
+              disabled={workspaceBusy}
               onClick={() => void draft.logout()}
             >
               <LogOut size={17} />
@@ -626,15 +636,29 @@ export default function App() {
               </span>
             )}
           </div>
-          {!snapshot ? (
+          {view === 'catalog' ? (
+            <Catalog
+              key={session!.user.id}
+              catalog={catalog}
+              snapshot={snapshot}
+              favorites={favorites}
+              legacyWatchlist={legacyWatchlist}
+              busy={draft.busy}
+              onSelect={openPick}
+            />
+          ) : !snapshot ? (
             <div className="card empty-state">
               <Trophy size={34} />
               <h2>{draft.leagueId !== null ? 'Loading league…' : 'No leagues'}</h2>
               {draft.leagueId === null && (
-                <button className="button primary" onClick={() => setCreate(true)}>
-                  <Plus size={16} />
-                  Create league
-                </button>
+                <div className="empty-state-actions">
+                  <button className="button primary" onClick={() => setCreate(true)}>
+                    <Plus size={16} /> Create league
+                  </button>
+                  <button className="button secondary" onClick={() => setView('catalog')}>
+                    <Bookmark size={16} /> Browse catalog & favorites
+                  </button>
+                </div>
               )}
             </div>
           ) : (
@@ -739,10 +763,12 @@ export default function App() {
                   </div>
                   <div className="draft-layout">
                     <Catalog
+                      key={session!.user.id}
                       catalog={catalog}
                       snapshot={snapshot}
-                      watchlist={watchlist}
-                      toggleWatch={toggleWatch}
+                      favorites={favorites}
+                      legacyWatchlist={legacyWatchlist}
+                      busy={draft.busy}
                       onSelect={openPick}
                     />
                     <aside className="draft-aside">
@@ -789,7 +815,7 @@ export default function App() {
                       {can('undo') && (
                         <button
                           className="undo-button"
-                          disabled={draft.busy}
+                          disabled={workspaceBusy}
                           onClick={() =>
                             setConfirmAction({ kind: 'undo', revision: snapshot.revision })
                           }
@@ -975,8 +1001,11 @@ export default function App() {
           }}
         />
       )}
-      {selected && snapshot && (
-        <Modal title="Pick details" onClose={() => setSelected(null)}>
+      {selected && (
+        <Modal
+          title={snapshot ? 'Pick details' : 'Pokémon details'}
+          onClose={() => setSelected(null)}
+        >
           <div className="pick-preview">
             <div className={`pokemon-art color-${(selected.item.dex ?? selected.item.id) % 6}`}>
               <PokemonImage item={selected.item} />
@@ -989,15 +1018,17 @@ export default function App() {
             <h2>{selected.item.name}</h2>
             <p>{selected.item.point_cost} points</p>
           </div>
-          <div className="pick-summary">
-            <span>
-              Drafting for<strong>{activeTeam ? teamName(activeTeam) : 'No active turn'}</strong>
-            </span>
-            <span>
-              Points after pick
-              <strong>{activeTeam ? activeTeam.points_remaining - cost : '—'}</strong>
-            </span>
-          </div>
+          {snapshot && (
+            <div className="pick-summary">
+              <span>
+                Drafting for<strong>{activeTeam ? teamName(activeTeam) : 'No active turn'}</strong>
+              </span>
+              <span>
+                Points after pick
+                <strong>{activeTeam ? activeTeam.points_remaining - cost : '—'}</strong>
+              </span>
+            </div>
+          )}
           {commissioner && can('pick') && !selectedTaken && (
             <label className="checkbox-field">
               <input
@@ -1008,7 +1039,9 @@ export default function App() {
               Waive points for this pick<span>Commissioner</span>
             </label>
           )}
-          {selectedTaken ? (
+          {!snapshot ? (
+            <p className="selection-notice">Choose a league to draft this Pokémon.</p>
+          ) : selectedTaken ? (
             <p className="selection-notice">This Pokémon has already been drafted.</p>
           ) : pickChanged ? (
             <p className="selection-notice">
@@ -1027,32 +1060,60 @@ export default function App() {
               This pick exceeds the current team’s remaining budget.
             </p>
           ) : null}
-          <button
-            className="button primary full-width"
-            disabled={!pickAllowed || draft.busy}
-            onClick={async () => {
-              await draft.draftAction('pick', selected.item.id, chargePoints)
-              setSelected(null)
-            }}
-          >
-            {draft.busy
-              ? 'Submitting pick…'
-              : `Draft ${selected.item.species || selected.item.name}`}
-            <ArrowRight size={17} />
-          </button>
+          {snapshot && (
+            <button
+              className="button primary full-width"
+              disabled={!pickAllowed || draft.busy}
+              onClick={async () => {
+                await draft.draftAction('pick', selected.item.id, chargePoints)
+                setSelected(null)
+              }}
+            >
+              {draft.busy
+                ? 'Submitting pick…'
+                : `Draft ${selected.item.species || selected.item.name}`}
+              <ArrowRight size={17} />
+            </button>
+          )}
           <button
             className="button text-button full-width"
-            onClick={() => toggleWatch(selected.item.id)}
+            disabled={
+              draft.busy ||
+              favorites.busy ||
+              favorites.loading ||
+              !!favorites.readError ||
+              !favorites.state
+            }
+            onClick={() => {
+              const list = favorites.state
+              if (!list) return
+              const input = {
+                p_list: list.id,
+                p_revision: list.revision,
+                p_draftable: selected.item.id,
+              }
+              const saved = list.entries.some((entry) => entry.draftable_id === selected.item.id)
+              void favorites.run(() =>
+                saved ? api.removeFavoritesEntry(input) : api.addFavoritesEntry(input),
+              )
+            }}
           >
-            {watchlist.includes(selected.item.id) ? (
+            {favorites.state?.entries.some((entry) => entry.draftable_id === selected.item.id) ? (
               <>
                 <Check size={15} />
-                Saved to watchlist
+                Remove from {favorites.state.name}
               </>
+            ) : favorites.state ? (
+              `Save to ${favorites.state.name}`
             ) : (
-              'Save to watchlist'
+              'Create a favorites list in the catalog to save this Pokémon'
             )}
           </button>
+          {favorites.error && (
+            <p className="inline-error" role="alert">
+              {favorites.error}
+            </p>
+          )}
         </Modal>
       )}
       {confirmAction && snapshot && (

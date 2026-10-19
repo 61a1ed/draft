@@ -33,6 +33,15 @@ import type {
   SetTeamAvailabilityInput,
   TeamAvailabilitySnapshot,
 } from './availabilityTypes'
+import type {
+  CreateFavoritesListInput,
+  FavoritesEntryInput,
+  FavoritesList,
+  FavoritesListRevision,
+  FavoritesListSnapshot,
+  RenameFavoritesListInput,
+  SetFavoritesOrderInput,
+} from './favoritesTypes'
 
 const errorMessages: Record<string, string> = {
   sign_in_required: 'Your session has ended. Sign in to continue.',
@@ -103,6 +112,13 @@ const errorMessages: Record<string, string> = {
   invalid_availability_week: 'Choose valid source and destination dates for the week copy.',
   nonexistent_local_boundary:
     'A copied time falls in a daylight saving time gap. Adjust that window before copying.',
+  favorites_list_not_found:
+    'That favorites list no longer exists. Refresh your lists and try again.',
+  favorites_entry_not_found:
+    'That Pokémon is no longer in this list. Refresh the list and try again.',
+  invalid_favorites_name: 'Enter a name for your favorites list.',
+  order_must_contain_every_draftable_once:
+    'Include every Pokémon in the favorites list exactly once when changing its order.',
 }
 
 export class ApiError extends Error {
@@ -229,6 +245,18 @@ export const api = {
   },
   users: (signal?: AbortSignal) => request<User[]>('/api/users', { signal }),
   draftables: (signal?: AbortSignal) => request<Draftable[]>('/api/draftables', { signal }),
+  favoritesLists: (ownerUserId: number, signal?: AbortSignal) =>
+    request<FavoritesList[]>(`/api/favorites-lists?owner_user_id=${ownerUserId}`, { signal }),
+  favoritesList: (listId: number, signal?: AbortSignal) =>
+    request<FavoritesListSnapshot>(`/api/favorites-lists/${listId}`, { signal }),
+  createFavoritesList: (input: CreateFavoritesListInput) =>
+    rpc<number>('create_favorites_list', input),
+  renameFavoritesList: (input: RenameFavoritesListInput) =>
+    rpc<null>('rename_favorites_list', input),
+  deleteFavoritesList: (input: FavoritesListRevision) => rpc<null>('delete_favorites_list', input),
+  addFavoritesEntry: (input: FavoritesEntryInput) => rpc<null>('add_favorites_entry', input),
+  removeFavoritesEntry: (input: FavoritesEntryInput) => rpc<null>('remove_favorites_entry', input),
+  setFavoritesOrder: (input: SetFavoritesOrderInput) => rpc<null>('set_favorites_order', input),
   leagues: (signal?: AbortSignal) => request<League[]>('/api/leagues', { signal }),
   snapshot: (id: number, signal?: AbortSignal) =>
     request<LeagueSnapshot>(`/api/leagues/${id}`, { signal }),

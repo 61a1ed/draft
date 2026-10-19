@@ -1,5 +1,6 @@
-"""Favorites are ordered account lists with owner-only, revisioned mutations."""
+"""Favorites have owner-only reads and revisioned, owner-only mutations."""
 
+import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -15,6 +16,7 @@ from psycopg import sql
 
 from draft_backend import app as module
 from draft_backend.config import Settings
+from draft_backend.db import Database
 
 
 def login(client, username="alice"):
@@ -138,23 +140,37 @@ def test_favorites_http_rejects_invalid_input_before_writing(application, name, 
         db.write.assert_not_awaited()
 
 
-def test_favorites_public_read_contract_and_id_validation(application):
+def test_favorites_read_contract_requires_session_and_valid_ids(application):
     app, db = application
-    header = {"id": 2, "owner_user_id": 7, "name": "Targets", "revision": 3}
+    header = {"id": 2, "owner_user_id": 1, "name": "Targets", "revision": 3}
     detail = {**header, "entries": [{"draftable_id": 5, "ordinal": 1}]}
     with TestClient(app) as client:
-        # TODO: These reads deliberately require no login until privacy is implemented.
+        for path in ("/api/favorites-lists", "/api/favorites-lists?owner_user_id=1",
+                     "/api/favorites-lists/2"):
+            response = client.get(path)
+            assert response.status_code == 401
+            assert response.json() == {"detail": "sign_in_required"}
+            assert response.headers["Cache-Control"] == "no-store"
+        db.read.assert_not_awaited()
+        login(client)
         db.read.return_value = [header]
         assert client.get("/api/favorites-lists").json() == [header]
-        assert db.read.await_args.args[0] is None
-        response = client.get("/api/favorites-lists", params={"owner_user_id": "7"})
+        assert db.read.await_args.args[0] == 1
+        response = client.get("/api/favorites-lists", params={"owner_user_id": "1"})
         assert response.status_code == 200
         assert response.json() == [header]
+        assert db.read.await_args.args[2] == (1,)
+        # A caller-supplied filter must not replace the authenticated DB identity.
+        db.read.return_value = []
+        assert client.get("/api/favorites-lists?owner_user_id=7").json() == []
+        assert db.read.await_args.args[0] == 1
         assert db.read.await_args.args[2] == (7,)
         db.read.return_value = [detail]
         response = client.get("/api/favorites-lists/2")
         assert response.status_code == 200
         assert response.json() == detail
+        assert response.headers["Cache-Control"] == "no-store"
+        assert db.read.await_args.args[0] == 1
         db.read.return_value = []
         response = client.get("/api/favorites-lists/2")
         assert response.status_code == 404
@@ -173,7 +189,7 @@ def test_favorites_public_read_contract_and_id_validation(application):
 
 
 @pytest.mark.integration
-def test_favorites_http_lifecycle_and_intentionally_public_reads(client):
+def test_favorites_http_lifecycle_and_owner_only_reads(client):
     owner = login(client)["id"]
     draftables = [row["id"] for row in client.get("/api/draftables").json()[:3]]
     first, second, third = draftables
@@ -238,7 +254,8 @@ def test_favorites_http_lifecycle_and_intentionally_public_reads(client):
     ) == {"detail": "stale_revision"}
     assert snapshot(client, other_list)["revision"] == 1
 
-    login(client, "bob")
+    other_owner = login(client, "bob")["id"]
+    bob_list = rpc(client, "create_favorites_list", p_name="Bob's private list")
     assert rpc(
         client,
         "delete_favorites_list",
@@ -246,14 +263,32 @@ def test_favorites_http_lifecycle_and_intentionally_public_reads(client):
         p_list=list_id,
         p_revision=7,
     ) == {"detail": "action_not_permitted"}
+    inaccessible = client.get(f"/api/favorites-lists/{list_id}")
+    missing = client.get("/api/favorites-lists/2147483647")
+    assert inaccessible.status_code == missing.status_code == 404
+    assert inaccessible.json() == missing.json() == {"detail": "favorites_list_not_found"}
+    headers = client.get("/api/favorites-lists").json()
+    assert bob_list in {row["id"] for row in headers}
+    assert all(row["owner_user_id"] == other_owner for row in headers)
+    assert client.get("/api/favorites-lists", params={"owner_user_id": owner}).json() == []
+
     client.cookies.clear()
-    # TODO: Replace these public-read expectations when favorites read restrictions land.
-    public = snapshot(client, list_id)
-    assert public["name"] == "Renamed"
-    assert public["revision"] == 7
+    for path in ("/api/favorites-lists", f"/api/favorites-lists?owner_user_id={owner}",
+                 f"/api/favorites-lists/{list_id}"):
+        response = client.get(path)
+        assert response.status_code == 401
+        assert response.json() == {"detail": "sign_in_required"}
+    # Catalog browsing remains public.
+    assert client.get("/api/draftables").status_code == 200
+
+    login(client)
+    private = snapshot(client, list_id)
+    assert private["name"] == "Renamed"
+    assert private["revision"] == 7
     headers = client.get("/api/favorites-lists").json()
     assert [row["id"] for row in headers] == sorted(row["id"] for row in headers)
-    assert {key: value for key, value in public.items() if key != "entries"} in headers
+    assert all(row["owner_user_id"] == owner for row in headers)
+    assert {key: value for key, value in private.items() if key != "entries"} in headers
     filtered = client.get("/api/favorites-lists", params={"owner_user_id": owner}).json()
     assert all(row["owner_user_id"] == owner for row in filtered)
     assert {list_id, other_list} <= {row["id"] for row in filtered}
@@ -268,7 +303,6 @@ def test_favorites_http_lifecycle_and_intentionally_public_reads(client):
     ):
         assert client.get(path).status_code == 422
 
-    login(client)
     rpc(client, "delete_favorites_list", p_list=list_id, p_revision=7)
     assert client.get(f"/api/favorites-lists/{list_id}").status_code == 404
     assert snapshot(client, other_list)["entries"] == []
@@ -342,6 +376,106 @@ def rejected(code, message=None):
     assert caught.value.sqlstate == code, str(caught.value)
     if message is not None:
         assert caught.value.diag.message_primary == message
+
+
+@pytest.mark.integration
+def test_favorites_rls_filters_tables_and_snapshot_by_owner(favorites):
+    state = favorites
+    first, second, _ = state.draftables
+    state.call("add_favorites_entry", (state.list_id, 0, first), user=state.owner)
+    state.call("add_favorites_entry", (state.list_id, 1, second), user=state.owner)
+    state.call("set_favorites_order", (state.list_id, 2, [second, first]), user=state.owner)
+    other_list = state.call("create_favorites_list", ("Other priorities",), user=state.other)
+    state.call("add_favorites_entry", (other_list, 0, first), user=state.other)
+
+    for user, visible, hidden, entries in (
+        (state.owner, state.list_id, other_list, [second, first]),
+        (state.other, other_list, state.list_id, [first]),
+    ):
+        with state.actor(user) as conn:
+            # No application WHERE clause: the database itself isolates accounts.
+            assert conn.execute("SELECT id FROM dl.favorites_list").fetchall() == [(visible,)]
+            assert conn.execute(
+                "SELECT favorites_list_id, draftable_id FROM dl.favorites_entry ORDER BY ordinal"
+            ).fetchall() == [(visible, draftable) for draftable in entries]
+            snapshots = conn.execute(
+                "SELECT to_jsonb(s) FROM dl.favorites_list_snapshot s"
+            ).fetchall()
+            assert len(snapshots) == 1
+            result = snapshots[0][0]
+            assert result["id"] == visible
+            assert result["owner_user_id"] == user
+            assert result["entries"] == [
+                {"draftable_id": draftable, "ordinal": i}
+                for i, draftable in enumerate(entries, 1)
+            ]
+            for table, key in (
+                ("favorites_list", "id"), ("favorites_entry", "favorites_list_id"),
+                ("favorites_list_snapshot", "id"),
+            ):
+                query = sql.SQL("SELECT * FROM dl.{} WHERE {} = %s").format(
+                    sql.Identifier(table), sql.Identifier(key),
+                )
+                assert conn.execute(query, (hidden,)).fetchall() == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("claims", [None, "", "{}", '{"user_id": null}'])
+def test_favorites_rls_returns_nothing_without_account_identity(favorites, claims):
+    state = favorites
+    state.call("add_favorites_entry", (state.list_id, 0, state.draftables[0]), user=state.owner)
+    with psycopg.connect(state.database.gateway) as conn:
+        conn.execute("SET LOCAL ROLE dl_api")
+        if claims is not None:
+            conn.execute("SELECT set_config('request.jwt.claims', %s, true)", (claims,))
+        for table in ("favorites_list", "favorites_entry", "favorites_list_snapshot"):
+            assert conn.execute(
+                sql.SQL("SELECT * FROM dl.{}").format(sql.Identifier(table))
+            ).fetchall() == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("role", ["dl_gateway", "dl_auth"])
+def test_favorites_tables_and_view_have_no_public_read_grants(favorites, role):
+    for table in ("favorites_list", "favorites_entry", "favorites_list_snapshot"):
+        with psycopg.connect(favorites.database.gateway) as conn:
+            conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
+            # Even an owner identity grants nothing outside the API role.
+            conn.execute(
+                "SELECT set_config('request.jwt.claims', %s, true)",
+                (json.dumps({"user_id": favorites.owner}),),
+            )
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(sql.SQL("SELECT * FROM dl.{}").format(sql.Identifier(table)))
+
+
+@pytest.mark.integration
+def test_favorites_pooled_reads_do_not_reuse_previous_account_identity(favorites):
+    state = favorites
+    other_list = state.call("create_favorites_list", ("Other account",), user=state.other)
+
+    async def check():
+        db = Database(Settings(
+            database_url=state.database.gateway,
+            migration_database_url=state.database.admin,
+            session_secret="x" * 40,
+            pool_size=1,
+            app_env="test",
+            test_login_enabled=True,
+        ))
+        await db.open()
+        try:
+            for user, expected in (
+                (state.owner, [state.list_id]), (state.other, [other_list]),
+                (None, []), (state.owner, [state.list_id]),
+            ):
+                rows = await db.read(user, "SELECT id FROM dl.favorites_list_snapshot ORDER BY id")
+                assert [row["id"] for row in rows] == expected
+        finally:
+            await db.close()
+
+    with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+        runner.run(check())
 
 
 @pytest.mark.integration
@@ -570,7 +704,7 @@ def test_favorites_notify_only_owner_after_commit_and_never_on_rollback(favorite
         with state.actor(state.owner) as conn:
             conn.execute("SELECT dl.add_favorites_entry(%s, 4, %s)", (state.list_id, first))
             assert_wakes(listener)
-            raise psycopg.Rollback
+            conn.rollback()
         assert_wakes(listener)
         assert state.snapshot()["revision"] == 4
         assert state.snapshot()["entries"] == []

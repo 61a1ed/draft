@@ -348,13 +348,12 @@ def create_app(settings: Settings | None = None):
             "'/images/' || image_hash AS image_url FROM dl.draftable ORDER BY id",
         )
 
-    # TODO FAVORITES READ PRIVACY: Both endpoints deliberately allow anonymous
-    # and other-account reads for now. owner_user_id is only a browsing filter,
-    # NOT authorization. Add owner-only read checks together with database
-    # restrictions on BOTH favorites tables and the snapshot view; see 0003.
+    # Sign-in supplies the trusted transaction identity; PostgreSQL RLS enforces
+    # ownership on both tables and the security-invoker snapshot view. The optional
+    # owner filter can narrow results but cannot expand access beyond that identity.
     @app.get("/api/favorites-lists", tags=["reads"])
     async def favorites_lists(
-        user: Reader,
+        user: User,
         owner_user_id: Annotated[int | None, Field(gt=0, le=2147483647)] = None,
     ):
         query = "SELECT id, owner_user_id, name, revision FROM dl.favorites_list"
@@ -366,7 +365,7 @@ def create_app(settings: Settings | None = None):
 
     @app.get("/api/favorites-lists/{list_id}", tags=["reads"])
     async def favorites_list(
-        list_id: Annotated[int, Field(gt=0, le=2147483647)], user: Reader,
+        list_id: Annotated[int, Field(gt=0, le=2147483647)], user: User,
     ):
         rows = await app.state.db.read(
             user, "SELECT * FROM dl.favorites_list_snapshot WHERE id = %s", (list_id,),

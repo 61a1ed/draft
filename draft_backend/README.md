@@ -25,6 +25,8 @@ baseline. Subsequent changes belong in `src/draft_backend/sql_migrations/`;
 permissions. `0002_team_metadata.sql` adds manager-owned team names and RGB colors,
 and requires complete team metadata before draft start. `0003_favorites.sql` adds
 account-owned catalog favorites lists, ordered entries, and controlled writes.
+`0004_favorites_privacy.sql` makes all existing and future favorites owner-only
+with row-level security, including direct reads of their tables and snapshot view.
 Startup applies these files through the separate
 `MIGRATION_DATABASE_URL` connection as `dl_owner`, closes it, then opens the
 ordinary `DATABASE_URL` pool. A failed migration prevents startup and readiness.
@@ -155,15 +157,15 @@ addresses come from configuration rather than forwarded request headers.
 
 ## HTTP contract
 
-Schema data is public. Data reads require no session and come directly from PostgreSQL.
-Writes and the account notification stream require a session:
+Catalog, league, and tournament reads are public and come directly from PostgreSQL.
+Favorites reads, writes, and the account notification stream require a session:
 
 | Method/path | Result |
 |---|---|
 | `GET /api/users` | Array of `{id, display_name}`; no login identities |
 | `GET /api/draftables` | Global catalog array |
-| `GET /api/favorites-lists` | List headers ordered by ID; optional `owner_user_id` query filter |
-| `GET /api/favorites-lists/{id}` | List header and ordered `{draftable_id, ordinal}` entries |
+| `GET /api/favorites-lists` | Signed-in account's list headers ordered by ID; optional `owner_user_id` filter can only narrow results |
+| `GET /api/favorites-lists/{id}` | Owner-only list header and ordered `{draftable_id, ordinal}` entries; sign-in required |
 | `GET /images/{hash}` / `HEAD /images/{hash}` | Public PNG image; no session required |
 | `GET /api/leagues` | Array of all leagues |
 | `GET /api/leagues/{id}` | One `dl.league_snapshot` row; actions personalized to the signed-in user |
@@ -216,12 +218,14 @@ unknown, especially `create_league`.
 
 ## Catalog favorites
 
-**BIG TODO — FAVORITES READ RESTRICTIONS ARE NOT IMPLEMENTED.** Lists and their
-entries are currently public, including to anonymous users and other managers.
-The owner filter is a convenience, not authorization. Before treating draft
-priorities as private, revoke public reads on both favorites tables and the
-snapshot view, enforce owner-only database reads, and authorize both HTTP read
-endpoints. Owner-only writes do not make the stored lists private.
+Lists, names, entries, and priority order are private to their owning account.
+Both HTTP read endpoints require sign-in. PostgreSQL row-level security enforces
+ownership on `dl.favorites_list` and `dl.favorites_entry`; the existing
+security-invoker snapshot view follows those policies. Public SELECT grants on
+all three objects are revoked, and only `dl_api` receives read access subject to
+RLS. The gateway supplies the account identity from the verified session for each
+transaction. The optional owner filter cannot change that identity or grant access.
+Existing lists become private when migration `0004_favorites_privacy.sql` runs.
 
 Favorites belong to an `app_user` account and can be prepared before joining any
 league, reused across drafts, and edited during a draft. They do not reserve a
@@ -235,17 +239,22 @@ List names are trimmed and must contain non-whitespace text; duplicate names are
 allowed. Empty lists are valid. Deleting a list cascades to its entries, while
 referenced draftables cannot be deleted without first resolving their references.
 
-`GET /api/favorites-lists?owner_user_id=42` returns headers for that account;
-omitting the filter returns all headers. `GET /api/favorites-lists/{id}` returns
+`GET /api/favorites-lists` returns only the signed-in account's headers.
+The optional `owner_user_id=42` filter returns those headers only if account 42 is
+signed in; filtering for a different account returns `[]`.
+`GET /api/favorites-lists/{id}` returns
 one consistent `dl.favorites_list_snapshot` with the header fields and an `entries`
-array sorted by ordinal (or `[]` for an empty list). Missing lists return 404 with
-`favorites_list_not_found`. Join entry IDs to the separately fetched catalog for
+array sorted by ordinal (or `[]` for an empty list). Missing lists and lists owned
+by another account both return 404 with `favorites_list_not_found`. Signed-out or
+expired sessions receive 401 with `sign_in_required`. Join entry IDs to the catalog for
 names, prices, and images.
 
 All writes use the existing login, CSRF, SERIALIZABLE transaction, and error
 handling conventions. The server derives the owner from the session at creation;
 only that owner may subsequently edit or delete the list. Commissioners have no
-special access to other accounts' favorites writes.
+special access to other accounts' favorites reads or writes. The schema owner
+retains administrative access, and the existing SECURITY DEFINER write functions
+retain their own ownership and revision checks.
 
 | Function | JSON arguments | `result` |
 |---|---|---|
@@ -546,10 +555,12 @@ the heartbeat interval. Cookies authenticate native EventSource automatically.
 | `dl_auth` | NOLOGIN, upsert `app_user`; public schema reads |
 | `dl_gateway` | Unprivileged LOGIN, NOINHERIT; can explicitly select API/auth roles |
 
-People are `app_user` rows. All tables, views, and columns in `dl` are publicly
-readable, including account identities and tournament history. New owner-created
-tables and views inherit public reads. Commissioner/manager write permissions remain
-in the schema. `request.jwt.claims` is populated transaction-locally from the verified
+People are `app_user` rows. Favorites tables and their snapshot view are private;
+other application tables and views remain publicly readable, including account
+identities and tournament history. New owner-created tables and views inherit
+public reads, so migrations adding private data must revoke those grants explicitly.
+Commissioner/manager write permissions remain in the schema.
+`request.jwt.claims` is populated transaction-locally from the verified
 session; despite its name, no browser JWT is needed. Runtime credentials belong
 only to the trusted Python server. Startup rejects an owner/superuser connection.
 

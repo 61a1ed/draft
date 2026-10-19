@@ -709,7 +709,7 @@ def test_rpc_authentication_scope_and_private_helpers(tournament_database):
             conn.execute("SELECT dl.set_match_vod(%s, 0, NULL)", (match,))
 
 
-def test_entire_schema_is_public_including_history_and_future_tables(tournament_database):
+def test_schema_reads_are_public_except_account_favorites(tournament_database):
     t = Tournament(tournament_database)
     match, a, _ = t.matches()[0]
     t.report(match, t.managers[a])
@@ -750,7 +750,15 @@ def test_entire_schema_is_public_including_history_and_future_tables(tournament_
                     )
                     for (name,) in relations:
                         query = sql.SQL("SELECT * FROM dl.{}").format(sql.Identifier(name))
-                        assert len(conn.execute(query).fetchall()) == counts[name], name
+                        if name in {"favorites_list", "favorites_entry", "favorites_list_snapshot"}:
+                            if role == reader:
+                                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                                    with conn.transaction():
+                                        conn.execute(query)
+                            else:
+                                assert conn.execute(query).fetchall() == []
+                        else:
+                            assert len(conn.execute(query).fetchall()) == counts[name], name
                     assert conn.execute(
                         "SELECT count(*) FROM dl.result_submission WHERE match_id=%s", (match,)
                     ).fetchone() == (2,)

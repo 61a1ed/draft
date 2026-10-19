@@ -2,11 +2,15 @@ import { act, type ReactNode } from 'react'
 import { create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { Catalog } from './components/Catalog'
 import { LeagueSetup } from './components/LeagueSetup'
+import { api } from './lib/api'
 import type { DraftStatus, LeagueSnapshot } from './lib/types'
 import { useDraft } from './lib/useDraft'
+import { useFavorites } from './lib/useFavorites'
 
 vi.mock('./lib/useDraft', () => ({ useDraft: vi.fn() }))
+vi.mock('./lib/useFavorites', () => ({ useFavorites: vi.fn() }))
 vi.mock('./components/LeagueSetup', () => ({
   LeagueSetup: vi.fn(({ onStartDraft }: { onStartDraft?: () => void }) => (
     <section data-testid="league-setup">
@@ -18,7 +22,7 @@ vi.mock('./components/LeagueSetup', () => ({
   )),
 }))
 vi.mock('./components/Catalog', () => ({
-  Catalog: () => <section data-testid="catalog">Available Pokémon</section>,
+  Catalog: vi.fn(() => <section data-testid="catalog">Available Pokémon</section>),
   PokemonImage: () => <span>Pokémon image</span>,
 }))
 vi.mock('./components/Tournament', () => ({ Tournament: () => <section>Tournament</section> }))
@@ -86,6 +90,7 @@ function league(status: DraftStatus = 'setup', id = 7): LeagueSnapshot {
 
 let renderer: ReactTestRenderer | null
 let draft: ReturnType<typeof useDraft>
+let favorites: ReturnType<typeof useFavorites>
 
 function text(node: ReactTestInstance | string): string {
   return typeof node === 'string' ? node : node.children.map(text).join('')
@@ -128,7 +133,12 @@ beforeEach(() => {
     scrollTo: vi.fn(),
     setInterval,
   })
-  vi.stubGlobal('localStorage', { getItem: vi.fn(() => null), setItem: vi.fn() })
+  vi.stubGlobal('localStorage', {
+    getItem: vi.fn(() => null),
+    setItem: vi.fn(),
+    removeItem: vi.fn(),
+    clear: vi.fn(),
+  })
   renderer = null
   const snapshot = league()
   draft = {
@@ -138,7 +148,17 @@ beforeEach(() => {
       csrf_token: 'csrf',
       expires_at: 2_000_000_000,
     },
-    catalog: [],
+    catalog: [
+      {
+        id: 25,
+        name: 'Pikachu',
+        point_cost: 12,
+        dex: 25,
+        species: 'Pikachu',
+        form: '',
+        image_url: null,
+      },
+    ],
     leagues: [snapshot.league, league('drafting', 8).league, league('setup', 9).league],
     users: [
       { id: 11, display_name: 'Alice' },
@@ -163,11 +183,212 @@ beforeEach(() => {
     createLeague: vi.fn(async () => true),
   }
   vi.mocked(useDraft).mockImplementation(() => draft)
+  const list = { id: 31, owner_user_id: 11, name: 'My shortlist', revision: 8 }
+  favorites = {
+    lists: [list],
+    selectedId: list.id,
+    state: { ...list, entries: [] },
+    loading: false,
+    busy: false,
+    error: '',
+    readError: '',
+    writeError: '',
+    selectList: vi.fn(),
+    refresh: vi.fn(async () => {}),
+    clearError: vi.fn(),
+    run: vi.fn(async () => true),
+    create: vi.fn(async () => true),
+  }
+  vi.mocked(useFavorites).mockImplementation(() => favorites)
 })
 
 afterEach(async () => {
   await act(async () => renderer?.unmount())
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
+})
+
+describe('account catalog and favorites', () => {
+  it('preserves valid browser watchlist IDs without rewriting or publishing them', async () => {
+    vi.mocked(localStorage.getItem).mockReturnValue(
+      JSON.stringify([25, 4, 25, '7', 0, -1, 2.5, null, true, {}, []]),
+    )
+    const createList = vi.spyOn(api, 'createFavoritesList').mockResolvedValue({ result: 32 })
+    const addEntry = vi.spyOn(api, 'addFavoritesEntry').mockResolvedValue({ result: null })
+    await render()
+    await navigate('Catalog & favorites')
+
+    expect(localStorage.getItem).toHaveBeenCalledExactlyOnceWith('draft-club:watchlist:live:11')
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].legacyWatchlist).toEqual([25, 4])
+    await navigate('Draft room')
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].legacyWatchlist).toEqual([25, 4])
+    expect(localStorage.setItem).not.toHaveBeenCalled()
+    expect(localStorage.removeItem).not.toHaveBeenCalled()
+    expect(localStorage.clear).not.toHaveBeenCalled()
+    expect(favorites.create).not.toHaveBeenCalled()
+    expect(favorites.run).not.toHaveBeenCalled()
+    expect(draft.mutate).not.toHaveBeenCalled()
+    expect(createList).not.toHaveBeenCalled()
+    expect(addEntry).not.toHaveBeenCalled()
+  })
+
+  it('never exposes the previous account browser watchlist while switching accounts', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation((key) => {
+      if (key === 'draft-club:watchlist:live:11') return '[25]'
+      if (key === 'draft-club:watchlist:live:22') return '[4]'
+      return null
+    })
+    draft = { ...draft, leagueId: null, leagues: [], snapshot: null }
+    await render()
+    await navigate('Catalog & favorites')
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].legacyWatchlist).toEqual([25])
+
+    vi.mocked(Catalog).mockClear()
+    draft = {
+      ...draft,
+      session: { ...draft.session!, user: { id: 22, display_name: 'Bob' } },
+    }
+    await render()
+
+    expect(localStorage.getItem).toHaveBeenLastCalledWith('draft-club:watchlist:live:22')
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].legacyWatchlist).toEqual([4])
+    for (const [props] of vi.mocked(Catalog).mock.calls) {
+      expect(props.legacyWatchlist).not.toContain(25)
+    }
+
+    const connected = draft
+    draft = { ...draft, mode: 'disconnected', session: null }
+    await render()
+    vi.mocked(Catalog).mockClear()
+    draft = {
+      ...connected,
+      session: { ...connected.session!, user: { id: 99, display_name: 'Carol' } },
+    }
+    await render()
+    expect(localStorage.getItem).toHaveBeenLastCalledWith('draft-club:watchlist:live:99')
+    for (const [props] of vi.mocked(Catalog).mock.calls) {
+      expect(props.legacyWatchlist).toEqual([])
+    }
+  })
+
+  it.each(['invalid JSON', '{"25":true}', 'null'])(
+    'ignores an invalid stored browser watchlist (%s)',
+    async (saved) => {
+      vi.mocked(localStorage.getItem).mockReturnValue(saved)
+      await render()
+      await navigate('Catalog & favorites')
+      expect(vi.mocked(Catalog).mock.lastCall?.[0].legacyWatchlist).toEqual([])
+      expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
+      expect(localStorage.setItem).not.toHaveBeenCalled()
+    },
+  )
+
+  it('keeps account favorites available when browser storage is inaccessible', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation(() => {
+      throw new Error('Storage access blocked')
+    })
+    await render()
+    await navigate('Catalog & favorites')
+    expect(vi.mocked(Catalog).mock.lastCall?.[0]).toMatchObject({
+      legacyWatchlist: [],
+      favorites,
+    })
+  })
+
+  it('opens the catalog without a league and passes the account favorites', async () => {
+    draft = { ...draft, leagueId: null, leagues: [], snapshot: null }
+    await render()
+    await navigate('Catalog & favorites')
+
+    expect(heading()).toBe('Catalog & favorites')
+    expect(renderer!.root.findByProps({ 'data-testid': 'catalog' })).toBeDefined()
+    expect(vi.mocked(Catalog).mock.lastCall?.[0]).toMatchObject({
+      catalog: draft.catalog,
+      snapshot: null,
+      favorites,
+    })
+    expect(vi.mocked(useFavorites).mock.lastCall?.[0]).toEqual({
+      userId: 11,
+      refreshKey: 0,
+      mutate: draft.mutate,
+    })
+  })
+
+  it('shares the selected favorites controller between the draft room and catalog', async () => {
+    await render()
+    await navigate('Draft room')
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
+
+    await navigate('Catalog & favorites')
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].snapshot).toBe(draft.snapshot)
+
+    await selectLeague(league('drafting', 8))
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
+    expect(vi.mocked(useFavorites).mock.lastCall?.[0].userId).toBe(11)
+  })
+
+  it('passes account invalidations to favorites even with no selected league', async () => {
+    draft = { ...draft, leagueId: null, leagues: [], snapshot: null }
+    await render()
+    draft = { ...draft, tournamentRefreshKey: 3 }
+    await render()
+
+    expect(vi.mocked(useFavorites).mock.lastCall?.[0]).toEqual({
+      userId: 11,
+      refreshKey: 3,
+      mutate: draft.mutate,
+    })
+  })
+
+  it('clears the favorites owner when signed out and switches to the next account', async () => {
+    await render()
+    const connected = draft
+    draft = { ...draft, mode: 'disconnected', session: null, snapshot: null }
+    await render()
+    expect(vi.mocked(useFavorites).mock.lastCall?.[0].userId).toBeNull()
+
+    draft = {
+      ...connected,
+      session: { ...connected.session!, user: { id: 22, display_name: 'Bob' } },
+    }
+    await render()
+    expect(vi.mocked(useFavorites).mock.lastCall?.[0].userId).toBe(22)
+  })
+
+  it.each([false, true])(
+    'allows saving or removing a Pokémon from details without a league (saved: %s)',
+    async (saved) => {
+      draft = { ...draft, leagueId: null, leagues: [], snapshot: null }
+      favorites.state!.entries = saved ? [{ draftable_id: 25, ordinal: 1 }] : []
+      const save = vi.spyOn(api, 'addFavoritesEntry').mockResolvedValue({ result: null })
+      const remove = vi.spyOn(api, 'removeFavoritesEntry').mockResolvedValue({ result: null })
+      vi.mocked(favorites.run).mockImplementation(async (operation) => {
+        await operation()
+        return true
+      })
+      await render()
+      await navigate('Catalog & favorites')
+      await act(async () => vi.mocked(Catalog).mock.lastCall?.[0].onSelect(draft.catalog[0]))
+
+      const dialog = renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Pokémon details' })
+      expect(text(dialog)).toContain('Choose a league to draft this Pokémon.')
+      expect(dialog.findAllByType('button').map(text)).not.toContain('Draft Pikachu')
+      const toggle = dialog
+        .findAllByType('button')
+        .find((button) => text(button) === `${saved ? 'Remove from' : 'Save to'} My shortlist`)!
+      expect(toggle.props.disabled).toBe(false)
+      await act(async () => toggle.props.onClick())
+
+      expect(saved ? remove : save).toHaveBeenCalledExactlyOnceWith({
+        p_list: 31,
+        p_revision: 8,
+        p_draftable: 25,
+      })
+      expect(saved ? save : remove).not.toHaveBeenCalled()
+      expect(draft.draftAction).not.toHaveBeenCalled()
+    },
+  )
 })
 
 describe('league navigation and team presentation', () => {

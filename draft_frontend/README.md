@@ -37,7 +37,11 @@ selecting **Sign in**. New accounts use that name, or their Google name when lef
 blank; returning accounts keep their saved display name. A failed session check
 shows **Try again**; sign-in errors appear inline on the welcome page.
 Catalog images are served by the backend through `/images`, with no copied
-Pokémon image library in `public/`. Watchlists are stored locally per user.
+Pokémon image library in `public/`. Named favorites lists are saved to your account
+for reuse across leagues, including before you join a league. Existing browser
+watchlists remain available in a read-only **Browser watchlist** tab. Bookmark
+items there to copy them into the selected account list; nothing is transferred
+automatically.
 
 ## Connect the backend
 
@@ -91,7 +95,16 @@ frontend development.
 - Team colors use saved RGB values with readable avatar text; unnamed teams have
   a stable label. Metadata edits retain their original revision until saved or
   explicitly reloaded after a conflict; live updates do not replace unsaved input.
-- Catalog search, point sorting, affordability filter, availability, and watchlists.
+- Catalog search, point sorting, affordability filter, and league availability.
+- **Catalog & favorites** is available without league membership. Create, select,
+  rename, and delete account lists; save/remove Pokémon from catalog cards or pick
+  details; reorder favorites with keyboard-accessible priority controls. Drafting
+  a Pokémon keeps it in the list, and filtering never drops entries from a saved
+  order. Favorites update from the existing account stream, with independent list
+  revisions, conflict handling, read retries, and no automatic write retries.
+- **Favorites are private to their owner.** Reading lists requires sign-in, and
+  the backend enforces ownership for list details and entries. Lists remain
+  available across leagues.
 - Pick confirmation showing the target team and resulting budget; optional
   commissioner point waiver; undo with revision protection.
 - Team rosters, charged pick prices, and history including undone selections.
@@ -135,7 +148,7 @@ database connection limits. Closing a tab or signing out closes its stream.
 Catalog refresh is explicit because administrative repricing has no backend
 event. Existing roster/history prices always use the amount originally charged.
 The toolbar's **Refresh all data** reloads the session, catalog, user and league
-lists, and the selected snapshot/event stream. It keeps the selected league if
+lists, favorites lists, and the selected snapshot/event stream. It keeps the selected league if
 it still exists, otherwise selects the first league. Use it after applying
 scenario SQL. This also clears old revision authority after administrative resets.
 
@@ -176,6 +189,8 @@ fallbacks if the font service is unavailable.
   independently of league/tournament revisions; writes are never replayed.
 - `src/lib/api.ts`, `types.ts`: typed backend contract and event client.
 - `src/lib/useDraft.ts`: session, league, request, and stream lifecycle.
+- `src/lib/favoritesTypes.ts`, `useFavorites.ts`: account favorites contract,
+  serialized list reads, selection, revision protection, and mutation lifecycle.
 - `src/lib/tournamentTypes.ts`, `useTournament.ts`, `tournamentView.ts`: tournament
   contract, serialized reads/retries, and presentation rules. The existing account
   stream invalidates tournament and match reads even when the draft revision is

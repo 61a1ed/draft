@@ -722,12 +722,15 @@ main {
 }
 .catalog-tabs {
   display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
   gap: 26px;
   border-bottom: 1px solid #e4e1ed;
   margin-bottom: 17px;
 }
 .catalog-tabs button {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 6px;
   color: #a39cab;
@@ -743,7 +746,7 @@ main {
 .catalog-tabs button.selected:after {
   position: absolute;
   content: '';
-  bottom: -1px;
+  bottom: 0;
   left: 0;
   right: 0;
   height: 2px;
@@ -4347,5 +4350,114 @@ main {
   }
   .tournament-management .modal-actions {
     flex-wrap: wrap;
+  }
+}
+
+/* Account favorites share the catalog controls in both catalog and draft views. */
+.favorites-toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 15px;
+  margin-bottom: 18px;
+  border: 1px solid #e4dced;
+  border-radius: 10px;
+  background: #f8f5fc;
+}
+.favorites-select {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.favorites-select > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #75618c;
+}
+.favorites-select select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #dcd2e8;
+  border-radius: 6px;
+  background: #fff;
+  color: #51415f;
+  text-overflow: ellipsis;
+}
+.favorites-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.favorites-actions .button {
+  min-height: 36px;
+  padding: 8px 11px;
+}
+.favorites-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: #796b87;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.favorite-order {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 10px;
+  border-top: 1px solid #eee8f4;
+  background: #fcfaff;
+}
+.favorite-order > span {
+  flex: 1;
+  color: #887297;
+  font-size: 11px;
+}
+.empty-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.legacy-watchlist-hint {
+  margin-bottom: 15px;
+}
+@media (max-width: 620px) {
+  .main-nav {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    justify-content: flex-start;
+  }
+  .main-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .main-nav button {
+    min-width: 64px;
+    flex: 1 0 64px;
+    padding: 5px 2px;
+    gap: 3px;
+    font-size: 9px;
+    line-height: 1.1;
+  }
+  .favorites-toolbar {
+    padding: 12px;
+  }
+  .favorites-select {
+    flex-basis: 100%;
+  }
+  .favorites-actions {
+    width: 100%;
+  }
+  .favorites-actions .button {
+    margin-right: auto;
+  }
+  .catalog-tabs {
+    gap: 20px;
   }
 }
