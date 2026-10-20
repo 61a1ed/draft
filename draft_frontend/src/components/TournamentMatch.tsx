@@ -21,7 +21,6 @@ interface TournamentMatchProps {
   snapshot: LeagueSnapshot
   userId: number
   users: User[]
-  refreshKey: number
   busy: boolean
   run: (operation: () => Promise<unknown>) => Promise<boolean>
   onClose: () => void
@@ -433,7 +432,6 @@ function TournamentMatchContent({
   snapshot,
   userId,
   users,
-  refreshKey,
   busy,
   run,
   onClose,
@@ -441,7 +439,6 @@ function TournamentMatchContent({
 }: TournamentMatchProps) {
   const { match, loading, error, refresh } = useTournamentMatch({
     matchId,
-    refreshKey,
     identityKey: userId,
   })
   const [editor, setEditor] = useState<'participant' | 'commissioner' | 'vod' | null>(null)
@@ -482,9 +479,8 @@ function TournamentMatchContent({
       setActionError(errorMessage(cause))
       return false
     } finally {
-      // The server may have committed even when the response was interrupted.
-      // Reload authoritative details after every attempt; never replay the operation.
-      await refresh()
+      // The tournament mutation refreshes both the schedule and active match queries,
+      // including when the server may have committed but its response was lost.
       setPending(false)
     }
   }

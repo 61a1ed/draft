@@ -272,7 +272,6 @@ beforeEach(() => {
     snapshot: room(),
     userId: 42,
     users: [{ id: 42, display_name: 'Commissioner' }],
-    refreshKey: 0,
     busy: false,
     mutate: run,
   }
@@ -295,6 +294,15 @@ afterEach(async () => {
 })
 
 describe('tournament publication', () => {
+  it('scopes cached tournament reads and related match invalidations to the signed-in user', async () => {
+    await render()
+    expect(useTournament).toHaveBeenCalledWith({
+      leagueId: props.snapshot.league_id,
+      identityKey: props.userId,
+      mutate: props.mutate,
+    })
+  })
+
   it('passes availability navigation through to opened match details', async () => {
     props.onCompareAvailability = vi.fn()
     await render()

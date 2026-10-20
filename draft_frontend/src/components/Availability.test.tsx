@@ -178,7 +178,6 @@ beforeEach(() => {
   props = {
     snapshot: league(),
     userId: 11,
-    refreshKey: 0,
     busy: false,
     mutate: run,
     initialTeamId: 1,

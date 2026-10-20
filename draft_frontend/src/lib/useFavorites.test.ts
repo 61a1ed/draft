@@ -1,9 +1,11 @@
-import { act, createElement } from 'react'
+import { act, createElement, StrictMode } from 'react'
 import { create, type ReactTestRenderer } from 'react-test-renderer'
+import { QueryClientProvider, notifyManager, type QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from './api'
 import type { FavoritesList, FavoritesListSnapshot } from './favoritesTypes'
 import { useFavorites, type FavoritesController, type UseFavoritesOptions } from './useFavorites'
+import { createQueryClient, queryKeys } from './queryClient'
 
 vi.mock('./api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./api')>()
@@ -37,6 +39,7 @@ function snapshot(id = 7, userId = 11, revision = 0): FavoritesListSnapshot {
 }
 
 let renderer: ReactTestRenderer | null
+let client: QueryClient
 let current: FavoritesController
 let props: UseFavoritesOptions
 let renders: { userId: number | null; value: FavoritesController }[]
@@ -47,16 +50,27 @@ function Harness(options: UseFavoritesOptions) {
   return null
 }
 
+function tree() {
+  return createElement(QueryClientProvider, { client }, createElement(Harness, props))
+}
+
 async function mount() {
   await act(async () => {
-    renderer = create(createElement(Harness, props))
+    renderer = create(tree())
   })
 }
 
 async function update(changes: Partial<UseFavoritesOptions>) {
   props = { ...props, ...changes }
   await act(async () => {
-    renderer!.update(createElement(Harness, props))
+    renderer!.update(tree())
+  })
+}
+
+async function invalidateFavorites() {
+  await act(async () => {
+    // Do not await the network: individual tests also exercise in-flight requests.
+    void client.invalidateQueries({ queryKey: queryKeys.favorites(props.userId) })
   })
 }
 
@@ -64,10 +78,11 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   renderer = null
+  client = createQueryClient()
+  notifyManager.setScheduler(queueMicrotask)
   renders = []
   props = {
     userId: 11,
-    refreshKey: 0,
     mutate: vi.fn(async (operation) => {
       try {
         await operation()
@@ -84,11 +99,21 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => renderer?.unmount())
+  client.clear()
+  notifyManager.setScheduler((callback) => setTimeout(callback, 0))
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
 describe('account favorites reads', () => {
+  it('loads successfully through Strict Mode effect cleanup and replay', async () => {
+    await act(async () => {
+      renderer = create(createElement(StrictMode, null, tree()))
+    })
+    expect(current.state?.id).toBe(7)
+    expect(current.loading).toBe(false)
+  })
+
   it('does not read or allow writes while signed out', async () => {
     props.userId = null
     await mount()
@@ -110,25 +135,25 @@ describe('account favorites reads', () => {
     expect(current.error).toContain('unexpected response')
   })
 
-  it('serializes reads and coalesces account wake-ups while a read is pending', async () => {
+  it('shares in-flight reads when several refreshes request the same account data', async () => {
     const initial = deferred<FavoritesList[]>()
     vi.mocked(api.favoritesLists).mockReturnValueOnce(initial.promise)
     await mount()
-    await update({ refreshKey: 1 })
-    await update({ refreshKey: 2 })
+    await invalidateFavorites()
+    await invalidateFavorites()
     expect(api.favoritesLists).toHaveBeenCalledTimes(1)
     await act(async () => initial.resolve([list()]))
-    expect(api.favoritesLists).toHaveBeenCalledTimes(2)
-    expect(api.favoritesList).toHaveBeenCalledTimes(2)
+    expect(api.favoritesLists).toHaveBeenCalledTimes(1)
+    expect(api.favoritesList).toHaveBeenCalledTimes(1)
     expect(current.state?.id).toBe(7)
     expect(current.loading).toBe(false)
   })
 
-  it('runs a refresh queued between a completed read and its promise cleanup', async () => {
+  it('refreshes the query when a completed snapshot is explicitly invalidated', async () => {
     vi.mocked(api.favoritesList)
       .mockImplementationOnce(() => {
         const response = Promise.resolve(snapshot(7, 11, 1))
-        // Queue the wake-up immediately after drain resumes, before its finally runs.
+        // Invalidate just as the first response completes.
         void response.then(() => queueMicrotask(() => void current.refresh()))
         return response
       })
@@ -139,22 +164,26 @@ describe('account favorites reads', () => {
     expect(current.loading).toBe(false)
   })
 
-  it('keeps the selected list across account wake-ups and ignores a late selection read', async () => {
+  it('keeps selection across refreshes and cancels a previous selection read', async () => {
     vi.mocked(api.favoritesLists).mockResolvedValue([list(), list(8)])
     await mount()
     const delayed = deferred<FavoritesListSnapshot>()
     vi.mocked(api.favoritesList).mockReturnValueOnce(delayed.promise)
     await act(async () => current.selectList(8))
+    const signal = vi.mocked(api.favoritesList).mock.calls.at(-1)![1]
     expect(current.selectedId).toBe(8)
     expect(current.state).toBeNull()
     await act(async () => current.selectList(7))
+    expect(signal?.aborted).toBe(true)
     await act(async () => delayed.resolve(snapshot(8, 11, 4)))
     expect(current.selectedId).toBe(7)
     expect(current.state?.id).toBe(7)
+    expect(client.getQueryData(queryKeys.favoritesList(11, 8))).toBeUndefined()
+    vi.mocked(api.favoritesList).mockResolvedValue(snapshot(8, 11, 1))
     await act(async () => current.selectList(8))
-    await update({ refreshKey: 1 })
+    await invalidateFavorites()
     expect(current.selectedId).toBe(8)
-    expect(current.state?.revision).toBe(4)
+    expect(current.state?.revision).toBe(1)
   })
 
   it('never regresses a header or snapshot and blocks edits after a stale snapshot response', async () => {
@@ -163,19 +192,19 @@ describe('account favorites reads', () => {
     await mount()
     vi.mocked(api.favoritesLists).mockResolvedValueOnce([list(7, 11, 1)])
     vi.mocked(api.favoritesList).mockResolvedValueOnce(snapshot(7, 11, 1))
-    await update({ refreshKey: 1 })
+    await invalidateFavorites()
     expect(current.lists[0].revision).toBe(3)
     expect(current.state?.revision).toBe(3)
     vi.mocked(api.favoritesLists).mockResolvedValueOnce([list(7, 11, 4)])
     vi.mocked(api.favoritesList).mockResolvedValueOnce(snapshot(7, 11, 2))
-    await update({ refreshKey: 2 })
+    await invalidateFavorites()
     expect(current.state?.revision).toBe(3)
     expect(current.readError).toContain('data changed')
     const blocked = vi.fn()
     expect(await current.run(blocked)).toBe(false)
     expect(blocked).not.toHaveBeenCalled()
     vi.mocked(api.favoritesList).mockResolvedValueOnce(snapshot(7, 11, 4))
-    await update({ refreshKey: 3 })
+    await invalidateFavorites()
     expect(current.state?.revision).toBe(4)
     expect(current.error).toBe('')
   })
@@ -186,7 +215,7 @@ describe('account favorites reads', () => {
     const refreshed = deferred<FavoritesListSnapshot>()
     vi.mocked(api.favoritesLists).mockResolvedValueOnce([list(7, 11, 1)])
     vi.mocked(api.favoritesList).mockReturnValueOnce(refreshed.promise)
-    await update({ refreshKey: 1 })
+    await invalidateFavorites()
     expect(current.lists[0].revision).toBe(1)
     expect(current.state).toBe(previous)
     expect(current.loading).toBe(true)
@@ -211,7 +240,7 @@ describe('account favorites reads', () => {
     expect(current.state?.id).toBe(8)
     expect(current.error).toBe('')
     vi.mocked(api.favoritesLists).mockResolvedValueOnce([])
-    await update({ refreshKey: 1 })
+    await invalidateFavorites()
     expect(current.selectedId).toBeNull()
     expect(current.state).toBeNull()
   })
@@ -220,10 +249,12 @@ describe('account favorites reads', () => {
     await mount()
     const old = deferred<FavoritesListSnapshot>()
     vi.mocked(api.favoritesList).mockReturnValueOnce(old.promise)
-    await update({ refreshKey: 1 })
+    await invalidateFavorites()
     const signal = vi.mocked(api.favoritesList).mock.calls.at(-1)![1]
     await update({ userId: 22 })
     expect(signal?.aborted).toBe(true)
+    expect(client.getQueryData(queryKeys.favoritesLists(11))).toBeUndefined()
+    expect(client.getQueryData(queryKeys.favoritesList(11, 7))).toBeUndefined()
     const firstNewAccount = renders.find((render) => render.userId === 22)!
     expect(firstNewAccount.value.lists).toEqual([])
     expect(firstNewAccount.value.state).toBeNull()
@@ -257,14 +288,19 @@ describe('account favorites reads', () => {
     expect(current.readError).toBe('')
 
     vi.mocked(api.favoritesLists).mockRejectedValue(new TypeError('offline'))
-    await update({ refreshKey: 1 })
-    for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+    await invalidateFavorites()
+    for (const delay of [1000, 2000]) {
       const reads = vi.mocked(api.favoritesLists).mock.calls.length
       await act(async () => vi.advanceTimersByTimeAsync(delay - 1))
       expect(api.favoritesLists).toHaveBeenCalledTimes(reads)
       await act(async () => vi.advanceTimersByTimeAsync(1))
       expect(api.favoritesLists).toHaveBeenCalledTimes(reads + 1)
     }
+    const reads = vi.mocked(api.favoritesLists).mock.calls.length
+    await act(async () => vi.advanceTimersByTimeAsync(10_000))
+    expect(api.favoritesLists).toHaveBeenCalledTimes(reads)
+    expect(current.loading).toBe(false)
+    expect(current.readError).toContain('Check your connection')
   })
 
   it('cancels scheduled retries after recovery or account logout', async () => {
@@ -272,13 +308,14 @@ describe('account favorites reads', () => {
     const delayed = deferred<FavoritesList[]>()
     vi.mocked(api.favoritesLists).mockReturnValueOnce(delayed.promise)
     await mount()
-    await update({ refreshKey: 1 })
+    await invalidateFavorites()
     await act(async () => delayed.reject(new TypeError('offline')))
-    expect(current.error).toBe('')
-    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    expect(current.error).toContain('Check your connection')
+    await act(async () => vi.advanceTimersByTimeAsync(1000))
     expect(api.favoritesLists).toHaveBeenCalledTimes(2)
+    expect(current.error).toBe('')
     vi.mocked(api.favoritesLists).mockRejectedValueOnce(new TypeError('offline'))
-    await update({ refreshKey: 2 })
+    await invalidateFavorites()
     await update({ userId: null })
     await act(async () => vi.advanceTimersByTimeAsync(30_000))
     expect(api.favoritesLists).toHaveBeenCalledTimes(3)
@@ -318,7 +355,43 @@ describe('favorites mutations', () => {
     expect(current.selectedId).toBe(8)
   })
 
-  it('refreshes uncertain writes without replaying them and preserves the error across wake-ups', async () => {
+  it('waits for a newly created list snapshot before releasing the write lock', async () => {
+    await mount()
+    const detail = deferred<FavoritesListSnapshot>()
+    vi.mocked(api.favoritesLists).mockResolvedValue([list(), list(9)])
+    vi.mocked(api.favoritesList).mockImplementation((id) =>
+      id === 9 ? detail.promise : Promise.resolve(snapshot(id)),
+    )
+    let pending!: Promise<boolean>
+    await act(async () => {
+      pending = current.create('New list')
+    })
+    expect(current.selectedId).toBe(9)
+    expect(current.busy).toBe(true)
+    expect(current.loading).toBe(true)
+    await act(async () => detail.resolve(snapshot(9)))
+    expect(await pending).toBe(true)
+    expect(current.state?.id).toBe(9)
+    expect(current.busy).toBe(false)
+  })
+
+  it('rejects an older action callback after selection or read readiness changes', async () => {
+    vi.mocked(api.favoritesLists).mockResolvedValue([list(), list(8)])
+    await mount()
+    const previousRun = current.run
+    const blocked = vi.fn()
+    await act(async () => current.selectList(8))
+    expect(await previousRun(blocked)).toBe(false)
+    const currentRun = current.run
+    const refresh = deferred<FavoritesList[]>()
+    vi.mocked(api.favoritesLists).mockReturnValueOnce(refresh.promise)
+    await invalidateFavorites()
+    expect(await currentRun(blocked)).toBe(false)
+    expect(blocked).not.toHaveBeenCalled()
+    await act(async () => refresh.resolve([list(), list(8)]))
+  })
+
+  it('refreshes uncertain writes without replaying them and preserves the error across query invalidations', async () => {
     await mount()
     vi.mocked(api.favoritesList).mockResolvedValue(snapshot(7, 11, 1))
     const operation = vi.fn().mockRejectedValue(new TypeError('lost response'))
@@ -327,11 +400,34 @@ describe('favorites mutations', () => {
     expect(current.state?.revision).toBe(1)
     expect(current.writeError).toContain('Check your connection')
     expect(current.readError).toBe('')
-    await update({ refreshKey: 1 })
+    await invalidateFavorites()
     expect(current.writeError).toContain('Check your connection')
     await act(async () => current.refresh())
     expect(current.error).toBe('')
     expect(operation).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels a poll started during a write before reading its committed state', async () => {
+    await mount()
+    const write = deferred<unknown>()
+    const poll = deferred<FavoritesListSnapshot>()
+    let pending!: Promise<boolean>
+    await act(async () => {
+      pending = current.run(() => write.promise)
+    })
+    vi.mocked(api.favoritesList)
+      .mockReturnValueOnce(poll.promise)
+      .mockResolvedValueOnce(snapshot(7, 11, 1))
+    await act(async () => {
+      void client.refetchQueries({ queryKey: queryKeys.favoritesList(11, 7) })
+    })
+    const signal = vi.mocked(api.favoritesList).mock.calls.at(-1)![1]
+    await act(async () => write.resolve({ result: null }))
+    expect(await pending).toBe(true)
+    expect(signal?.aborted).toBe(true)
+    expect(current.state?.revision).toBe(1)
+    await act(async () => poll.resolve(snapshot(7, 11, 0)))
+    expect(current.state?.revision).toBe(1)
   })
 
   it('refreshes a stale revision failure once and uses the latest snapshot for the next action', async () => {

@@ -1,4 +1,4 @@
-"""Account wake-ups are determined transactionally by SQL, including management changes."""
+"""Only the selected league's draft channel wakes, transactionally and without payloads."""
 
 import json
 from contextlib import contextmanager
@@ -51,25 +51,30 @@ def call(state, query, arguments=()):
         return conn.execute(query, arguments).fetchone()[0]
 
 
-def assert_wakes(state, *accounts):
+def listen(state, league):
+    state.listener.execute(sql.SQL("LISTEN {}").format(sql.Identifier(f"dl_draft_{league}")))
+
+
+def assert_wakes(state, *leagues):
     messages = list(state.listener.notifies(timeout=0.1))
     assert all(message.payload == "" for message in messages)
     assert sorted(message.channel for message in messages) == sorted(
-        f"dl_user_{user_id}" for user_id in accounts
+        f"dl_draft_{league}" for league in leagues
     )
 
 
-def test_sql_rpc_membership_and_draft_changes_notify_exact_accounts(notifications):
+def test_sql_rpc_membership_and_draft_changes_notify_only_selected_league(notifications):
     state = notifications
-    commissioner, manager, other, replacement, _outsider = state.accounts
+    _commissioner, manager, other, replacement, _outsider = state.accounts
     league = call(state, "SELECT dl.create_league('Notification draft', 1)")
-    assert_wakes(state, commissioner)
+    assert_wakes(state)
+    listen(state, league)
     first = call(state, "SELECT dl.add_team(%s, 0, 'First', %s, 100)", (league, manager))
-    assert_wakes(state, commissioner, manager)
+    assert_wakes(state, league)
     second = call(state, "SELECT dl.add_team(%s, 1, 'Second', %s, 100)", (league, other))
-    assert_wakes(state, commissioner, manager, other)
+    assert_wakes(state, league)
     call(state, "SELECT dl.update_league(%s, 2, 'Renamed', 1, 30)", (league,))
-    assert_wakes(state, commissioner, manager, other)
+    assert_wakes(state, league)
 
     call(
         state,
@@ -77,23 +82,23 @@ def test_sql_rpc_membership_and_draft_changes_notify_exact_accounts(notification
         (league, first, replacement),
     )
     # Both sides of reassignment refresh, after the old manager stops managing the team.
-    assert_wakes(state, commissioner, manager, other, replacement)
+    assert_wakes(state, league)
     call(state, "SELECT dl.remove_team(%s, 4, %s)", (league, first))
-    assert_wakes(state, commissioner, other, replacement)
+    assert_wakes(state, league)
     first = call(state, "SELECT dl.add_team(%s, 5, 'Rejoined', %s, 100)", (league, manager))
-    assert_wakes(state, commissioner, manager, other)
+    assert_wakes(state, league)
     call(state, "SELECT dl.set_draft_order(%s, 6, %s)", (league, [first, second]))
-    assert_wakes(state, commissioner, manager, other)
+    assert_wakes(state, league)
     # Supply fixture colors without shifting the draft revision assertions.
     state.admin.execute("UPDATE dl.team SET color_rgb = 0 WHERE league_id = %s", (league,))
-    assert_wakes(state, commissioner, manager, other)
+    assert_wakes(state, league)
     call(state, "SELECT dl.draft_action(%s, 7, 'start')", (league,))
-    assert_wakes(state, commissioner, manager, other)
+    assert_wakes(state, league)
     draftable = state.admin.execute("SELECT min(id) FROM dl.draftable").fetchone()[0]
     call(state, "SELECT dl.draft_action(%s, 8, 'pick', %s)", (league, draftable))
-    assert_wakes(state, commissioner, manager, other)
+    assert_wakes(state, league)
     call(state, "SELECT dl.draft_action(%s, 9, 'undo')", (league,))
-    assert_wakes(state, commissioner, manager, other)
+    assert_wakes(state, league)
     assert (
         state.admin.execute("SELECT revision FROM dl.league WHERE id = %s", (league,)).fetchone()[0]
         == 10
@@ -109,8 +114,9 @@ def test_notifications_wait_for_commit_and_disappear_on_rollback(notifications):
     commissioner, manager, *_ = state.accounts
     with actor(state.writer, commissioner) as conn:
         league = conn.execute("SELECT dl.create_league('Transactional', 1)").fetchone()[0]
+        listen(state, league)
         assert_wakes(state)
-    assert_wakes(state, commissioner)
+    assert_wakes(state, league)
     with actor(state.writer, commissioner) as conn:
         conn.execute("SELECT dl.add_team(%s, 0, 'Rolled back', %s, 100)", (league, manager))
         assert_wakes(state)
@@ -124,31 +130,33 @@ def test_notifications_wait_for_commit_and_disappear_on_rollback(notifications):
 
 def test_table_triggers_include_departing_commissioner_and_moved_team(notifications):
     state = notifications
-    commissioner, manager, other, replacement, _outsider = state.accounts
+    _commissioner, manager, other, replacement, _outsider = state.accounts
     first = call(state, "SELECT dl.create_league('First league', 1)")
-    assert_wakes(state, commissioner)
+    assert_wakes(state)
+    listen(state, first)
     second = state.admin.execute(
         "INSERT INTO dl.league (name, commissioner_user_id, roster_size) "
         "VALUES ('Second league', %s, 1) RETURNING id",
         (other,),
     ).fetchone()[0]
-    assert_wakes(state, other)
+    assert_wakes(state)
+    listen(state, second)
     team = state.admin.execute(
         "INSERT INTO dl.team (league_id, name, manager_user_id, point_budget) "
         "VALUES (%s, 'SQL team', %s, 100) RETURNING id",
         (first, manager),
     ).fetchone()[0]
-    assert_wakes(state, commissioner, manager)
+    assert_wakes(state, first)
     state.admin.execute(
         "UPDATE dl.league SET commissioner_user_id = %s WHERE id = %s", (replacement, first)
     )
-    assert_wakes(state, commissioner, replacement, manager)
+    assert_wakes(state, first)
     state.admin.execute("UPDATE dl.team SET league_id = %s WHERE id = %s", (second, team))
-    assert_wakes(state, replacement, other, manager)
+    assert_wakes(state, first, second)
     state.admin.execute("DELETE FROM dl.team WHERE id = %s", (team,))
-    assert_wakes(state, other, manager)
+    assert_wakes(state, second)
     state.admin.execute("DELETE FROM dl.league WHERE id = %s", (second,))
-    assert_wakes(state, other)
+    assert_wakes(state, second)
 
 
 @pytest.mark.parametrize(

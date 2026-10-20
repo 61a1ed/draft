@@ -451,11 +451,13 @@ def test_metadata_sql_boundary_and_column_constraints(metadata_league):
 
 
 @pytest.mark.integration
-def test_metadata_notifies_accounts_only_after_commit_and_failed_edits_do_not_wake(metadata_league):
+def test_metadata_notifies_draft_only_after_commit_and_failed_edits_do_not_wake(metadata_league):
     state = metadata_league
     with psycopg.connect(state.database.gateway, autocommit=True) as listener:
         for account in state.users:
             listener.execute(sql.SQL("LISTEN {}").format(sql.Identifier(f"dl_user_{account}")))
+        channel = f"dl_draft_{state.league}"
+        listener.execute(sql.SQL("LISTEN {}").format(sql.Identifier(channel)))
 
         def wakes():
             messages = list(listener.notifies(timeout=0.1))
@@ -466,7 +468,7 @@ def test_metadata_notifies_accounts_only_after_commit_and_failed_edits_do_not_wa
         with state.actor(state.first_manager) as conn:
             conn.execute(query, (state.league, 0, state.teams[0], "First", 0))
             assert wakes() == []
-        assert wakes() == sorted(f"dl_user_{account}" for account in state.users[:3])
+        assert wakes() == [channel]
         assert state.revision() == 1
         with state.actor(state.owner) as conn:
             conn.execute(query, (state.league, 1, state.teams[1], "Rollback", 1))

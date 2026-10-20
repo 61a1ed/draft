@@ -27,6 +27,8 @@ and requires complete team metadata before draft start. `0003_favorites.sql` add
 account-owned catalog favorites lists, ordered entries, and controlled writes.
 `0004_favorites_privacy.sql` makes all existing and future favorites owner-only
 with row-level security, including direct reads of their tables and snapshot view.
+`0005_draft_events.sql` replaces account-wide notifications with selected-league
+draft notifications. Favorites, tournaments, and availability use HTTP refreshes.
 Startup applies these files through the separate
 `MIGRATION_DATABASE_URL` connection as `dl_owner`, closes it, then opens the
 ordinary `DATABASE_URL` pool. A failed migration prevents startup and readiness.
@@ -158,7 +160,7 @@ addresses come from configuration rather than forwarded request headers.
 ## HTTP contract
 
 Catalog, league, and tournament reads are public and come directly from PostgreSQL.
-Favorites reads, writes, and the account notification stream require a session:
+Favorites reads, writes, and draft notification streams require a session:
 
 | Method/path | Result |
 |---|---|
@@ -172,7 +174,7 @@ Favorites reads, writes, and the account notification stream require a session:
 | `GET /api/leagues/{id}/tournament` | Tournament, schedule, current evidence, official results, records, and withdrawals |
 | `GET /api/matches/{id}` | Match context and complete report/decision history |
 | `GET /api/teams/{id}/availability` | Availability header and timestamp ranges; empty state before the first edit |
-| `GET /api/events` | Account SSE stream, including accounts with no leagues |
+| `GET /api/leagues/{id}/events` | Signed-in SSE stream for the selected draft |
 | `GET /healthz` | Process status; public |
 | `GET /ready` | Public readiness check; 200 with a working pooled DB query, otherwise 503 |
 
@@ -281,11 +283,10 @@ missing, or extra IDs return 400 with `order_must_contain_every_draftable_once`.
 Blank names return 400 with `invalid_favorites_name` (empty strings are rejected
 by HTTP shape validation with 422).
 
-Committed list and entry changes wake the owner's existing account event stream.
-Entry/header notifications in one transaction coalesce into one empty wake-up;
-rollback emits none. Direct administrative edits also notify affected owners,
-but must maintain the list's revision in the same transaction. Frontend favorites
-display and refresh handling are future work.
+After a list mutation, the frontend invalidates the owner's list queries and
+reloads their committed state. Polling and focus refreshes discover changes from
+other tabs. Favorites produce no stream notifications. Direct administrative
+edits must maintain the list's revision in the same transaction.
 
 ## Team names and colors
 
@@ -364,7 +365,8 @@ Publication checks the league revision. Date hints, withdrawals, tiebreaks, and
 final publication check the tournament revision. Commissioner results and VOD
 edits check the match revision. Participant reports check only that participant's
 previous submission ID; availability uses its own revision. Refresh the relevant
-read after a write or a 409. Tournament changes reuse the account notification stream.
+read after a write or a 409. Tournament queries poll for changes from other users
+and refresh on window focus or network reconnection; they do not use SSE.
 
 All tournament reads are public, including reports and decision history. Each
 endpoint reads a consistent database snapshot in one statement. A known team
@@ -485,30 +487,34 @@ repricing. The seed catalog uses costs 0 through 29.
 
 ## Server-sent events
 
-Every signed-in tab opens one `GET /api/events` stream, even with zero leagues.
-Selecting a league does not reopen it. The authenticated account ID determines
-the safely quoted PostgreSQL channel (`dl_user_42`, for example); the browser
-cannot choose another account's channel. Each stream runs in an async handler
-with one dedicated autocommit connection outside the query pool. It completes
-`LISTEN` before sending an initial generic `invalidate`, forwards notifications
-as the same event, and sends idle keep-alive comments every 15 seconds.
+The frontend uses TanStack Query for HTTP data and mutations. Lists, favorites,
+tournaments, match details, and availability refresh through query invalidation,
+focus/reconnect refreshes, and polling. Only the selected draft needs immediate
+events: signed-in tabs open `GET /api/leagues/{id}/events` for the selected league
+and close it when the selection or account changes or the view unmounts. The
+stream remains open after completion so an undo that reopens the draft immediately
+updates its participants, including when the resumed turn has a short deadline.
 
-SQL determines recipients. League creation and changes notify the commissioner
-and current managers. Team changes also notify former managers, including those
-who just lost their last team. Favorites changes notify the list owner.
-Notifications have empty payloads and are delivered
-only after commit. The triggers cover direct SQL edits as well as the public SQL
-functions used by HTTP. Direct administrative edits must still preserve draft
-invariants and increment the league revision in the same transaction.
+The endpoint checks the session and league existence before deriving the safely
+quoted PostgreSQL channel (`dl_draft_42`, for example). League snapshots are
+public, and these events contain no private data or authorization decisions.
+Each stream uses one dedicated autocommit connection outside the query pool.
+It completes `LISTEN` before sending an initial generic `invalidate`, forwards
+notifications as the same event, and sends idle keep-alive comments every 15 seconds.
 
-An invalidation refreshes the accessible league list and selected snapshot.
-Refreshes are serialized; an event during a read schedules another pass. The
-frontend preserves an accessible selection, otherwise selects an available
-league or clears private league state. Newly accessible leagues produce an
-in-app notice. Revision/server-time ordering and account/selection guards discard
-stale responses. Transient read and stream-opening failures retry with bounded
-backoff. Stream errors also prompt an HTTP read to detect expired sessions.
-Mutations are never replayed automatically.
+League and team triggers notify only the affected draft channels. A moved team
+wakes both leagues. Notifications have empty payloads, fold duplicates within a
+transaction, and arrive only after commit. Direct administrative edits must still
+preserve draft invariants and increment the league revision in the same transaction.
+Tournament and favorites changes no longer produce account notifications. The
+retired private helper signatures remain as no-ops because historical tournament
+functions reference them; applied migrations remain immutable.
+
+An event invalidates the selected draft query, whose HTTP response includes the
+current user's allowed actions. Account and selection query keys isolate data;
+revision/server-time ordering rejects stale snapshots. Transient read and stream
+failures retry with bounded backoff. Stream errors also prompt an HTTP session
+check. Mutations are never replayed automatically.
 
 Disconnect, cancellation, fixed session expiry, and database failure close the
 dedicated connection, which removes its subscription. A database failure ends
@@ -516,7 +522,7 @@ that stream; its replacement sends a fresh initial invalidation after `LISTEN`.
 Notifications are transient wake-up signals, with no event IDs or durable replay.
 Changes during an outage are recovered through these ordinary HTTP reads.
 
-Each open tab consumes **one persistent PostgreSQL connection**, in addition to
+Each tab watching a draft consumes **one persistent PostgreSQL connection**, in addition to
 normal query connections. `SSE_MAX_CONNECTIONS` limits streams per worker (default
 30); excess stream requests receive 503 and retry. `DB_POOL_SIZE` still bounds
 ordinary query connections (default 10). Budget all workers and overlapping
@@ -528,19 +534,9 @@ releases would need 80 before headroom. Neither provisioning nor startup raises
 PostgreSQL connection limits. Use a direct or session-preserving PostgreSQL
 connection, not a transaction-pooling endpoint, for `LISTEN`.
 
-This notification refactor predates the migration history and is part of the
-fixed bootstrap baseline. For disposable databases older than that baseline, upgrade
-local databases by stopping the old development run and starting
-`uv run python scripts/dev.py --pg-bin <binaries>` without `--data-dir`; this
-provisions the new schema and preserves the old cluster for inspection. Resuming
-such a pre-baseline cluster or deploying application code alone does not update
-its notification triggers. Databases already on the fixed baseline receive
-subsequent changes, including tournaments, through startup migrations.
-For an existing deployment, provision a fresh database/cluster using the normal
-bootstrap, import the catalog, and point the new release at it. This does not
-transfer existing leagues or accounts; retain the old database if they are needed.
-Do not run `schema.sql` over a populated schema or delete an existing database
-as an implicit upgrade step.
+Startup applies `0005_draft_events.sql` to existing installations without replacing
+their data. Fresh installations apply the same migration after the fixed baseline.
+Deploy the frontend and backend together: the old account stream route is removed.
 
 The stream works over HTTP/1.1. Disable buffering for this route in any reverse
 proxy; the response includes `X-Accel-Buffering: no`. Idle timeouts should exceed

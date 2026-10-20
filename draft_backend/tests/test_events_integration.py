@@ -1,4 +1,4 @@
-"""Account discovery and stream lifetime through ASGI and real PostgreSQL."""
+"""Selected draft delivery and stream lifetime through ASGI and real PostgreSQL."""
 
 import asyncio
 from contextlib import AsyncExitStack, suppress
@@ -17,15 +17,16 @@ pytestmark = pytest.mark.integration
 class BrowserStream:
     """Drive streaming ASGI directly: httpx's ASGI transport buffers responses."""
 
-    def __init__(self, app, client):
+    def __init__(self, app, client, league):
         self.incoming = asyncio.Queue()
         self.outgoing = asyncio.Queue()
         self.incoming.put_nowait({"type": "http.request", "body": b"", "more_body": False})
-        request = client.build_request("GET", "/api/events")
+        path = f"/api/leagues/{league}/events"
+        request = client.build_request("GET", path)
         scope = {
             "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
             "http_version": "1.1", "method": "GET", "scheme": "http",
-            "path": "/api/events", "raw_path": b"/api/events", "query_string": b"",
+            "path": path, "raw_path": path.encode(), "query_string": b"",
             "root_path": "",
             "headers": [(key.lower(), value) for key, value in request.headers.raw],
             "client": ("127.0.0.1", 12345), "server": ("testserver", 80),
@@ -52,6 +53,13 @@ class BrowserStream:
     async def close(self):
         self.incoming.put_nowait({"type": "http.disconnect"})
         await asyncio.wait_for(self.task, 5)
+
+    async def quiet(self):
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.1):
+                while True:
+                    message = await self.outgoing.get()
+                    assert b"event: invalidate" not in message.get("body", b"")
 
 
 def settings(test_database, **overrides):
@@ -116,7 +124,7 @@ async def expect_listeners(admin, count):
             await asyncio.sleep(0.02)
 
 
-def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
+def test_selected_draft_reassignment_turns_tabs_and_reconnect(test_database):
     names = create_accounts(test_database.admin, 3)
 
     async def exercise():
@@ -125,15 +133,16 @@ def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
             commissioner, owner = await signed_in(stack, app, names[0])
             manager, first = await signed_in(stack, app, names[1])
             replacement, second = await signed_in(stack, app, names[2])
-            tab1 = await BrowserStream(app, manager).opened()
+            league = await rpc(commissioner, "create_league", p_name="Selected", p_roster_size=2)
+            unrelated = await rpc(replacement, "create_league", p_name="Other", p_roster_size=2)
+            tab1 = await BrowserStream(app, manager, league).opened()
             stack.push_async_callback(tab1.close)
-            tab2 = await BrowserStream(app, manager).opened()
+            tab2 = await BrowserStream(app, manager, league).opened()
             stack.push_async_callback(tab2.close)
-            other = await BrowserStream(app, replacement).opened()
+            other = await BrowserStream(app, replacement, unrelated).opened()
             stack.push_async_callback(other.close)
             await expect_listeners(test_database.admin, 3)
 
-            league = await rpc(commissioner, "create_league", p_name="Discovered", p_roster_size=2)
             team = await rpc(
                 commissioner, "add_team", p_league=league, p_revision=0,
                 p_name="Manager", p_manager=first["id"], p_point_budget=100,
@@ -150,12 +159,14 @@ def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
             )
             await tab1.invalidated()
             await tab2.invalidated()
-            await other.invalidated()
+            await other.quiet()
             assert (await snapshot(manager, league))["revision"] == 2
             assert (await snapshot(manager, league))["actions"] == []
             assert (await snapshot(replacement, league))["revision"] == 2
             await rpc(commissioner, "remove_team", p_league=league, p_revision=2, p_team=team)
-            await other.invalidated()
+            await tab1.invalidated()
+            await tab2.invalidated()
+            await other.quiet()
             assert (await snapshot(replacement, league))["revision"] == 3
 
             team = await rpc(
@@ -206,7 +217,7 @@ def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
             assert len(before - surviving) == 1
             await rpc(commissioner, "draft_action", p_league=league, p_revision=8, p_kind="undo")
             await tab2.invalidated()
-            tab1 = await BrowserStream(app, manager).opened()
+            tab1 = await BrowserStream(app, manager, league).opened()
             stack.push_async_callback(tab1.close)
             assert (await snapshot(manager, league))["revision"] == 9
 
@@ -223,7 +234,7 @@ def test_account_discovery_reassignment_turns_tabs_and_reconnect(test_database):
                 p_kind="pick", p_draftable=player,
             )
             await tab2.invalidated()
-            recovered = await BrowserStream(app, manager).opened()
+            recovered = await BrowserStream(app, manager, league).opened()
             stack.push_async_callback(recovered.close)
             state = await snapshot(manager, league)
             assert state["revision"] == 10 and state["state"]["next_team_id"] == team
@@ -239,7 +250,8 @@ def test_stream_expiry_and_cancellation_close_database_connections(test_database
         app = create_app(settings(test_database, session_ttl_seconds=2))
         async with app.router.lifespan_context(app), AsyncExitStack() as stack:
             manager, _ = await signed_in(stack, app, name)
-            stream = await BrowserStream(app, manager).opened()
+            league = await rpc(manager, "create_league", p_name="Expiry", p_roster_size=1)
+            stream = await BrowserStream(app, manager, league).opened()
             stack.push_async_callback(stream.close)
             await expect_listeners(test_database.admin, 1)
             await asyncio.wait_for(stream.task, 4)
@@ -248,7 +260,7 @@ def test_stream_expiry_and_cancellation_close_database_connections(test_database
             assert (await manager.get("/auth/me")).status_code == 401
 
             manager, _ = await signed_in(stack, app, name)
-            cancelled = await BrowserStream(app, manager).opened()
+            cancelled = await BrowserStream(app, manager, league).opened()
             await expect_listeners(test_database.admin, 1)
             cancelled.task.cancel()
             with suppress(asyncio.CancelledError):

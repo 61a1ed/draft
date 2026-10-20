@@ -190,7 +190,6 @@ function screen() {
         { id: 22, display_name: 'Bob' },
         { id: 99, display_name: 'Commissioner' },
       ]}
-      refreshKey={detail.revision}
       busy={false}
       run={run}
       onClose={() => undefined}
@@ -313,7 +312,7 @@ describe('TournamentMatch', () => {
       p_team_a_game_wins: 2,
       p_team_b_game_wins: 1,
     })
-    expect(refresh).toHaveBeenCalledOnce()
+    expect(refresh).not.toHaveBeenCalled()
   })
 
   it('keeps a first report valid when only the opponent report or VOD changes', async () => {
@@ -497,7 +496,7 @@ describe('TournamentMatch', () => {
     expect(text(renderer!.root)).toContain('without spaces or sign-in credentials')
   })
 
-  it('refreshes after an interrupted write and shows the error inside the dialog without replay', async () => {
+  it('shows an interrupted write inside the dialog without replay or a duplicate refresh', async () => {
     vi.mocked(api.submitResult).mockRejectedValue(new TypeError('Network failed'))
     await mount()
     await click('Report result')
@@ -505,7 +504,7 @@ describe('TournamentMatch', () => {
     await change('Beta (B) game wins', '1')
     await submit()
     expect(api.submitResult).toHaveBeenCalledOnce()
-    expect(refresh).toHaveBeenCalledOnce()
+    expect(refresh).not.toHaveBeenCalled()
     expect(text(renderer!.root)).toContain('Could not reach the server')
   })
 

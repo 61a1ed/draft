@@ -673,16 +673,13 @@ def test_concurrent_favorites_edits_have_one_winner_and_one_stale_revision(favor
     ]
 
 
-def assert_wakes(listener, *owners):
+def assert_no_wakes(listener):
     messages = list(listener.notifies(timeout=0.1))
-    assert all(message.payload == "" for message in messages)
-    assert sorted(message.channel for message in messages) == sorted(
-        f"dl_user_{owner}" for owner in owners
-    )
+    assert messages == []
 
 
 @pytest.mark.integration
-def test_favorites_notify_only_owner_after_commit_and_never_on_rollback(favorites):
+def test_favorites_use_http_refresh_without_account_notifications(favorites):
     state = favorites
     first = state.draftables[0]
     with psycopg.connect(state.database.gateway, autocommit=True) as listener:
@@ -690,8 +687,8 @@ def test_favorites_notify_only_owner_after_commit_and_never_on_rollback(favorite
             listener.execute(sql.SQL("LISTEN {}").format(sql.Identifier(channel)))
         with state.actor(state.owner) as conn:
             extra = conn.execute("SELECT dl.create_favorites_list('Another list')").fetchone()[0]
-            assert_wakes(listener)
-        assert_wakes(listener, state.owner)
+            assert_no_wakes(listener)
+        assert_no_wakes(listener)
         for name, params in (
             ("rename_favorites_list", (state.list_id, 0, "Revised")),
             ("add_favorites_entry", (state.list_id, 1, first)),
@@ -700,18 +697,18 @@ def test_favorites_notify_only_owner_after_commit_and_never_on_rollback(favorite
             ("delete_favorites_list", (extra, 0)),
         ):
             state.call(name, params, user=state.owner)
-            assert_wakes(listener, state.owner)
+            assert_no_wakes(listener)
         with state.actor(state.owner) as conn:
             conn.execute("SELECT dl.add_favorites_entry(%s, 4, %s)", (state.list_id, first))
-            assert_wakes(listener)
+            assert_no_wakes(listener)
             conn.rollback()
-        assert_wakes(listener)
+        assert_no_wakes(listener)
         assert state.snapshot()["revision"] == 4
         assert state.snapshot()["entries"] == []
         with rejected("PT409", "stale_revision"):
             state.call("delete_favorites_list", (state.list_id, 3), user=state.owner)
-        assert_wakes(listener)
+        assert_no_wakes(listener)
         state.call("add_favorites_entry", (state.list_id, 4, first), user=state.owner)
-        assert_wakes(listener, state.owner)
+        assert_no_wakes(listener)
         state.call("delete_favorites_list", (state.list_id, 5), user=state.owner)
-        assert_wakes(listener, state.owner)
+        assert_no_wakes(listener)

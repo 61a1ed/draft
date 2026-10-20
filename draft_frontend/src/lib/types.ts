@@ -168,7 +168,7 @@ export interface RpcResult<T> {
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'closed'
 
-export interface AccountEventHandlers {
+export interface DraftEventHandlers {
   onInvalidate: () => void
   onStatus?: (status: ConnectionStatus) => void
 }

@@ -12,6 +12,7 @@
     "format": "prettier --write src vite.config.ts index.html tsconfig.json package.json"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.104.5",
     "lucide-react": "^0.577.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

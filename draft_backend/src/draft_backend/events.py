@@ -19,21 +19,21 @@ def event(kind, payload=None):
     return f"event: {kind}\ndata: {json.dumps(jsonable_encoder(payload))}\n\n"
 
 
-class AccountEventResponse(StreamingResponse):
+class DraftEventResponse(StreamingResponse):
     """Own the connection for the complete response, including failed socket sends.
 
     Opening inside stream_response also lets Starlette cancel connection setup on
-    disconnect. There are no pooled listeners or account-to-subscriber mappings.
+    disconnect. There are no pooled listeners or subscriber mappings.
     """
 
-    def __init__(self, settings, user_id: int, expires_at: int, slots: asyncio.Semaphore):
+    def __init__(self, settings, league_id: int, expires_at: int, slots: asyncio.Semaphore):
         super().__init__(
             content=(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
         )
         self.settings = settings
-        self.user_id = user_id
+        self.league_id = league_id
         self.expires_at = expires_at
         self.slots = slots
 
@@ -51,7 +51,7 @@ class AccountEventResponse(StreamingResponse):
         except (psycopg.Error, OSError):
             # Closing forces a fresh listener and snapshot after any missed interval.
             # Do not include provider errors, connection strings, or credentials.
-            log.warning("Account notification connection lost; ending stream")
+            log.warning("Draft notification connection lost; ending stream")
 
     async def stream_response(self, send):
         # Admission is immediate: reserve query capacity rather than letting idle
@@ -77,11 +77,11 @@ class AccountEventResponse(StreamingResponse):
                             keepalives_interval=5,
                             keepalives_count=3,
                         )
-                        # The ID comes only from the authenticated session; never a URL
-                        # or request parameter. Still quote the channel as an identifier.
+                        # The endpoint validated this numeric league ID and its visibility.
+                        # Quote the derived channel as an identifier, never raw SQL.
                         await conn.execute(
                             psycopg.sql.SQL("LISTEN {}").format(
-                                psycopg.sql.Identifier(f"dl_user_{self.user_id}")
+                                psycopg.sql.Identifier(f"dl_draft_{self.league_id}")
                             )
                         )
                     except (psycopg.Error, OSError):

@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import ClientDisconnect
 
-from draft_backend.events import AccountEventResponse
+from draft_backend.events import DraftEventResponse
 
 
 class Connection:
@@ -42,7 +42,7 @@ class Connection:
 
 
 def response(*, slots=None, expires_at=None, heartbeat=0.02):
-    return AccountEventResponse(
+    return DraftEventResponse(
         SimpleNamespace(database_url="unused", sse_heartbeat_seconds=heartbeat),
         42,
         expires_at if expires_at is not None else time.time() + 60,
@@ -69,7 +69,7 @@ async def test_listen_precedes_headers_and_initial_invalidation_then_forwards_ev
     listened = asyncio.Event()
 
     async def listen(query):
-        assert query.as_string() == 'LISTEN "dl_user_42"'
+        assert query.as_string() == 'LISTEN "dl_draft_42"'
         await listened.wait()
 
     conn.execute.side_effect = listen
@@ -109,7 +109,7 @@ async def test_two_tabs_have_independent_connections_and_closing_one_keeps_the_o
             assert b"invalidate" in (await next_message(queue))["body"]
         assert slots.locked()
         for conn in [first, second]:
-            assert conn.execute.await_args.args[0].as_string() == 'LISTEN "dl_user_42"'
+            assert conn.execute.await_args.args[0].as_string() == 'LISTEN "dl_draft_42"'
         await stop(tasks[0])
         assert first.closed and not second.closed
         assert slots._value == 1

@@ -1,4 +1,6 @@
 import { act, createElement } from 'react'
+import { QueryClientProvider, notifyManager } from '@tanstack/react-query'
+import { createQueryClient, queryKeys } from './queryClient'
 import { create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from './api'
@@ -31,6 +33,7 @@ function availability(teamId = 7, revision: number | null = 0): TeamAvailability
   }
 }
 
+let client: ReturnType<typeof createQueryClient>
 let renderer: ReactTestRenderer | null
 let current: ReturnType<typeof useAvailability>
 let props: UseAvailabilityOptions
@@ -40,23 +43,31 @@ function Harness(options: UseAvailabilityOptions) {
 }
 async function mount() {
   await act(async () => {
-    renderer = create(createElement(Harness, props))
+    renderer = create(createElement(QueryClientProvider, { client }, createElement(Harness, props)))
   })
 }
 async function update(changes: Partial<UseAvailabilityOptions>) {
   props = { ...props, ...changes }
   await act(async () => {
-    renderer!.update(createElement(Harness, props))
+    renderer!.update(createElement(QueryClientProvider, { client }, createElement(Harness, props)))
+  })
+}
+async function invalidate() {
+  const queryKey = queryKeys.availability(props.identityKey, props.teamId)
+  await act(async () => {
+    await client.cancelQueries({ queryKey, exact: true })
+    void client.invalidateQueries({ queryKey, exact: true })
   })
 }
 
 beforeEach(() => {
+  client = createQueryClient()
+  notifyManager.setScheduler(queueMicrotask)
   vi.resetAllMocks()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   renderer = null
   props = {
     teamId: 7,
-    refreshKey: 0,
     identityKey: 'account-a',
     mutate: vi.fn(async (operation) => {
       try {
@@ -71,6 +82,8 @@ beforeEach(() => {
 })
 afterEach(async () => {
   await act(async () => renderer?.unmount())
+  client.clear()
+  notifyManager.setScheduler((callback) => setTimeout(callback, 0))
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -83,44 +96,78 @@ describe('availability reads and mutations', () => {
     expect(current.error).toBe('')
     expect(current.loading).toBe(false)
     vi.mocked(api.teamAvailability).mockRejectedValueOnce(new ApiError(404, 'team_not_found'))
-    await update({ refreshKey: 1 })
+    await invalidate()
     expect(current.error).toContain('team no longer exists')
     expect(current.state?.team_id).toBe(7)
   })
 
-  it('serializes reads and coalesces account invalidations', async () => {
+  it('cancels an older read when fresh availability is requested', async () => {
     const initial = deferred<TeamAvailabilitySnapshot>()
     vi.mocked(api.teamAvailability)
       .mockReturnValueOnce(initial.promise)
       .mockResolvedValueOnce(availability(7, 2))
     await mount()
-    await update({ refreshKey: 1 })
-    await update({ refreshKey: 2 })
-    expect(api.teamAvailability).toHaveBeenCalledTimes(1)
+    const signal = vi.mocked(api.teamAvailability).mock.calls[0][1]
+    await invalidate()
+    await invalidate()
+    expect(signal?.aborted).toBe(true)
+    expect(api.teamAvailability).toHaveBeenCalledTimes(3)
     await act(async () => initial.resolve(availability(7, 1)))
-    expect(api.teamAvailability).toHaveBeenCalledTimes(2)
+    expect(api.teamAvailability).toHaveBeenCalledTimes(3)
     expect(current.state?.availability?.revision).toBe(2)
     expect(current.loading).toBe(false)
+  })
+
+  it('shares cached availability between editors and comparison views', async () => {
+    const initial = deferred<TeamAvailabilitySnapshot>()
+    vi.mocked(api.teamAvailability).mockReturnValueOnce(initial.promise)
+    await act(async () => {
+      renderer = create(
+        createElement(QueryClientProvider, { client }, [
+          createElement(Harness, { ...props, key: 'editor' }),
+          createElement(Harness, { ...props, key: 'comparison' }),
+        ]),
+      )
+    })
+    expect(api.teamAvailability).toHaveBeenCalledTimes(1)
+    await act(async () => initial.resolve(availability(7, 3)))
+    expect(current.state?.availability?.revision).toBe(3)
+    expect(client.getQueryData(queryKeys.availability('account-a', 7))).toEqual(availability(7, 3))
+  })
+
+  it('cancels the initial read after a mutation so its old snapshot cannot win', async () => {
+    const initial = deferred<TeamAvailabilitySnapshot>()
+    vi.mocked(api.teamAvailability)
+      .mockReturnValueOnce(initial.promise)
+      .mockResolvedValueOnce(availability(7, 2))
+    await mount()
+    const signal = vi.mocked(api.teamAvailability).mock.calls[0][1]
+    await act(async () => {
+      expect(await current.run(async () => null)).toBe(true)
+    })
+    expect(signal?.aborted).toBe(true)
+    await act(async () => initial.resolve(availability(7, 0)))
+    expect(current.state?.availability?.revision).toBe(2)
   })
 
   it('accepts the first saved revision and never regresses to older or absent headers', async () => {
     vi.mocked(api.teamAvailability).mockResolvedValueOnce(availability(7, null))
     await mount()
-    await update({ refreshKey: 1 })
+    await invalidate()
     expect(current.state?.availability?.revision).toBe(0)
     vi.mocked(api.teamAvailability).mockResolvedValueOnce(availability(7, 2))
-    await update({ refreshKey: 2 })
+    await invalidate()
     vi.mocked(api.teamAvailability).mockResolvedValueOnce(availability(7, 1))
-    await update({ refreshKey: 3 })
+    await invalidate()
     vi.mocked(api.teamAvailability).mockResolvedValueOnce(availability(7, null))
-    await update({ refreshKey: 4 })
+    await invalidate()
     expect(current.state?.availability?.revision).toBe(2)
   })
 
   it('ignores a response belonging to a different team', async () => {
     await mount()
     vi.mocked(api.teamAvailability).mockResolvedValueOnce(availability(8, 99))
-    await update({ refreshKey: 1 })
+    await invalidate()
     expect(current.state).toEqual(availability(7))
   })
 
@@ -136,7 +183,7 @@ describe('availability reads and mutations', () => {
       .mockRejectedValueOnce(new ApiError(503, 'database_unavailable'))
       .mockRejectedValueOnce(new TypeError('Connection interrupted'))
       .mockResolvedValueOnce(availability(7, 2))
-    await update({ refreshKey: 1 })
+    await invalidate()
     expect(current.state?.windows).toEqual(saved.windows)
     expect(current.readError).toContain('database is unavailable')
     await act(async () => {
@@ -171,7 +218,7 @@ describe('availability reads and mutations', () => {
     const pending = deferred<TeamAvailabilitySnapshot>()
     vi.mocked(api.teamAvailability).mockReturnValueOnce(pending.promise)
     await mount()
-    await update({ refreshKey: 1 })
+    await invalidate()
     await act(async () => pending.reject(new TypeError('Connection interrupted')))
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000)
@@ -244,7 +291,7 @@ describe('availability reads and mutations', () => {
     expect(current.state?.availability?.revision).toBe(1)
     expect(current.writeError).toContain('Check your connection')
     expect(current.readError).toBe('')
-    await update({ refreshKey: 1 })
+    await invalidate()
     expect(current.writeError).toContain('Check your connection')
     await act(async () => current.refresh())
     expect(current.error).toBe('')

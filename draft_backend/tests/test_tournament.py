@@ -885,18 +885,15 @@ def test_invalid_availability_endpoints_roll_back_the_entire_edit(tournament_dat
         )
 
 
-def test_every_writer_notifies_members_only_on_commit_and_noop_is_quiet(tournament_database):
+def test_tournament_writers_use_http_refresh_without_stream_notifications(tournament_database):
     t = Tournament(tournament_database, 2, publish=False)
-    channels = {f"dl_user_{user}" for user in t.users[:-1]}
     with psycopg.connect(t.database.admin, autocommit=True) as listener:
         for user in t.users:
             listener.execute(sql.SQL("LISTEN {}").format(sql.Identifier(f"dl_user_{user}")))
+        listener.execute(sql.SQL("LISTEN {}").format(sql.Identifier(f"dl_draft_{t.league}")))
 
         def changed(function, *args, **kwargs):
             value = function(*args, **kwargs)
-            notifications = list(listener.notifies(timeout=1, stop_after=2))
-            assert {item.channel for item in notifications} == channels
-            assert all(item.payload == "" for item in notifications)
             assert list(listener.notifies(timeout=0.05)) == []
             return value
 

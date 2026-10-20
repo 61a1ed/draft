@@ -253,7 +253,7 @@ describe('backend API contract', () => {
     },
   )
 
-  it('retries transient session reads with bounded delays and does not retry authentication failures', async () => {
+  it('leaves session retries to the query client, including transient failures', async () => {
     vi.useFakeTimers()
     const fetch = vi
       .fn()
@@ -263,26 +263,26 @@ describe('backend API contract', () => {
       .mockResolvedValueOnce(json({ detail: 'sign_in_required' }, 401))
     vi.stubGlobal('fetch', fetch)
     const { api } = await import('./api')
-    const pending = api.session()
-    await vi.advanceTimersByTimeAsync(1000)
-    expect(fetch).toHaveBeenCalledTimes(2)
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(await pending).toEqual(session)
+    await expect(api.session()).rejects.toThrow('offline')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await expect(api.session()).rejects.toMatchObject({ status: 503 })
+    expect(await api.session()).toEqual(session)
     await expect(api.session()).rejects.toMatchObject({ status: 401 })
     await vi.advanceTimersByTimeAsync(30_000)
     expect(fetch).toHaveBeenCalledTimes(4)
   })
 })
 
-describe('account event stream', () => {
+describe('selected draft event stream', () => {
   it('refreshes on every invalidation and explicitly reconnects failed opens', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('EventSource', FakeEventSource)
-    const { subscribeAccount } = await import('./api')
+    const { subscribeDraft } = await import('./api')
     const handlers = { onInvalidate: vi.fn(), onStatus: vi.fn() }
-    const cleanup = subscribeAccount(handlers)
+    const cleanup = subscribeDraft(3, handlers)
     const source = FakeEventSource.instances[0]
-    expect(source.url).toBe('/api/events')
+    expect(source.url).toBe('/api/leagues/3/events')
     source.dispatchEvent(new Event('open'))
     expect(handlers.onStatus).toHaveBeenLastCalledWith('connected')
     source.emit('invalidate', null)
@@ -309,8 +309,8 @@ describe('account event stream', () => {
   it('backs off repeated failures up to 30 seconds and cancels pending reconnects', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('EventSource', FakeEventSource)
-    const { subscribeAccount } = await import('./api')
-    const close = subscribeAccount({ onInvalidate: vi.fn() })
+    const { subscribeDraft } = await import('./api')
+    const close = subscribeDraft(3, { onInvalidate: vi.fn() })
     for (const delay of [1000, 2000, 4000, 8000, 16_000, 30_000, 30_000]) {
       const count = FakeEventSource.instances.length
       const latest = FakeEventSource.instances[count - 1]
@@ -338,9 +338,9 @@ describe('account event stream', () => {
       }
     }
     vi.stubGlobal('EventSource', OpeningSource)
-    const { subscribeAccount } = await import('./api')
+    const { subscribeDraft } = await import('./api')
     const onInvalidate = vi.fn()
-    const close = subscribeAccount({ onInvalidate })
+    const close = subscribeDraft(3, { onInvalidate })
     expect(onInvalidate).toHaveBeenCalledOnce()
     fail = false
     await vi.advanceTimersByTimeAsync(1000)
@@ -353,11 +353,11 @@ describe('account event stream', () => {
 
   it('keeps separate browser streams independent when one closes', async () => {
     vi.stubGlobal('EventSource', FakeEventSource)
-    const { subscribeAccount } = await import('./api')
+    const { subscribeDraft } = await import('./api')
     const first = { onInvalidate: vi.fn() }
     const second = { onInvalidate: vi.fn() }
-    const closeFirst = subscribeAccount(first)
-    const closeSecond = subscribeAccount(second)
+    const closeFirst = subscribeDraft(3, first)
+    const closeSecond = subscribeDraft(4, second)
     closeFirst()
     FakeEventSource.instances[0].emit('invalidate', '')
     FakeEventSource.instances[1].emit('invalidate', '')

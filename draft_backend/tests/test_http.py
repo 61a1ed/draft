@@ -281,55 +281,62 @@ def test_startup_refuses_test_login_on_an_unmarked_database(application):
     db.close.assert_awaited_once()
 
 
-def test_account_events_authenticate_without_requiring_league_access(application, monkeypatch):
+def test_draft_events_require_a_session_and_an_existing_league(application, monkeypatch):
     app, db = application
     connect = AsyncMock(side_effect=psycopg.OperationalError("private database credentials"))
     monkeypatch.setattr(psycopg.AsyncConnection, "connect", connect)
     with TestClient(app) as client:
-        assert client.get("/api/events").status_code == 401
+        assert client.get("/api/leagues/8/events").status_code == 401
         connect.assert_not_awaited()
         client.post("/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"})
         assert client.get("/api/leagues").json() == []
         db.read.reset_mock()
-        response = client.get("/api/events?user_id=999&channel=dl_user_999")
+        assert client.get("/api/leagues/8/events").status_code == 404
+        connect.assert_not_awaited()
+        db.read.return_value = [{"id": 8}]
+        response = client.get("/api/leagues/8/events?user_id=999&channel=dl_user_999")
         assert response.status_code == 503
         assert response.json() == {"detail": "database_unavailable"}
         connect.assert_awaited_once()
-        db.read.assert_not_awaited()
-        assert client.get("/api/leagues/8/events").status_code == 404
+        db.read.assert_awaited_with(1, "SELECT id FROM dl.league WHERE id = %s", (8,))
+        assert client.get("/api/events").status_code == 404
+        for invalid in ("0", "-1", "2147483648", "not-a-number"):
+            assert client.get(f"/api/leagues/{invalid}/events").status_code == 422
 
 
-def test_stream_capacity_returns_retryable_failure_without_using_the_pool(application):
+def test_stream_capacity_returns_retryable_failure_after_league_validation(application):
     app, db = application
     with TestClient(app) as client:
         client.post("/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"})
         app.state.event_slots = asyncio.Semaphore(0)
-        response = client.get("/api/events")
+        db.read.return_value = [{"id": 8}]
+        response = client.get("/api/leagues/8/events")
         assert response.status_code == 503
         assert response.json() == {"detail": "event_stream_capacity"}
         assert response.headers["retry-after"] == "2"
         assert client.get("/ready").status_code == 200
-        db.read.assert_not_awaited()
+        db.read.assert_awaited_once_with(1, "SELECT id FROM dl.league WHERE id = %s", (8,))
 
 
-def test_event_channel_comes_only_from_authenticated_account(application, monkeypatch):
+def test_event_channel_comes_only_from_validated_league(application, monkeypatch):
     app, db = application
     conn = SimpleNamespace(execute=AsyncMock(), close=AsyncMock())
     monkeypatch.setattr(psycopg.AsyncConnection, "connect", AsyncMock(return_value=conn))
 
-    class FiniteResponse(module.AccountEventResponse):
+    class FiniteResponse(module.DraftEventResponse):
         async def _notifications(self, conn):
             yield "event: invalidate\ndata: null\n\n"
 
-    monkeypatch.setattr(module, "AccountEventResponse", FiniteResponse)
+    monkeypatch.setattr(module, "DraftEventResponse", FiniteResponse)
     with TestClient(app) as client:
         client.post("/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"})
-        response = client.get("/api/events?user_id=999&channel=dl_user_999&league_id=8")
+        db.read.return_value = [{"id": 8}]
+        response = client.get("/api/leagues/8/events?user_id=999&channel=dl_user_999&league_id=9")
         assert response.status_code == 200
         assert response.text == "event: invalidate\ndata: null\n\n"
-        assert conn.execute.await_args.args[0].as_string() == 'LISTEN "dl_user_1"'
+        assert conn.execute.await_args.args[0].as_string() == 'LISTEN "dl_draft_8"'
         conn.close.assert_awaited_once()
-        db.read.assert_not_awaited()
+        db.read.assert_awaited_once_with(1, "SELECT id FROM dl.league WHERE id = %s", (8,))
 
 
 @pytest.mark.parametrize("function", ["add_team", "update_team"])

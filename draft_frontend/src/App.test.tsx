@@ -167,7 +167,6 @@ beforeEach(() => {
     leagueId: snapshot.league_id,
     snapshot,
     connection: 'connected',
-    tournamentRefreshKey: 0,
     error: '',
     sessionCheckFailed: false,
     setError: vi.fn(),
@@ -309,7 +308,6 @@ describe('account catalog and favorites', () => {
     })
     expect(vi.mocked(useFavorites).mock.lastCall?.[0]).toEqual({
       userId: 11,
-      refreshKey: 0,
       mutate: draft.mutate,
     })
   })
@@ -328,15 +326,12 @@ describe('account catalog and favorites', () => {
     expect(vi.mocked(useFavorites).mock.lastCall?.[0].userId).toBe(11)
   })
 
-  it('passes account invalidations to favorites even with no selected league', async () => {
+  it('keeps account queries available even with no selected league', async () => {
     draft = { ...draft, leagueId: null, leagues: [], snapshot: null }
-    await render()
-    draft = { ...draft, tournamentRefreshKey: 3 }
     await render()
 
     expect(vi.mocked(useFavorites).mock.lastCall?.[0]).toEqual({
       userId: 11,
-      refreshKey: 3,
       mutate: draft.mutate,
     })
   })

@@ -37,7 +37,6 @@ import { Modal } from './Modal'
 interface Props {
   snapshot: LeagueSnapshot
   userId: number
-  refreshKey: number
   busy: boolean
   mutate: (operation: () => Promise<unknown>) => Promise<boolean>
   initialTeamId?: number
@@ -261,7 +260,6 @@ function Comparison({
   const read = useAvailability({
     teamId: compareTeam.id,
     identityKey: props.userId,
-    refreshKey: props.refreshKey,
     mutate: props.mutate,
   })
   return (
@@ -827,7 +825,6 @@ function TeamAvailability({
   const read = useAvailability({
     teamId: team.id,
     identityKey: props.userId,
-    refreshKey: props.refreshKey,
     mutate: props.mutate,
   })
   const [editor, setEditor] = useState<{

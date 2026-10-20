@@ -17,7 +17,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import install_auth, optional_user, require_user, session_valid
 from .config import Settings
 from .db import Database
-from .events import AccountEventResponse
+from .events import DraftEventResponse
 from .migrations import migrate
 
 MIGRATION_DIRECTORY = Path(__file__).with_name("sql_migrations")
@@ -559,10 +559,17 @@ def create_app(settings: Settings | None = None):
     async def publish_final(body: PublishFinal, user: User):
         return await rpc(user, "publish_final", body)
 
-    @app.get("/api/events", tags=["events"])
-    async def events(request: Request, user: User):
-        return AccountEventResponse(
-            settings, user, request.session["expires_at"], app.state.event_slots,
+    @app.get("/api/leagues/{league_id}/events", tags=["events"])
+    async def events(
+        request: Request, league_id: Annotated[int, Field(gt=0, le=2147483647)], user: User,
+    ):
+        # League snapshots are public, but streams still require a valid session and
+        # an existing league. Payloads carry no account-specific data or permissions.
+        rows = await app.state.db.read(user, "SELECT id FROM dl.league WHERE id = %s", (league_id,))
+        if not rows:
+            raise HTTPException(404, "league_not_found")
+        return DraftEventResponse(
+            settings, league_id, request.session["expires_at"], app.state.event_slots,
         )
 
     return app

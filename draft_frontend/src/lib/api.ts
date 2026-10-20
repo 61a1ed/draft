@@ -4,7 +4,7 @@ import type {
   Draftable,
   DraftActionInput,
   League,
-  AccountEventHandlers,
+  DraftEventHandlers,
   LeagueSnapshot,
   RpcResult,
   Session,
@@ -178,38 +178,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 async function session(signal?: AbortSignal): Promise<Session> {
   const generation = ++sessionGeneration
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const value = await request<Session>('/auth/me', { signal })
-      if (signal?.aborted) throw signal.reason
-      // Do not resume an old implicit login lookup into a write using the newer account.
-      if (generation !== sessionGeneration) throw new ApiError(409, 'session_changed')
-      csrfToken = value.csrf_token
-      return value
-    } catch (cause) {
-      if (
-        signal?.aborted ||
-        generation !== sessionGeneration ||
-        attempt >= 2 ||
-        (cause instanceof ApiError && cause.status < 500 && ![408, 429].includes(cause.status))
-      )
-        throw cause
-      await new Promise<void>((resolve, reject) => {
-        const cancel = () => {
-          clearTimeout(timer)
-          reject(signal?.reason)
-        }
-        const timer = setTimeout(
-          () => {
-            signal?.removeEventListener('abort', cancel)
-            resolve()
-          },
-          1000 * 2 ** attempt,
-        )
-        signal?.addEventListener('abort', cancel, { once: true })
-      })
-    }
-  }
+  const value = await request<Session>('/auth/me', { signal })
+  if (signal?.aborted) throw signal.reason
+  // TanStack Query owns read retries. A superseded login lookup must never resume a write.
+  if (generation !== sessionGeneration) throw new ApiError(409, 'session_changed')
+  csrfToken = value.csrf_token
+  return value
 }
 
 async function rpc<T>(name: string, body: object): Promise<RpcResult<T>> {
@@ -291,8 +265,8 @@ export const api = {
   publishFinal: (input: PublishFinalInput) => rpc<number>('publish_final', input),
 }
 
-/** One stream per signed-in browser tab. Explicit retries also recover failed HTTP opens. */
-export function subscribeAccount(handlers: AccountEventHandlers): () => void {
+/** Draft changes alone need immediate delivery. Query reads recover missed intervals. */
+export function subscribeDraft(leagueId: number, handlers: DraftEventHandlers): () => void {
   let source: EventSource | null = null
   let closed = false
   let retry: ReturnType<typeof setTimeout> | undefined
@@ -320,7 +294,7 @@ export function subscribeAccount(handlers: AccountEventHandlers): () => void {
     if (closed) return
     handlers.onStatus?.(failures ? 'reconnecting' : 'connecting')
     try {
-      const next = new EventSource('/api/events')
+      const next = new EventSource(`/api/leagues/${leagueId}/events`)
       source = next
       const valid = () => !closed && source === next
       next.addEventListener('open', () => {

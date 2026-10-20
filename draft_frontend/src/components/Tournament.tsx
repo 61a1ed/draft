@@ -13,7 +13,6 @@ interface Props {
   snapshot: LeagueSnapshot
   userId: number
   users: User[]
-  refreshKey: number
   busy: boolean
   mutate: (operation: () => Promise<unknown>) => Promise<boolean>
   onCompareAvailability?: (teamId: number, compareTeamId: number, date?: string) => void
@@ -461,14 +460,13 @@ export function Tournament({
   snapshot,
   userId,
   users,
-  refreshKey,
   busy,
   mutate,
   onCompareAvailability,
 }: Props) {
   const { state, loading, error, readError, writeError, clearError, refresh, run } = useTournament({
     leagueId: snapshot.league_id,
-    refreshKey,
+    identityKey: userId,
     mutate,
   })
   const [editor, setEditor] = useState<Editor | null>(null)
@@ -880,7 +878,6 @@ export function Tournament({
           snapshot={snapshot}
           userId={userId}
           users={users}
-          refreshKey={refreshKey}
           busy={busy}
           run={run}
           onClose={() => setMatchId(null)}

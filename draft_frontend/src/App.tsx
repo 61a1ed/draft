@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowLeft,
@@ -193,7 +194,8 @@ function TestSignIn({
   onClose: () => void
 }) {
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
+  const login = useMutation({ mutationFn: (name: string) => api.testLogin(name) })
+  const busy = login.isPending
   const [username, setUsername] = useState('alice')
   const mounted = useRef(true)
   useEffect(() => {
@@ -204,17 +206,14 @@ function TestSignIn({
   }, [])
   const testLogin = async (event: FormEvent) => {
     event.preventDefault()
-    setBusy(true)
     setError('')
     try {
-      const next = await api.testLogin(username)
+      const next = await login.mutateAsync(username)
       if (!mounted.current) return
       onClose()
       await onConnect(next)
     } catch (cause) {
       if (mounted.current) setError(errorMessage(cause))
-    } finally {
-      if (mounted.current) setBusy(false)
     }
   }
   return (
@@ -247,7 +246,6 @@ export default function App() {
   const { snapshot, session, catalog, mode } = draft
   const favorites = useFavorites({
     userId: mode === 'live' ? (session?.user.id ?? null) : null,
-    refreshKey: draft.tournamentRefreshKey,
     mutate: draft.mutate,
   })
   const workspaceBusy = draft.busy || favorites.busy
@@ -533,6 +531,10 @@ export default function App() {
                 <>
                   <span />
                   Live updates
+                </>
+              ) : draft.connection === 'closed' ? (
+                <>
+                  <RefreshCw size={13} /> Automatic refresh
                 </>
               ) : (
                 <>
@@ -911,7 +913,6 @@ export default function App() {
                   snapshot={snapshot}
                   userId={session!.user.id}
                   users={draft.users}
-                  refreshKey={draft.tournamentRefreshKey}
                   busy={draft.busy}
                   mutate={draft.mutate}
                   onCompareAvailability={(teamId, compareTeamId, date) => {
@@ -935,7 +936,6 @@ export default function App() {
                   ])}
                   snapshot={snapshot}
                   userId={session!.user.id}
-                  refreshKey={draft.tournamentRefreshKey}
                   busy={draft.busy}
                   mutate={draft.mutate}
                   initialTeamId={availabilityNavigation?.teamId}

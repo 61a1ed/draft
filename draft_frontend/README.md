@@ -100,7 +100,7 @@ frontend development.
   rename, and delete account lists; save/remove Pokémon from catalog cards or pick
   details; reorder favorites with keyboard-accessible priority controls. Drafting
   a Pokémon keeps it in the list, and filtering never drops entries from a saved
-  order. Favorites update from the existing account stream, with independent list
+  order. Favorites use account-scoped TanStack Query caches, independent list
   revisions, conflict handling, read retries, and no automatic write retries.
 - **Favorites are private to their owner.** Reading lists requires sign-in, and
   the backend enforces ownership for list details and entries. Lists remain
@@ -122,13 +122,16 @@ frontend development.
   saving changes. Managers edit their own teams; match details open both teams
   at the round's suggested week, and any dates can be browsed. Availability is
   advisory and does not book a match or restrict result reporting.
-- One account SSE stream at `/api/events` per signed-in tab, including accounts
-  with no leagues. Assignments appear automatically with a notice; selection
-  changes keep the stream open, and removed access selects another league or
-  clears the private league state.
-- Serialized, coalesced league-list and selected-snapshot refreshes, monotonic
-  revisions, explicit reconnect and read retries with backoff capped at 30 seconds,
-  session expiry handling, and stream cleanup on account changes.
+- One SSE stream at `/api/leagues/{id}/events` for the selected draft. Picks wake
+  the draft query immediately, including an undo that reopens a completed draft.
+  Switching leagues replaces the stream; sign-out and unmount close it.
+- TanStack Query owns session, catalog, league, draft, favorites, tournament, match,
+  and availability reads, plus mutations. Account-scoped keys, abortable reads,
+  revision guards, and cache clearing on logout prevent stale or cross-account data.
+- Mutations invalidate affected queries immediately. Other tabs' changes and new
+  league assignments arrive through 30-second query polling, window focus, and
+  network reconnection. Session checks run every minute; catalog refreshes every
+  five minutes. Transient reads retry twice; writes are never automatically replayed.
 - Responsive navigation, keyboard-accessible native dialogs, labeled forms,
   and reduced-motion support.
 
@@ -139,13 +142,13 @@ The countdown uses the snapshot's server time; expiry is informational, matching
 the backend (there is no automatic pick or skip).
 
 Each newly established listener sends an initial invalidation. Notifications are
-transient wake-up signals: a reconnect reloads the current league list and snapshot,
-including changes missed while offline. Every open tab uses its own persistent
+transient wake-up signals: a reconnect invalidates the selected draft query,
+including changes missed while offline. Each active draft stream uses a persistent
 PostgreSQL connection in addition to the server's normal query connections. Keep
 database capacity available for normal API traffic; the frontend does not change
 database connection limits. Closing a tab or signing out closes its stream.
 
-Catalog refresh is explicit because administrative repricing has no backend
+Catalog refresh uses HTTP because administrative repricing has no backend
 event. Existing roster/history prices always use the amount originally charged.
 The toolbar's **Refresh all data** reloads the session, catalog, user and league
 lists, favorites lists, and the selected snapshot/event stream. It keeps the selected league if
@@ -185,16 +188,18 @@ fallbacks if the font service is unavailable.
   occurrence when entered; nonexistent local times are rejected.
 - `src/lib/availabilityTypes.ts`, `availabilityTime.ts`, `useAvailability.ts`:
   availability contracts, timezone conversion and interval intersection, and
-  revision-aware reads. Availability refreshes from the existing account stream
-  independently of league/tournament revisions; writes are never replayed.
+  revision-aware queries. Availability refreshes independently of draft events
+  and league/tournament revisions; writes are never replayed.
 - `src/lib/api.ts`, `types.ts`: typed backend contract and event client.
-- `src/lib/useDraft.ts`: session, league, request, and stream lifecycle.
+- `src/lib/queryClient.ts`: shared query keys, retry policy, and cache defaults.
+- `src/lib/useDraft.ts`: session/league queries, mutations, and draft stream lifecycle.
+- `src/lib/useResourceQuery.ts`: reusable resource queries and guarded mutations.
 - `src/lib/favoritesTypes.ts`, `useFavorites.ts`: account favorites contract,
-  serialized list reads, selection, revision protection, and mutation lifecycle.
+  account-scoped queries, selection, revision protection, and mutation lifecycle.
 - `src/lib/tournamentTypes.ts`, `useTournament.ts`, `tournamentView.ts`: tournament
-  contract, serialized reads/retries, and presentation rules. The existing account
-  stream invalidates tournament and match reads even when the draft revision is
-  unchanged. Each operation uses its own league/tournament/match/report token;
+  contract, cached queries, and presentation rules. Tournament mutations invalidate
+  both tournament and match queries, independently of the draft revision.
+  Each operation uses its own league/tournament/match/report token;
   stale forms require review, and uncertain writes are refreshed without replay.
 - `src/lib/*.test.*`: API, OAuth, and lifecycle regression tests.
 - `public/`: app favicon and generic image placeholder.
