@@ -20,6 +20,18 @@ export interface BaseStats {
   speed: number
 }
 
+export type MoveCategory = 'Physical' | 'Special' | 'Status'
+
+export interface Move {
+  name: string
+  type: string
+  category: MoveCategory
+  power: number | null
+  accuracy: number | null
+  pp: number | null
+  description: string | null
+}
+
 export interface MegaEvolution {
   id: number
   name: string
@@ -44,6 +56,7 @@ export interface Draftable {
   base_stats: BaseStats | null
   image_url: string | null
   megas: MegaEvolution[]
+  moves?: Move[]
 }
 
 export interface League {

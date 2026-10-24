@@ -83,21 +83,33 @@ STATS = {"hp": 35, "attack": 55, "defense": 40, "special_attack": 50,
          "special_defense": 50, "speed": 90}
 
 
-def details(tmp_path, dex=25, **overrides):
+def details(tmp_path, dex=25, move_defs=None, **overrides):
     entry = {
         "dex": dex, "form": "", "types": ["Electric"], "abilities": ["Static"],
         "hidden_ability": "Lightning Rod", "base_stats": STATS,
         "megas": [{"name": "Mega Pikachu", "types": ["Electric", "Fairy"],
                    "abilities": ["Pixilate"], "hidden_ability": None,
                    "base_stats": {**STATS, "speed": 130}, "image_path": "pokemon.png"}],
+        "moves": ["Light Screen", "Thunderbolt"],
         **overrides,
     }
+    default_moves = [
+        {"name": "Light Screen", "type": "Psychic", "category": "Status",
+         "power": None, "accuracy": None, "pp": 20, "description": "Halves special damage."},
+        {"name": "Thunderbolt", "type": "Electric", "category": "Special",
+         "power": 90, "accuracy": 100, "pp": 16, "description": "10% chance to paralyze."},
+    ]
     path = tmp_path / "details.json"
-    path.write_text(json.dumps({"pokemon": [entry]}), encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {"moves": default_moves if move_defs is None else move_defs, "pokemon": [entry]}
+        ),
+        encoding="utf-8",
+    )
     return path
 
 
-def test_details_and_megas_are_attached_by_dex_and_form(tmp_path):
+def test_details_megas_and_moves_are_attached_by_dex_and_form(tmp_path):
     rows, images = load_catalog(*source(tmp_path), details(tmp_path))
     pokemon = rows[0]
     assert pokemon.details.types == ("Electric",)
@@ -106,6 +118,8 @@ def test_details_and_megas_are_attached_by_dex_and_form(tmp_path):
     assert [m.name for m in pokemon.megas] == ["Mega Pikachu"]
     assert pokemon.megas[0].details.stats[-1] == 130
     assert pokemon.megas[0].image_hash == pokemon.image_hash
+    assert [m.name for m in pokemon.moves] == ["Light Screen", "Thunderbolt"]
+    assert pokemon.moves[1].power == 90 and pokemon.moves[1].category == "Special"
     assert load_catalog(*source(tmp_path))[0][0].details is None
 
 
@@ -121,6 +135,8 @@ def test_details_and_megas_are_attached_by_dex_and_form(tmp_path):
         {"base_stats": {"hp": 35}},
         {"megas": [{"name": "Mega", "types": ["Electric"], "abilities": ["A"],
                     "base_stats": STATS, "image_path": "missing.png"}]},
+        {"moves": ["Unknown Move"]},
+        {"moves": ["Light Screen", "Light Screen"]},
     ],
 )
 def test_invalid_details_fail_with_line_number(tmp_path, overrides):
@@ -175,17 +191,21 @@ def test_postgres_import_stores_and_replaces_details_and_megas(tmp_path, test_da
     rows = [replace(rows[0], dex=dex)]
     import_catalog(test_database.admin, rows, images)
     query = (
-        "SELECT d.types, d.hidden_ability, d.speed, array_agg(m.name ORDER BY m.id) "
-        "FROM dl.draftable d LEFT JOIN dl.mega_evolution m ON m.draftable_id = d.id "
+        "SELECT d.types, d.hidden_ability, d.speed, array_agg(DISTINCT m.name), "
+        "array_agg(DISTINCT dm.move_name) "
+        "FROM dl.draftable d "
+        "LEFT JOIN dl.mega_evolution m ON m.draftable_id = d.id "
+        "LEFT JOIN dl.draftable_move dm ON dm.draftable_id = d.id "
         "WHERE d.dex = %s GROUP BY d.id"
     )
     with psycopg.connect(test_database.admin, autocommit=True) as conn:
         assert conn.execute(query, (dex,)).fetchone() == (
             ["Electric"], "Lightning Rod", 90, ["Mega Pikachu"],
+            ["Light Screen", "Thunderbolt"],
         )
-        # A reimport replaces Megas; an import without details keeps stored details.
-        import_catalog(test_database.admin, [replace(rows[0], megas=())], images)
-        assert conn.execute(query, (dex,)).fetchone()[3] == [None]
+        # A reimport replaces Megas and moves; an import without details keeps stored details.
+        import_catalog(test_database.admin, [replace(rows[0], megas=(), moves=())], images)
+        assert conn.execute(query, (dex,)).fetchone()[3:] == ([None], [None])
         import_catalog(test_database.admin, [replace(rows[0], details=None)], images)
         assert conn.execute(query, (dex,)).fetchone()[:3] == (["Electric"], "Lightning Rod", 90)
         with pytest.raises(psycopg.errors.CheckViolation):

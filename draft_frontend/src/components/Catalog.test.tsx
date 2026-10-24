@@ -260,6 +260,15 @@ describe('catalog search filters', () => {
       base_stats: { hp: 1, attack: 1, defense: 1, special_attack: 1, special_defense: 1, speed: 1 },
       image_url: null,
     }
+    const lightScreen = {
+      name: 'Light Screen',
+      type: 'Psychic',
+      category: 'Status' as const,
+      power: null,
+      accuracy: null,
+      pp: 20,
+      description: 'Halves special damage.',
+    }
     props.snapshot = null
     props.catalog = [
       {
@@ -268,8 +277,9 @@ describe('catalog search filters', () => {
         abilities: ['Overgrow'],
         hidden_ability: 'Chlorophyll',
         megas: [mega],
+        moves: [lightScreen],
       },
-      { ...catalog[1], types: ['Electric'], abilities: ['Static'] },
+      { ...catalog[1], types: ['Electric'], abilities: ['Static'], moves: [lightScreen] },
       { ...catalog[2], types: ['Water'], abilities: ['Torrent'] },
       {
         ...catalog[3],
@@ -281,8 +291,16 @@ describe('catalog search filters', () => {
     ]
   })
 
-  it('suggests type, ability, and Mega filters and combines selected ones', async () => {
+  it('suggests type, ability, move, and Mega filters and combines selected ones', async () => {
     await render()
+    await change(searchBox(), 'light screen')
+    expect(options()).toEqual(['Light Screen move'])
+    await click(option('Light Screen move'))
+    expect(searchBox().props.value).toBe('')
+    expect(cardNames()).toEqual(['Bulbasaur', 'Pikachu'])
+    await click(control('Remove Light Screen move filter'))
+    expect(cardNames()).toHaveLength(4)
+
     await change(searchBox(), 'grass')
     expect(options()).toEqual(['Grass type'])
     await click(option('Grass type'))

@@ -356,7 +356,11 @@ def create_app(settings: Settings | None = None):
             f"SELECT d.id, d.name, d.point_cost, d.dex, d.species, d.form, {details.format('d')}, "
             "coalesce((SELECT json_agg(m ORDER BY m.id) FROM ("
             f"SELECT me.id, me.name, {details.format('me')} FROM dl.mega_evolution me "
-            "WHERE me.draftable_id = d.id) m), '[]') AS megas "
+            "WHERE me.draftable_id = d.id) m), '[]') AS megas, "
+            "coalesce((SELECT json_agg(mv ORDER BY lower(mv.name), mv.name) FROM ("
+            "SELECT m.name, m.type, m.category, m.power, m.accuracy, m.pp, m.description "
+            "FROM dl.draftable_move dm JOIN dl.move m ON m.name = dm.move_name "
+            "WHERE dm.draftable_id = d.id) mv), '[]') AS moves "
             "FROM dl.draftable d ORDER BY d.id",
         )
 

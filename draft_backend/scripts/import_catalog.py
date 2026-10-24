@@ -39,6 +39,17 @@ class Details:
 
 
 @dataclass(frozen=True)
+class Move:
+    name: str
+    type: str
+    category: str
+    power: int | None
+    accuracy: int | None
+    pp: int | None
+    description: str | None
+
+
+@dataclass(frozen=True)
 class Mega:
     name: str
     details: Details
@@ -54,6 +65,7 @@ class Pokemon:
     image_hash: str
     details: Details | None = None
     megas: tuple[Mega, ...] = ()
+    moves: tuple[Move, ...] = ()
 
     @property
     def name(self) -> str:
@@ -101,13 +113,43 @@ def parse_details(entry: dict) -> Details:
     )
 
 
-def load_details(path: Path) -> dict[tuple[int, str], dict]:
-    """Index a snapshot_showdown.py file by the CSV's dex/form key."""
+def parse_move(entry: dict) -> Move:
+    if not isinstance(entry, dict):
+        raise ValueError("Move entry must be an object")
+    name = names([entry.get("name")], "Move name", 1)[0]
+    move_type = names([entry.get("type")], "Move type", 1)[0]
+    category = entry.get("category")
+    if category not in {"Physical", "Special", "Status"}:
+        raise ValueError("Move category must be Physical, Special, or Status")
+    power, accuracy, pp = entry.get("power"), entry.get("accuracy"), entry.get("pp")
+    if power is not None and not (type(power) is int and power > 0):
+        raise ValueError("Move power must be a positive integer or null")
+    if accuracy is not None and not (type(accuracy) is int and 1 <= accuracy <= 100):
+        raise ValueError("Move accuracy must be 1..100 or null")
+    if pp is not None and not (type(pp) is int and pp > 0):
+        raise ValueError("Move PP must be a positive integer or null")
+    desc = entry.get("description")
+    if desc is not None and not (isinstance(desc, str) and desc.strip()):
+        raise ValueError("Move description must be a string or null")
+    return Move(name, move_type, category, power, accuracy, pp, desc and desc.strip())
+
+
+def load_details(path: Path) -> tuple[dict[tuple[int, str], dict], dict[str, Move]]:
+    """Index a snapshot_showdown.py file by the CSV's dex/form key and move name."""
     data = json.loads(path.read_text(encoding="utf-8"))
     entries = data.get("pokemon") if isinstance(data, dict) else None
     if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
         raise ValueError("Details file must contain a list of Pokémon")
-    return {(e.get("dex"), str(e.get("form", "")).strip()): e for e in entries}
+    raw_moves = data.get("moves", [])
+    if not isinstance(raw_moves, list):
+        raise ValueError("Details moves must be a list")
+    moves: dict[str, Move] = {}
+    for raw in raw_moves:
+        move = parse_move(raw)
+        if move.name in moves:
+            raise ValueError(f"Duplicate move definition: {move.name}")
+        moves[move.name] = move
+    return {(e.get("dex"), str(e.get("form", "")).strip()): e for e in entries}, moves
 
 
 def load_catalog(
@@ -117,7 +159,7 @@ def load_catalog(
     root = image_root.resolve(strict=True)
     if not root.is_dir():
         raise ValueError("Image root must be a directory")
-    known = load_details(details_path) if details_path else None
+    known, move_defs = load_details(details_path) if details_path else (None, {})
     pokemon, images, seen = [], {}, set()
     with csv_path.open(encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream, strict=True)
@@ -140,7 +182,7 @@ def load_catalog(
                     raise ValueError(f"Duplicate dex/form: {key}")
                 seen.add(key)
                 digest = read_png(root, row["image_path"], images)
-                details, megas = None, ()
+                details, megas, moves = None, (), ()
                 if known is not None:
                     entry = known.get(key)
                     if entry is None:
@@ -162,7 +204,19 @@ def load_catalog(
                     )
                     if len({m.name for m in megas}) != len(megas):
                         raise ValueError("Duplicate Mega name")
-                pokemon.append(Pokemon(dex, species, form, points, digest, details, megas))
+                    raw_pokemon_moves = entry.get("moves", [])
+                    if not isinstance(raw_pokemon_moves, list) or not all(
+                        isinstance(m, str) and m.strip() for m in raw_pokemon_moves
+                    ):
+                        raise ValueError("Moves must be a list of move names")
+                    move_names = [m.strip() for m in raw_pokemon_moves]
+                    if len(set(move_names)) != len(move_names):
+                        raise ValueError("Duplicate move name")
+                    unknown = [m for m in move_names if m not in move_defs]
+                    if unknown:
+                        raise ValueError(f"Unknown move: {unknown[0]}")
+                    moves = tuple(move_defs[m] for m in move_names)
+                pokemon.append(Pokemon(dex, species, form, points, digest, details, megas, moves))
             except (OSError, ValueError) as exc:
                 raise ValueError(f"CSV line {reader.line_num}: {exc}") from exc
     if not pokemon:
@@ -220,6 +274,29 @@ def import_catalog_connection(
                     for p in detailed for m in p.megas
                 ],
             )
+            unique_moves = {m.name: m for p in detailed for m in p.moves}
+            cursor.executemany(
+                "INSERT INTO dl.move (name, type, category, power, accuracy, pp, description) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (name) DO UPDATE SET type = EXCLUDED.type, "
+                "category = EXCLUDED.category, power = EXCLUDED.power, "
+                "accuracy = EXCLUDED.accuracy, pp = EXCLUDED.pp, "
+                "description = EXCLUDED.description",
+                [
+                    (m.name, m.type, m.category, m.power, m.accuracy, m.pp, m.description)
+                    for m in unique_moves.values()
+                ],
+            )
+            cursor.executemany(
+                "DELETE FROM dl.draftable_move dm USING dl.draftable d "
+                "WHERE dm.draftable_id = d.id AND d.dex = %s AND d.form = %s",
+                [(p.dex, p.form) for p in detailed],
+            )
+            cursor.executemany(
+                "INSERT INTO dl.draftable_move (draftable_id, move_name) "
+                "SELECT id, %s FROM dl.draftable WHERE dex = %s AND form = %s",
+                [(m.name, p.dex, p.form) for p in detailed for m in p.moves],
+            )
         conn.execute("RESET ROLE")
 
 
@@ -248,8 +325,11 @@ def main() -> None:
         raise SystemExit(1) from None
     action = "Validated" if args.dry_run else "Imported"
     megas = sum(len(p.megas) for p in pokemon)
-    print(f"{action} {len(pokemon)} Pokémon, {megas} Mega Evolutions, and {len(images)} unique "
-          f"PNG images ({sum(map(len, images.values())):,} bytes).")
+    moves = len({m.name for p in pokemon for m in p.moves})
+    print(
+        f"{action} {len(pokemon)} Pokémon, {megas} Mega Evolutions, {moves} moves, "
+        f"and {len(images)} unique PNG images ({sum(map(len, images.values())):,} bytes)."
+    )
 
 
 if __name__ == "__main__":

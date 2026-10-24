@@ -42,6 +42,35 @@ const charizard: Draftable = {
       image_url: null,
     },
   ],
+  moves: [
+    {
+      name: 'Air Slash',
+      type: 'Flying',
+      category: 'Special',
+      power: 75,
+      accuracy: 95,
+      pp: 16,
+      description: '30% chance to make the target flinch.',
+    },
+    {
+      name: 'Dragon Dance',
+      type: 'Dragon',
+      category: 'Status',
+      power: null,
+      accuracy: null,
+      pp: 20,
+      description: "Raises the user's Attack and Speed by 1.",
+    },
+    {
+      name: 'Flare Blitz',
+      type: 'Fire',
+      category: 'Physical',
+      power: 120,
+      accuracy: 100,
+      pp: 16,
+      description: 'Has 33% recoil. 10% chance to burn.',
+    },
+  ],
 }
 
 let renderer: ReactTestRenderer | null
@@ -85,8 +114,62 @@ describe('Pokémon details', () => {
     expect(abilities()).toEqual(['Blaze', 'Solar Power'])
     expect(text(statRow('Sp. Atk'))).toBe('Sp. Atk109')
     expect(text(statRow('Total'))).toBe('Total534')
-    expect(tabs().map(text)).toEqual(['Base form', 'Mega Charizard X', 'Mega Charizard Y'])
+    expect(tabs().map(text)).toEqual([
+      'Base form',
+      'Mega Charizard X',
+      'Mega Charizard Y',
+      'Moves',
+    ])
     expect(tabs()[0].props['aria-selected']).toBe(true)
+    expect(tabs()[3].props.className).toContain('moves-tab')
+  })
+
+  it('switches to the Moves tab and filters moves by category, type, and name', async () => {
+    await render(charizard)
+    await act(async () => tabs()[3].props.onClick())
+    expect(tabs()[3].props['aria-selected']).toBe(true)
+    const moveRows = () =>
+      root()
+        .findByProps({ 'aria-label': 'Learned moves' })
+        .findByType('tbody')
+        .findAllByType('tr')
+    expect(moveRows().map((row) => text(row.findByType('strong')))).toEqual([
+      'Air Slash',
+      'Dragon Dance',
+      'Flare Blitz',
+    ])
+    expect(text(moveRows()[0])).toContain('75')
+    expect(text(moveRows()[0])).toContain('95%')
+    expect(text(moveRows()[0])).toContain('16')
+    expect(text(moveRows()[0])).toContain('30% chance to make the target flinch.')
+
+    const searchBox = root().findByProps({
+      'aria-label': 'Search moves by name, type, or category',
+    })
+    await act(async () => searchBox.props.onChange({ target: { value: 'status' } }))
+    const statusOption = root()
+      .findAllByProps({ role: 'option' })
+      .find((node) => text(node) === 'Status category')!
+    await act(async () => statusOption.props.onClick())
+    expect(moveRows().map((row) => text(row.findByType('strong')))).toEqual(['Dragon Dance'])
+
+    await act(async () =>
+      root()
+        .findByProps({ 'aria-label': 'Remove Status category filter' })
+        .props.onClick(),
+    )
+    expect(moveRows()).toHaveLength(3)
+
+    await act(async () => searchBox.props.onChange({ target: { value: 'fire' } }))
+    const fireOption = root()
+      .findAllByProps({ role: 'option' })
+      .find((node) => text(node) === 'Fire type')!
+    await act(async () => fireOption.props.onClick())
+    expect(moveRows().map((row) => text(row.findByType('strong')))).toEqual(['Flare Blitz'])
+
+    await act(async () => searchBox.props.onChange({ target: { value: 'air' } }))
+    expect(root().findAllByProps({ 'aria-label': 'Learned moves' })).toHaveLength(0)
+    expect(text(root())).toContain('No moves match the current filter.')
   })
 
   it('switches to a Mega tab and shows its own data with changes from the base form', async () => {
@@ -106,16 +189,16 @@ describe('Pokémon details', () => {
     expect(root().findByType('img').props.src).toBe('/pokeball.svg')
   })
 
-  it('moves between form tabs with the arrow keys', async () => {
+  it('moves between form and Moves tabs with the arrow keys', async () => {
     await render(charizard)
     const list = root().findByProps({ role: 'tablist' })
     await act(async () => list.props.onKeyDown({ key: 'ArrowLeft', preventDefault: vi.fn() }))
-    expect(tabs()[2].props['aria-selected']).toBe(true)
+    expect(tabs()[3].props['aria-selected']).toBe(true)
     await act(async () => list.props.onKeyDown({ key: 'ArrowRight', preventDefault: vi.fn() }))
     expect(tabs()[0].props['aria-selected']).toBe(true)
   })
 
-  it('hides tabs without Megas and explains missing details', async () => {
+  it('hides tabs without Megas or moves and explains missing details', async () => {
     await render({
       ...charizard,
       form: 'Alolan',
@@ -124,6 +207,7 @@ describe('Pokémon details', () => {
       hidden_ability: null,
       base_stats: null,
       megas: [],
+      moves: [],
     })
     expect(tabs()).toHaveLength(0)
     expect(text(root())).toContain('POKÉDEX #006 · Alolan')

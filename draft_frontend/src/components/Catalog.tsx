@@ -43,7 +43,7 @@ export function PokemonImage({
 
 type ListDialog = { kind: 'create' } | { kind: 'rename' | 'delete'; list: FavoritesListSnapshot }
 
-type SearchFilter = { kind: 'type' | 'ability' | 'mega'; value: string; label: string }
+type SearchFilter = { kind: 'type' | 'ability' | 'move' | 'mega'; value: string; label: string }
 
 const MEGA_FILTER: SearchFilter = { kind: 'mega', value: 'mega', label: 'Has Mega Evolution' }
 const filterKey = (filter: SearchFilter) => `${filter.kind}:${filter.value}`
@@ -52,6 +52,7 @@ function matchesFilter(item: Draftable, filter: SearchFilter) {
   if (filter.kind === 'type') return !!item.types?.includes(filter.value)
   if (filter.kind === 'ability')
     return !!item.abilities?.includes(filter.value) || item.hidden_ability === filter.value
+  if (filter.kind === 'move') return !!item.moves?.some((move) => move.name === filter.value)
   return item.megas.length > 0
 }
 
@@ -95,11 +96,13 @@ export function Catalog({
   const allFilters = useMemo(() => {
     const types = new Set<string>()
     const abilities = new Set<string>()
+    const moves = new Set<string>()
     let anyMega = false
     for (const item of catalog) {
       item.types?.forEach((type) => types.add(type))
       item.abilities?.forEach((ability) => abilities.add(ability))
       if (item.hidden_ability) abilities.add(item.hidden_ability)
+      item.moves?.forEach((move) => moves.add(move.name))
       anyMega ||= item.megas.length > 0
     }
     const sorted = (values: Set<string>) => [...values].sort((a, b) => a.localeCompare(b))
@@ -113,6 +116,11 @@ export function Catalog({
         kind: 'ability',
         value,
         label: `${value} ability`,
+      })),
+      ...sorted(moves).map((value): SearchFilter => ({
+        kind: 'move',
+        value,
+        label: `${value} move`,
       })),
       ...(anyMega ? [MEGA_FILTER] : []),
     ]
@@ -348,7 +356,7 @@ export function Catalog({
             aria-expanded={showSuggestions}
             aria-controls="catalog-search-suggestions"
             aria-activedescendant={showSuggestions ? `catalog-suggestion-${highlight}` : undefined}
-            placeholder="Search name, Pokédex number, type, or ability..."
+            placeholder="Search name, Pokédex number, type, ability, or move..."
             value={search}
             onChange={(event) => {
               setSearch(event.target.value)

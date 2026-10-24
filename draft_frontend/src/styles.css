@@ -4684,7 +4684,7 @@ main {
 
 /* ---------- Pokémon details (pop-out) ---------- */
 .modal:has(.pokemon-details) {
-  width: 620px;
+  width: min(740px, 95vw);
 }
 .pokemon-details {
   margin-bottom: 20px;
@@ -4745,6 +4745,95 @@ main {
   border-color: light-dark(#eee4f5, #3b2748);
   border-bottom-color: light-dark(#fff, #16141a);
   background: light-dark(#fff, #16141a);
+}
+.form-tabs button.moves-tab {
+  margin-left: auto;
+}
+.pokemon-moves-panel {
+  padding-top: 14px;
+}
+.move-search-controls {
+  margin-bottom: 12px;
+}
+.move-search-controls .search-field {
+  width: 100%;
+}
+.move-table-scroll {
+  max-height: 290px;
+  overflow-y: auto;
+  overflow-x: auto;
+  border: 1px solid light-dark(#eee4f5, #3b2748);
+  border-radius: 8px;
+}
+.move-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.move-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: light-dark(#777181, #a39eaa);
+  background: light-dark(#f8f5fc, #1b1425);
+  border-bottom: 1px solid light-dark(#eee4f5, #3b2748);
+  white-space: nowrap;
+}
+.move-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid light-dark(#f5f0f9, #271b33);
+  color: light-dark(#473d54, #c8c0d1);
+  vertical-align: middle;
+}
+.move-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.move-table .num-col {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.move-name-cell {
+  white-space: nowrap;
+}
+.move-desc-cell {
+  color: light-dark(#6c6378, #a99fb5);
+  font-size: 11px;
+  line-height: 1.35;
+  min-width: 180px;
+}
+.move-category-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.move-category-pill.physical {
+  background: light-dark(#f9e0d9, #49231d);
+  color: light-dark(#a4351f, #f49b88);
+}
+.move-category-pill.special {
+  background: light-dark(#dde6fa, #1f2b49);
+  color: light-dark(#2a4f96, #94b5f6);
+}
+.move-category-pill.status {
+  background: light-dark(#e9e6ee, #2d2936);
+  color: light-dark(#5f586b, #bdb6c9);
+}
+.move-empty {
+  margin: 16px 0 4px;
+  text-align: center;
 }
 .pokemon-details-body {
   display: grid;
