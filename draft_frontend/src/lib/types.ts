@@ -11,6 +11,25 @@ export interface Session {
   expires_at: number
 }
 
+export interface BaseStats {
+  hp: number
+  attack: number
+  defense: number
+  special_attack: number
+  special_defense: number
+  speed: number
+}
+
+export interface MegaEvolution {
+  id: number
+  name: string
+  types: string[]
+  abilities: string[]
+  hidden_ability: string | null
+  base_stats: BaseStats
+  image_url: string | null
+}
+
 export interface Draftable {
   id: number
   name: string
@@ -18,7 +37,13 @@ export interface Draftable {
   dex: number | null
   species: string | null
   form: string
+  /** Showdown details are null until a catalog import supplies them. */
+  types: string[] | null
+  abilities: string[] | null
+  hidden_ability: string | null
+  base_stats: BaseStats | null
   image_url: string | null
+  megas: MegaEvolution[]
 }
 
 export interface League {

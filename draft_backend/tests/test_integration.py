@@ -135,6 +135,12 @@ def test_draft_workflow_and_database_enforced_access(client, test_database):
     carol = next(user for user in users if user["display_name"] == "Carol")
     catalog = client.get("/api/draftables").json()
     assert len(catalog) >= 4
+    assert all(
+        set(row) == {"id", "name", "point_cost", "dex", "species", "form", "types",
+                     "abilities", "hidden_ability", "base_stats", "image_url", "megas"}
+        and isinstance(row["megas"], list)
+        for row in catalog
+    )
     players = [row["id"] for row in catalog[:4]]
 
     league_id, team_a, team_b = configure_league(client, alice, bob, carol, test_database)

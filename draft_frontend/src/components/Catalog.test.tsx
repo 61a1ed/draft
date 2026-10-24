@@ -33,7 +33,17 @@ const catalog: Draftable[] = [
   { id: 2, name: 'Pikachu', dex: 25, point_cost: 12 },
   { id: 3, name: 'Squirtle', dex: 7, point_cost: 3 },
   { id: 4, name: 'Charmander', dex: 4, point_cost: 6 },
-].map((item) => ({ ...item, species: item.name, form: '', image_url: null }))
+].map((item) => ({
+  ...item,
+  species: item.name,
+  form: '',
+  types: null,
+  abilities: null,
+  hidden_ability: null,
+  base_stats: null,
+  image_url: null,
+  megas: [],
+}))
 
 function savedList(): FavoritesListSnapshot {
   return {
@@ -192,6 +202,125 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => renderer?.unmount())
   vi.unstubAllGlobals()
+})
+
+describe('catalog cards', () => {
+  it('show the points ribbon, types, and Mega Evolutions', async () => {
+    const stats = { hp: 1, attack: 1, defense: 1, special_attack: 1, special_defense: 1, speed: 1 }
+    props.catalog = [
+      {
+        ...catalog[0],
+        types: ['Grass', 'Poison'],
+        megas: [
+          {
+            id: 5,
+            name: 'Mega Bulbasaur',
+            types: ['Grass', 'Fairy'],
+            abilities: ['Thick Fat'],
+            hidden_ability: null,
+            base_stats: stats,
+            image_url: null,
+          },
+        ],
+      },
+      { ...catalog[3], types: ['Fire'] },
+    ]
+    await render()
+    const [bulbasaur, charmander] = renderer!.root.findAllByType('article')
+    const pills = (card: ReactTestInstance) =>
+      card.findAllByProps({ className: 'type-pill' }).map(text)
+    expect(pills(bulbasaur)).toEqual(['Grass', 'Poison', 'Grass', 'Fairy'])
+    expect(text(bulbasaur)).toContain('Mega Bulbasaur')
+    expect(text(bulbasaur.findByProps({ className: 'points-ribbon' }))).toBe('4pts')
+    expect(pills(charmander)).toEqual(['Fire'])
+    expect(text(charmander)).not.toContain('Mega')
+    expect(charmander.findAllByProps({ className: 'card-megas' })).toHaveLength(0)
+    // Alpha has 5 points left, so Charmander (6) is flagged over budget.
+    expect(charmander.findByProps({ className: 'points-ribbon over-budget' })).toBeDefined()
+    expect(control('View Charmander, 6 points, over budget')).toBeDefined()
+    expect(
+      bulbasaur.findByProps({ className: 'bookmark-button card-bookmark saved' }),
+    ).toBeDefined()
+  })
+})
+
+describe('catalog search filters', () => {
+  const searchBox = () => control('Search Pokémon by name or Pokédex number')
+  const options = () => renderer!.root.findAllByProps({ role: 'option' }).map(text)
+  const option = (label: string) =>
+    renderer!.root.findAllByProps({ role: 'option' }).find((node) => text(node) === label)!
+
+  beforeEach(() => {
+    const mega = {
+      id: 9,
+      name: 'Mega Venusaur',
+      types: ['Grass', 'Poison'],
+      abilities: ['Thick Fat'],
+      hidden_ability: null,
+      base_stats: { hp: 1, attack: 1, defense: 1, special_attack: 1, special_defense: 1, speed: 1 },
+      image_url: null,
+    }
+    props.snapshot = null
+    props.catalog = [
+      {
+        ...catalog[0],
+        types: ['Grass', 'Poison'],
+        abilities: ['Overgrow'],
+        hidden_ability: 'Chlorophyll',
+        megas: [mega],
+      },
+      { ...catalog[1], types: ['Electric'], abilities: ['Static'] },
+      { ...catalog[2], types: ['Water'], abilities: ['Torrent'] },
+      {
+        ...catalog[3],
+        name: 'Oddish',
+        species: 'Oddish',
+        types: ['Grass', 'Poison'],
+        abilities: ['Chlorophyll'],
+      },
+    ]
+  })
+
+  it('suggests type, ability, and Mega filters and combines selected ones', async () => {
+    await render()
+    await change(searchBox(), 'grass')
+    expect(options()).toEqual(['Grass type'])
+    await click(option('Grass type'))
+    expect(searchBox().props.value).toBe('')
+    expect(cardNames()).toEqual(['Bulbasaur', 'Oddish'])
+
+    await change(searchBox(), 'chloro')
+    expect(options()).toEqual(['Chlorophyll ability'])
+    await click(option('Chlorophyll ability'))
+    expect(cardNames()).toEqual(['Bulbasaur', 'Oddish'])
+
+    await change(searchBox(), 'mega')
+    expect(options()).toEqual(['Has Mega Evolution'])
+    await click(option('Has Mega Evolution'))
+    expect(cardNames()).toEqual(['Bulbasaur'])
+
+    await change(searchBox(), 'grass')
+    expect(options()).toEqual([])
+    await change(searchBox(), '')
+
+    await click(control('Remove Has Mega Evolution filter'))
+    expect(cardNames()).toEqual(['Bulbasaur', 'Oddish'])
+    await click(button('Clear filters'))
+    expect(cardNames()).toHaveLength(4)
+  })
+
+  it('selects the highlighted suggestion with the keyboard', async () => {
+    await render()
+    await change(searchBox(), 'o')
+    const key = (name: string) =>
+      act(async () => searchBox().props.onKeyDown({ key: name, preventDefault: vi.fn() }))
+    await key('ArrowDown')
+    const second = options()[1]
+    await key('Enter')
+    expect(text(renderer!.root.findByProps({ className: 'search-filter-chip' }))).toBe(second)
+    await key('Backspace')
+    expect(renderer!.root.findAllByProps({ className: 'search-filter-chip' })).toHaveLength(0)
+  })
 })
 
 describe('catalog favorites', () => {

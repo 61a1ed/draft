@@ -393,8 +393,11 @@ After bootstrapping a fresh database, set `ADMIN_DATABASE_URL` to an administrat
 connection allowed to `SET ROLE dl_owner`, then import:
 
 ```sh
-uv run python scripts/import_catalog.py ../pokemon_catalog.csv --image-root ../showdown
+uv run python scripts/import_catalog.py ../pokemon_catalog.csv --image-root ../showdown --details ../pokemon_details.json
 ```
+
+`--details` adds types, abilities, base stats, and Mega Evolutions from the saved
+Showdown snapshot; see `scripts/README.md` to refresh it.
 
 The import validates all rows and reads all files before opening its database
 connection, then commits assets and catalog rows in one transaction. Repeating it
@@ -408,9 +411,13 @@ Only large images are exported from `min_pokemon`. The supplied source contains
 263 Pokémon and 6,102,933 bytes of images. Copy the CSV and image directory together
 to run the same import elsewhere, preserving the relative image paths.
 
-Catalog responses include `id`, `name`, `point_cost`, `dex`, `species`, `form`, and
-`image_url`. Display names include nonempty forms in parentheses. Generic test
-players have null Pokémon metadata and image URLs.
+Catalog responses include `id`, `name`, `point_cost`, `dex`, `species`, `form`,
+`types`, `abilities`, `hidden_ability`, `base_stats`, `image_url`, and `megas`.
+`base_stats` has `hp`, `attack`, `defense`, `special_attack`, `special_defense`,
+and `speed`. Each Mega has `id`, `name`, the same detail fields, and an
+`image_url` (null when no sprite exists). Display names include nonempty forms in
+parentheses. Generic test players have null Pokémon metadata and image URLs and
+no Megas; details are also null until an import supplies them.
 
 `dl.asset` stores the PNG bytes and content type under their SHA-256 hash. The
 database checks the hash against the bytes; identical images share one asset.

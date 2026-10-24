@@ -342,10 +342,22 @@ def create_app(settings: Settings | None = None):
 
     @app.get("/api/draftables", tags=["reads"])
     async def draftables(user: Reader):
+        # base_stats is NULL until a catalog import supplies Showdown details.
+        details = (
+            "{0}.types, {0}.abilities, {0}.hidden_ability, "
+            "CASE WHEN {0}.hp IS NOT NULL THEN json_build_object('hp', {0}.hp, "
+            "'attack', {0}.attack, 'defense', {0}.defense, "
+            "'special_attack', {0}.special_attack, 'special_defense', {0}.special_defense, "
+            "'speed', {0}.speed) END AS base_stats, "
+            "'/images/' || {0}.image_hash AS image_url"
+        )
         return await app.state.db.read(
             user,
-            "SELECT id, name, point_cost, dex, species, form, "
-            "'/images/' || image_hash AS image_url FROM dl.draftable ORDER BY id",
+            f"SELECT d.id, d.name, d.point_cost, d.dex, d.species, d.form, {details.format('d')}, "
+            "coalesce((SELECT json_agg(m ORDER BY m.id) FROM ("
+            f"SELECT me.id, me.name, {details.format('me')} FROM dl.mega_evolution me "
+            "WHERE me.draftable_id = d.id) m), '[]') AS megas "
+            "FROM dl.draftable d ORDER BY d.id",
         )
 
     # Sign-in supplies the trusted transaction identity; PostgreSQL RLS enforces

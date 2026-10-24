@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import {
   ArrowDown,
   ArrowDownWideNarrow,
-  ArrowRight,
   ArrowUp,
   Bookmark,
   Check,
@@ -19,8 +18,15 @@ import type { Draftable, LeagueSnapshot } from '../lib/types'
 import type { FavoritesListSnapshot } from '../lib/favoritesTypes'
 import type { FavoritesController } from '../lib/useFavorites'
 import { Modal } from './Modal'
+import { PointsRibbon, TypePills } from './PokemonParts'
 
-export function PokemonImage({ item, className = '' }: { item: Draftable; className?: string }) {
+export function PokemonImage({
+  item,
+  className = '',
+}: {
+  item: Pick<Draftable, 'name' | 'image_url'>
+  className?: string
+}) {
   return (
     <img
       className={className}
@@ -36,6 +42,18 @@ export function PokemonImage({ item, className = '' }: { item: Draftable; classN
 }
 
 type ListDialog = { kind: 'create' } | { kind: 'rename' | 'delete'; list: FavoritesListSnapshot }
+
+type SearchFilter = { kind: 'type' | 'ability' | 'mega'; value: string; label: string }
+
+const MEGA_FILTER: SearchFilter = { kind: 'mega', value: 'mega', label: 'Has Mega Evolution' }
+const filterKey = (filter: SearchFilter) => `${filter.kind}:${filter.value}`
+
+function matchesFilter(item: Draftable, filter: SearchFilter) {
+  if (filter.kind === 'type') return !!item.types?.includes(filter.value)
+  if (filter.kind === 'ability')
+    return !!item.abilities?.includes(filter.value) || item.hidden_ability === filter.value
+  return item.megas.length > 0
+}
 
 export function Catalog({
   catalog,
@@ -53,12 +71,14 @@ export function Catalog({
   onSelect: (item: Draftable) => void
 }) {
   const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState<SearchFilter[]>([])
+  const [suggestOpen, setSuggestOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
   const [tab, setTab] = useState<'available' | 'all' | 'favorites' | 'legacy'>(
     snapshot ? 'available' : 'all',
   )
   const [sort, setSort] = useState('dex')
   const [affordable, setAffordable] = useState(false)
-  const [limit, setLimit] = useState(12)
   const [dialog, setDialog] = useState<ListDialog | null>(null)
   const [name, setName] = useState('')
   const list = favorites.state
@@ -72,6 +92,51 @@ export function Catalog({
   )
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
   const remaining = activeTeam?.points_remaining
+  const allFilters = useMemo(() => {
+    const types = new Set<string>()
+    const abilities = new Set<string>()
+    let anyMega = false
+    for (const item of catalog) {
+      item.types?.forEach((type) => types.add(type))
+      item.abilities?.forEach((ability) => abilities.add(ability))
+      if (item.hidden_ability) abilities.add(item.hidden_ability)
+      anyMega ||= item.megas.length > 0
+    }
+    const sorted = (values: Set<string>) => [...values].sort((a, b) => a.localeCompare(b))
+    return [
+      ...sorted(types).map((value): SearchFilter => ({
+        kind: 'type',
+        value,
+        label: `${value} type`,
+      })),
+      ...sorted(abilities).map((value): SearchFilter => ({
+        kind: 'ability',
+        value,
+        label: `${value} ability`,
+      })),
+      ...(anyMega ? [MEGA_FILTER] : []),
+    ]
+  }, [catalog])
+  const suggestions = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return []
+    const active = new Set(filters.map(filterKey))
+    return allFilters
+      .filter(
+        (filter) => !active.has(filterKey(filter)) && filter.label.toLowerCase().includes(query),
+      )
+      .slice(0, 8)
+  }, [allFilters, filters, search])
+  const showSuggestions = suggestOpen && suggestions.length > 0
+  const addFilter = (filter: SearchFilter) => {
+    setFilters((current) => [...current, filter])
+    setSearch('')
+    setSuggestOpen(false)
+    setHighlight(0)
+  }
+  const removeFilter = (filter: SearchFilter) => {
+    setFilters((current) => current.filter((entry) => filterKey(entry) !== filterKey(filter)))
+  }
   const filtered = useMemo(
     () =>
       catalog
@@ -82,6 +147,7 @@ export function Catalog({
             (tab !== 'favorites' || saved.has(item.id)) &&
             (tab !== 'legacy' || legacyWatchlist.includes(item.id)) &&
             (!affordable || remaining === undefined || item.point_cost <= remaining) &&
+            filters.every((filter) => matchesFilter(item, filter)) &&
             (!query ||
               item.name.toLowerCase().includes(query) ||
               String(item.dex ?? '').includes(query))
@@ -98,7 +164,19 @@ export function Catalog({
                   ? a.name.localeCompare(b.name)
                   : (a.dex ?? a.id) - (b.dex ?? b.id) || a.id - b.id,
         ),
-    [catalog, search, tab, affordable, remaining, drafted, saved, savedIds, sort, legacyWatchlist],
+    [
+      catalog,
+      search,
+      filters,
+      tab,
+      affordable,
+      remaining,
+      drafted,
+      saved,
+      savedIds,
+      sort,
+      legacyWatchlist,
+    ],
   )
   const staleDialog =
     dialog &&
@@ -157,7 +235,6 @@ export function Catalog({
             disabled={locked || !favorites.lists.length}
             onChange={(event) => {
               favorites.selectList(Number(event.target.value))
-              setLimit(12)
             }}
           >
             {!favorites.lists.length && (
@@ -234,7 +311,6 @@ export function Catalog({
             onClick={() => {
               setTab(value)
               setSort(value === 'favorites' ? 'saved' : 'dex')
-              setLimit(12)
             }}
           >
             {value === 'favorites' && <Bookmark size={14} />}
@@ -249,7 +325,6 @@ export function Catalog({
             onClick={() => {
               setTab('legacy')
               setSort('dex')
-              setLimit(12)
             }}
           >
             Browser watchlist <span>{legacyWatchlist.length}</span>
@@ -267,18 +342,65 @@ export function Catalog({
           <Search size={18} />
           <input
             type="search"
+            role="combobox"
             aria-label="Search Pokémon by name or Pokédex number"
-            placeholder="Search Pokémon or Pokédex number..."
+            aria-autocomplete="list"
+            aria-expanded={showSuggestions}
+            aria-controls="catalog-search-suggestions"
+            aria-activedescendant={showSuggestions ? `catalog-suggestion-${highlight}` : undefined}
+            placeholder="Search name, Pokédex number, type, or ability..."
             value={search}
             onChange={(event) => {
               setSearch(event.target.value)
-              setLimit(12)
+              setSuggestOpen(true)
+              setHighlight(0)
+            }}
+            onFocus={() => setSuggestOpen(true)}
+            onBlur={() => setSuggestOpen(false)}
+            onKeyDown={(event) => {
+              if (event.key === 'Backspace' && !search && filters.length) {
+                removeFilter(filters[filters.length - 1])
+              } else if (!showSuggestions) {
+                return
+              } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault()
+                const step = event.key === 'ArrowDown' ? 1 : -1
+                setHighlight((highlight + step + suggestions.length) % suggestions.length)
+              } else if (event.key === 'Enter') {
+                event.preventDefault()
+                addFilter(suggestions[Math.min(highlight, suggestions.length - 1)])
+              } else if (event.key === 'Escape') {
+                setSuggestOpen(false)
+              }
             }}
           />
           {search && (
             <button className="icon-button" aria-label="Clear search" onClick={() => setSearch('')}>
               <X size={15} />
             </button>
+          )}
+          {showSuggestions && (
+            <ul
+              className="search-suggestions"
+              id="catalog-search-suggestions"
+              role="listbox"
+              aria-label="Search filters"
+            >
+              {suggestions.map((filter, index) => (
+                <li
+                  key={filterKey(filter)}
+                  id={`catalog-suggestion-${index}`}
+                  role="option"
+                  aria-selected={index === highlight}
+                  className={index === highlight ? 'highlighted' : ''}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setHighlight(index)}
+                  onClick={() => addFilter(filter)}
+                >
+                  {filter.label}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
         <label className="sort-control">
@@ -288,7 +410,6 @@ export function Catalog({
             value={sort}
             onChange={(event) => {
               setSort(event.target.value)
-              setLimit(12)
             }}
           >
             {tab === 'favorites' && <option value="saved">Saved order</option>}
@@ -305,72 +426,82 @@ export function Catalog({
           disabled={!activeTeam}
           onClick={() => {
             setAffordable(!affordable)
-            setLimit(12)
           }}
         >
           <SlidersHorizontal size={16} />
           <span>In budget</span>
         </button>
       </div>
+      {filters.length > 0 && (
+        <div className="search-filter-chips" aria-label="Active search filters">
+          {filters.map((filter) => (
+            <span className="search-filter-chip" key={filterKey(filter)}>
+              {filter.label}
+              <button
+                aria-label={`Remove ${filter.label} filter`}
+                onClick={() => removeFilter(filter)}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          <button className="button text-button" onClick={() => setFilters([])}>
+            Clear filters
+          </button>
+        </div>
+      )}
       <div className="pokemon-grid">
-        {filtered.slice(0, limit).map((item) => {
+        {filtered.map((item) => {
           const taken = drafted.has(item.id)
           const overBudget = remaining !== undefined && item.point_cost > remaining
           const isSaved = saved.has(item.id)
           const position = savedIds.indexOf(item.id)
           return (
             <article className={`pokemon-card ${taken ? 'taken' : ''}`} key={item.id}>
-              <div className="pokemon-card-top">
-                <span className="dex-number">
-                  {item.dex !== null ? `#${String(item.dex).padStart(3, '0')}` : 'DRAFTABLE'}
-                </span>
-                <button
-                  className={`bookmark-button ${isSaved ? 'saved' : ''}`}
-                  aria-label={`${isSaved ? 'Remove' : 'Add'} ${item.name} ${isSaved ? 'from' : 'to'} ${list?.name ?? 'favorites'}`}
-                  title={
-                    list
-                      ? `${isSaved ? 'Remove from' : 'Save to'} ${list.name}`
-                      : 'Create a favorites list first'
-                  }
-                  aria-pressed={isSaved}
-                  disabled={cannotEdit}
-                  onClick={() => toggleFavorite(item.id)}
-                >
-                  <Bookmark size={17} fill={isSaved ? 'currentColor' : 'none'} />
-                </button>
-              </div>
               <button
-                className="pokemon-main"
+                className={`pokemon-main ${item.megas.length ? '' : 'no-megas'}`}
                 onClick={() => onSelect(item)}
-                aria-label={`View ${item.name}, ${item.point_cost} points${taken ? ', already drafted' : ''}`}
+                aria-label={`View ${item.name}, ${item.point_cost} points${taken ? ', already drafted' : overBudget ? ', over budget' : ''}`}
               >
                 <div className={`pokemon-art color-${(item.dex ?? item.id) % 6}`}>
                   <PokemonImage item={item} />
+                  <PointsRibbon points={item.point_cost} overBudget={overBudget && !taken} />
                 </div>
                 <h3>{item.species || item.name}</h3>
-                <p className="pokemon-form">
-                  {item.form || (item.dex !== null ? 'Original form' : 'Draftable')}
-                </p>
+                <p className="pokemon-form">{item.form}</p>
+                {item.types && <TypePills types={item.types} />}
+                {item.megas.length > 0 && (
+                  <div className="card-megas">
+                    <span className="card-megas-label">Mega Evolutions</span>
+                    {item.megas.map((mega) => (
+                      <span className="card-mega" key={mega.id}>
+                        <span>{mega.name}</span>
+                        <TypePills types={mega.types} small />
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {taken && (
+                  <span className="drafted-badge">
+                    <Check size={13} />
+                    Drafted
+                  </span>
+                )}
               </button>
-              <div className="pokemon-card-footer">
-                <span className={`price ${overBudget && !taken ? 'over-budget' : ''}`}>
-                  {item.point_cost}
-                  <small>pts</small>
-                </span>
-                <button className="pick-link" onClick={() => onSelect(item)}>
-                  {taken ? (
-                    <>
-                      <Check size={13} />
-                      Drafted
-                    </>
-                  ) : (
-                    <>
-                      View {snapshot ? 'pick' : 'details'}
-                      <ArrowRight size={14} />
-                    </>
-                  )}
-                </button>
-              </div>
+              <button
+                className={`bookmark-button card-bookmark ${isSaved ? 'saved' : ''}`}
+                aria-label={`${isSaved ? 'Remove' : 'Add'} ${item.name} ${isSaved ? 'from' : 'to'} ${list?.name ?? 'favorites'}`}
+                title={
+                  list
+                    ? `${isSaved ? 'Remove from' : 'Save to'} ${list.name}`
+                    : 'Create a favorites list first'
+                }
+                aria-pressed={isSaved}
+                disabled={cannotEdit}
+                onClick={() => toggleFavorite(item.id)}
+              >
+                <Bookmark size={17} fill={isSaved ? 'currentColor' : 'none'} />
+              </button>
               {tab === 'favorites' && sort === 'saved' && (
                 <div className="favorite-order">
                   <span>Priority {position + 1}</span>
@@ -420,6 +551,7 @@ export function Catalog({
                 if (tab === 'favorites' && !list) openDialog({ kind: 'create' })
                 else {
                   setSearch('')
+                  setFilters([])
                   setAffordable(false)
                   setTab('all')
                   setSort('dex')
@@ -432,15 +564,7 @@ export function Catalog({
         )}
       {filtered.length > 0 && (
         <div className="catalog-bottom">
-          <span className="muted">
-            Showing {Math.min(limit, filtered.length)} of {filtered.length} Pokémon
-          </span>
-          {limit < filtered.length && (
-            <button className="button secondary" onClick={() => setLimit(limit + 12)}>
-              Load more
-              <ArrowRight size={15} />
-            </button>
-          )}
+          <span className="muted">Showing {filtered.length} Pokémon</span>
         </div>
       )}
       {dialog && (

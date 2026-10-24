@@ -129,13 +129,14 @@ def test_draft_events_upgrade_preserves_populated_data_and_retires_account_wakeu
         for channel in (account_channel, draft_channel):
             conn.execute(sql.SQL("LISTEN {}").format(sql.Identifier(channel)))
 
-        assert migrate(database.admin, MIGRATION_DIRECTORY, schema="dl", role="dl_owner") == [
-            "0005_draft_events.sql"
-        ]
+        # Exercise this upgrade independently of later feature migrations.
+        source = MIGRATION_DIRECTORY / "0005_draft_events.sql"
+        (tmp_path / source.name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        assert migrate(database.admin, tmp_path, schema="dl", role="dl_owner") == [source.name]
         assert baseline_rows(conn) == before
         assert conn.execute("SELECT * FROM dl.favorites_list").fetchall() == favorite_before
         assert list(conn.notifies(timeout=0.05)) == []
-        assert migrate(database.admin, MIGRATION_DIRECTORY, schema="dl", role="dl_owner") == []
+        assert migrate(database.admin, tmp_path, schema="dl", role="dl_owner") == []
 
         call_as_commissioner(
             database, "SELECT dl.rename_favorites_list(%s, %s, %s)", (favorites, 0, "Renamed"),

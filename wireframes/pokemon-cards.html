@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wireframes: Pokémon catalog card and detail pop-out</title>
+<style>
+  :root {
+    --ink: #2b2b2b; --muted: #777; --line: #9a9a9a; --fill: #ececec; --paper: #fafafa;
+    --note: #3466c2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px; background: var(--paper); color: var(--ink);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  h2 { margin: 40px 0 6px; font-size: 18px; }
+  .lede { margin: 0 0 8px; color: var(--muted); max-width: 70ch; }
+  .note {
+    color: var(--note); font-size: 13px; font-style: italic; margin: 4px 0 0;
+  }
+  .note b { font-style: normal; }
+  .legend { display: flex; gap: 20px; flex-wrap: wrap; margin: 8px 0 20px; color: var(--muted);
+    font-size: 13px; }
+  .num {
+    display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--note); color: #fff; font: 700 11px/1 system-ui; font-style: normal;
+    vertical-align: middle;
+  }
+
+  /* ---------- Catalog card ---------- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
+  .card {
+    position: relative; border: 2px solid var(--ink); border-radius: 10px; background: #fff;
+    display: flex; flex-direction: column;
+  }
+  .card:hover, .card:focus-within { outline: 3px dashed var(--note); outline-offset: 3px; }
+  .card-main {
+    flex: 1; border: 0; background: none; padding: 14px; text-align: left; cursor: pointer;
+    font: inherit; color: inherit; display: flex; flex-direction: column; gap: 10px;
+    border-radius: 10px;
+  }
+  .card-main:focus-visible { outline: none; }
+  .card .sprite { width: 100%; height: 120px; border-radius: 8px; background: var(--fill); }
+  .card .name { margin: 0; font-size: 17px; font-weight: 700; }
+  .card .form { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+  .card .art { height: 120px; aspect-ratio: auto; }
+  /* Catalog card: top-left, clear of the points ribbon. The pop-out's copy sits inline. */
+  .favorite {
+    position: absolute; top: 20px; left: 20px; width: 34px; height: 34px; border-radius: 50%;
+    border: 1.5px solid var(--ink); background: #fff; font-size: 18px; line-height: 1;
+    cursor: pointer; display: grid; place-items: center;
+  }
+  .favorite[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .favorite-inline .favorite { position: static; }
+
+  /* ---------- Points ribbon ---------- */
+  .sprite-wrap { position: relative; }
+  /* Banner wrapping past the card's right edge (card padding is 14px + 2px border). */
+  .pts-ribbon {
+    position: absolute; right: -22px; bottom: 10px; display: flex; align-items: baseline; gap: 4px;
+    background: var(--ink); color: #fff; padding: 5px 14px; border-radius: 4px 0 0 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .pts-ribbon b { font-size: 22px; line-height: 1; font-weight: 800; }
+  .pts-ribbon small {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700;
+  }
+  /* The fold: a dark triangle under the right end, as if the ribbon wraps behind the card. */
+  .pts-ribbon::after {
+    content: ''; position: absolute; right: 0; bottom: -6px; border-style: solid;
+    border-width: 6px 6px 0 0; border-color: #000 transparent transparent transparent;
+  }
+  .head .pts-ribbon { right: -10px; }
+  .head .pts-ribbon::after { display: none; }
+  .sprite { display: block; object-fit: contain; }
+  .types { display: flex; gap: 6px; flex-wrap: wrap; }
+  .type {
+    border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .04em; background: var(--fill);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / .18);
+  }
+  .megas { margin-top: auto; border-top: 1.5px dashed var(--line); padding-top: 8px; }
+  .megas-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .mega-chip { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 13px; }
+  .mega-chip .types .type { font-size: 10px; padding: 0 7px; }
+  .no-mega { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .pin { position: absolute; top: -9px; }
+
+  /* ---------- Pop-out ---------- */
+  .backdrop {
+    position: fixed; inset: 0; background: rgb(0 0 0 / .35); display: none;
+    align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto;
+  }
+  .backdrop.open { display: flex; }
+  .sheet {
+    width: min(720px, 100%); background: #fff; border: 2px solid var(--ink); border-radius: 12px;
+    padding: 20px 22px 24px; position: relative;
+  }
+  .sheet-static { position: static; margin-top: 12px; }
+  .close {
+    position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border-radius: 6px;
+    border: 1.5px solid var(--ink); background: #fff; font-size: 18px; cursor: pointer;
+  }
+  .head { display: grid; grid-template-columns: 150px 1fr; gap: 18px; align-items: start; }
+  .art {
+    aspect-ratio: 1; border: 2px dashed var(--line); border-radius: 8px; background:
+      linear-gradient(45deg, transparent 49%, var(--line) 49.5% 50.5%, transparent 51%),
+      linear-gradient(-45deg, transparent 49%, var(--line) 49.5% 50.5%, transparent 51%), var(--fill);
+    display: grid; place-items: end center; padding-bottom: 6px; font-size: 11px; color: var(--muted);
+    text-align: center;
+  }
+  .head .sprite { width: 100%; aspect-ratio: 1; border-radius: 8px; background: var(--fill); }
+  .dex { font-size: 13px; color: var(--muted); margin: 0; }
+  .sheet h3 { margin: 0; font-size: 24px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 18px 0 0; border-bottom: 2px solid var(--ink); }
+  .tab {
+    border: 2px solid var(--ink); border-bottom: none; border-radius: 8px 8px 0 0; background: var(--fill);
+    padding: 6px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    margin-bottom: -2px;
+  }
+  .tab[aria-selected="true"] { background: #fff; }
+  .panel { padding-top: 14px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 22px; }
+  .section-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    margin: 0 0 6px;
+  }
+  .abilities { list-style: none; margin: 0 0 14px; padding: 0; }
+  .abilities li { border: 1.5px solid var(--line); border-radius: 6px; padding: 5px 9px; margin-bottom: 5px; font-size: 14px; }
+  .stats { display: grid; grid-template-columns: 62px 34px 1fr; gap: 6px 8px; align-items: center; font-size: 13px; }
+  .stats .label { color: var(--muted); }
+  .stats .value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .bar { height: 10px; border: 1.5px solid var(--ink); border-radius: 3px; background: #fff; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: repeating-linear-gradient(45deg, #555 0 3px, #888 3px 6px); }
+  .delta { font-size: 11px; color: var(--note); }
+  .total { border-top: 1.5px dashed var(--line); padding-top: 6px; }
+  .footer {
+    margin-top: 18px; border-top: 1.5px dashed var(--line); padding-top: 12px; display: flex;
+    justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: 13px;
+  }
+  .ghost-btn { border: 1.5px dashed var(--line); border-radius: 6px; padding: 7px 14px; color: var(--muted); }
+  @media (max-width: 560px) {
+    body { padding: 16px; }
+    .head, .panel { grid-template-columns: 1fr; }
+    .art, .head .sprite { width: 120px; }
+  }
+</style>
+</head>
+<body>
+<h1>Wireframes: Pokémon catalog card &amp; detail pop-out</h1>
+<p class="lede">Low-fidelity layout only. Type colors are final; other colors, icons, and styling are not
+  decided here. Sample data is real data from <code>pokemon_details.json</code> (the saved Showdown snapshot), and
+  sprites load from <code>showdown/sprites</code>.</p>
+<div class="legend">
+  <span><span class="num">1</span> numbered notes explain layout decisions</span>
+  <span>Dashed box = placeholder / existing feature</span>
+</div>
+
+<h2>1. Catalog card</h2>
+<p class="lede">Shows the sprite, point value, name, type(s), Mega Evolutions, and a favorite button. Click a card to
+  open its pop-out; the favorite button works on its own without opening it.</p>
+<div class="grid" id="grid"></div>
+<p class="note"><span class="num">1</span> <b>Sprite</b> at the top, with the <b>favorite / add to list</b> button in its
+  top-left corner (★ = saved to the selected favorites list, ☆ = not saved). Top-left keeps it diagonally opposite the
+  points ribbon, so the two never crowd each other. It is a separate button, so saving never opens the pop-out.</p>
+<p class="note"><span class="num">2</span> <b>Name</b> is the species; a non-base form (Alolan, Female, …) sits on a
+  second line so cards stay the same width.</p>
+<p class="note"><span class="num">3</span> <b>Types</b> as colored pills, in Showdown order (primary first). Text is dark or
+  white, whichever is easier to read on that type's color.</p>
+<p class="note"><span class="num">4</span> <b>Mega Evolutions</b> list each Mega by name with its own types, since Megas
+  can change type (e.g. Mega Charizard X becomes Fire/Dragon). Pokémon without a Mega show "No Mega Evolution" so every
+  card has the same structure.</p>
+<p class="note"><span class="num">5</span> <b>Point value</b> on a ribbon in the sprite's bottom-right corner. It wraps past
+  the card edge with a folded tail, so it reads as "attached" to the card rather than floating on the art.</p>
+
+<h2>2. Detail pop-out (opened from a card)</h2>
+<p class="lede">Static copy of the pop-out for review; the live version opens over the page when you click a card.</p>
+<div id="static-sheet"></div>
+<p class="note"><b>Sprite</b> carries the same points ribbon as the card, so the cost looks the same in both places.
+  A Mega costs the same as its base Pokémon, so the ribbon stays put on every tab.</p>
+<p class="note"><span class="num">6</span> <b>Form tabs</b>: the base form first, then one tab per Mega. Switching tabs
+  swaps the sprite, types, abilities, and stats in place, so Megas use the same layout. Tabs are hidden when there is no Mega.
+  Megas without a sprite yet (e.g. Mega Meowstic) show a placeholder.</p>
+<p class="note"><span class="num">7</span> <b>Abilities</b>: one plain list. Hidden abilities are not marked, since
+  Champions treats them like any other ability. Megas have exactly one ability.</p>
+<p class="note"><span class="num">8</span> <b>Base stats</b>: six bars on a shared 0–255 scale, plus the total. On a Mega tab,
+  the small blue number shows the change from the base form (e.g. +46 Attack).</p>
+<p class="note"><span class="num">9</span> <b>Footer</b> repeats the points next to the draft action, where the decision
+  is made. The favorite button here mirrors the card's, so it stays in sync.</p>
+
+<div class="backdrop" id="backdrop" role="presentation">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="live-title" id="live-sheet"></div>
+</div>
+
+<script>
+// Sample entries copied from pokemon_details.json (abbreviated to the fields shown).
+const S = (hp, attack, defense, special_attack, special_defense, speed) =>
+  ({ hp, attack, defense, special_attack, special_defense, speed })
+// sprite = file name in showdown/sprites/home-centered; null when no sprite exists yet.
+const POKEMON = [
+  { dex: 6, species: 'Charizard', form: '', points: 22, types: ['Fire', 'Flying'], sprite: 'charizard',
+    abilities: ['Blaze'], hidden_ability: 'Solar Power', base_stats: S(78, 84, 78, 109, 85, 100),
+    megas: [
+      { name: 'Mega Charizard X', types: ['Fire', 'Dragon'], abilities: ['Tough Claws'], hidden_ability: null,
+        base_stats: S(78, 130, 111, 130, 85, 100), sprite: 'charizard-megax' },
+      { name: 'Mega Charizard Y', types: ['Fire', 'Flying'], abilities: ['Drought'], hidden_ability: null,
+        base_stats: S(78, 104, 78, 159, 115, 100), sprite: 'charizard-megay' },
+    ] },
+  { dex: 3, species: 'Venusaur', form: '', points: 16, types: ['Grass', 'Poison'], sprite: 'venusaur',
+    abilities: ['Overgrow'], hidden_ability: 'Chlorophyll', base_stats: S(80, 82, 83, 100, 100, 80),
+    megas: [{ name: 'Mega Venusaur', types: ['Grass', 'Poison'], abilities: ['Thick Fat'], hidden_ability: null,
+      base_stats: S(80, 100, 123, 122, 120, 80), sprite: 'venusaur-mega' }] },
+  { dex: 26, species: 'Raichu', form: 'Alolan', points: 3, types: ['Electric', 'Psychic'], sprite: 'raichu-alola',
+    abilities: ['Surge Surfer'], hidden_ability: null, base_stats: S(60, 85, 50, 95, 85, 110), megas: [] },
+  { dex: 678, species: 'Meowstic', form: 'Female', points: 7, types: ['Psychic'], sprite: 'meowstic-f',
+    abilities: ['Keen Eye', 'Infiltrator'], hidden_ability: 'Competitive', base_stats: S(74, 48, 76, 83, 81, 104),
+    megas: [{ name: 'Mega Meowstic', types: ['Psychic'], abilities: ['Trace'], hidden_ability: null,
+      base_stats: S(74, 48, 76, 143, 101, 124), sprite: null }] },
+  { dex: 25, species: 'Pikachu', form: '', points: 2, types: ['Electric'], sprite: 'pikachu',
+    abilities: ['Static'], hidden_ability: 'Lightning Rod', base_stats: S(35, 55, 40, 50, 50, 90), megas: [] },
+]
+const TYPE_COLORS = {
+  Normal: '#A8A878', Fighting: '#C03028', Flying: '#A890F0', Poison: '#A040A0',
+  Ground: '#E0C068', Rock: '#B8A038', Bug: '#A8B820', Ghost: '#705898',
+  Steel: '#B8B8D0', Fire: '#F08030', Water: '#6890F0', Grass: '#78C850',
+  Electric: '#F8D030', Psychic: '#F85888', Ice: '#98D8D8', Dragon: '#7038F8',
+  Dark: '#705848', Fairy: '#EE99AC',
+}
+const STAT_LABELS = { hp: 'HP', attack: 'Attack', defense: 'Defense', special_attack: 'Sp. Atk',
+  special_defense: 'Sp. Def', speed: 'Speed' }
+const DARK_TEXT = '#1d1d1d'
+const favorites = new Set()
+const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+
+// WCAG relative luminance; choose whichever text color has more contrast with the pill.
+function luminance(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+const DARK_LUMINANCE = luminance(DARK_TEXT)
+function textColor(hex) {
+  const l = luminance(hex)
+  return (l + 0.05) / (DARK_LUMINANCE + 0.05) >= 1.05 / (l + 0.05) ? DARK_TEXT : '#fff'
+}
+const pill = (type) => {
+  const color = TYPE_COLORS[type]
+  return color
+    ? `<span class="type" style="background:${color};color:${textColor(color)}">${esc(type)}</span>`
+    : `<span class="type">${esc(type)}</span>`
+}
+const pills = (types) => `<div class="types">${types.map(pill).join('')}</div>`
+const sprite = (form, label) => form.sprite
+  ? `<img class="sprite" src="../showdown/sprites/home-centered/${form.sprite}.png" alt="${esc(label)}" loading="lazy">`
+  : '<div class="art">No sprite yet — placeholder</div>'
+const favoriteButton = (p, index) => {
+  const saved = favorites.has(index)
+  return `<button class="favorite" data-favorite="${index}" aria-pressed="${saved}"
+    aria-label="${saved ? 'Remove' : 'Add'} ${esc(p.species)}${p.form ? ' (' + esc(p.form) + ')' : ''} ${saved ? 'from' : 'to'} favorites"
+    title="${saved ? 'Remove from' : 'Save to'} favorites list">${saved ? '★' : '☆'}</button>`
+}
+
+const ribbon = (p) => `<div class="pts-ribbon"><b>${p.points}</b><small>pts</small></div>`
+
+function card(p, index) {
+  const pin = (n) => (index === 0 ? ` <span class="num">${n}</span>` : '')
+  const label = `${esc(p.species)}${p.form ? ' (' + esc(p.form) + ')' : ''}`
+  const megas = p.megas.length
+    ? p.megas.map((m) => `<div class="mega-chip"><span>${esc(m.name)}</span>${pills(m.types)}</div>`).join('')
+    : '<div class="no-mega">No Mega Evolution</div>'
+  return `<article class="card">
+    <button class="card-main" data-index="${index}" aria-haspopup="dialog"
+      aria-label="View ${label}, ${p.points} points">
+      <div class="sprite-wrap">${sprite(p, p.species)}${ribbon(p)}</div>
+      <div><p class="name">${esc(p.species)}${pin(2)}</p>
+      ${p.form ? `<p class="form">${esc(p.form)}</p>` : ''}</div>
+      <div style="display:flex;align-items:center;gap:6px">${pills(p.types)}${pin(3)}</div>
+      <div class="megas"><div class="megas-label">Mega Evolutions${pin(4)}</div>${megas}</div>
+    </button>
+    ${favoriteButton(p, index)}
+    ${index === 0 ? '<span class="num" style="position:absolute;top:28px;left:60px">1</span>' +
+      '<span class="num" style="position:absolute;top:118px;left:6px">5</span>' : ''}
+  </article>`
+}
+
+function panel(form, base) {
+  const stats = Object.entries(STAT_LABELS).map(([key, label]) => {
+    const value = form.base_stats[key]
+    const change = form === base ? 0 : value - base.base_stats[key]
+    return `<span class="label">${label}</span><span class="value">${value}</span>
+      <span><div class="bar"><span style="width:${(value / 255) * 100}%"></span></div>
+      ${change ? `<span class="delta">${change > 0 ? '+' : ''}${change}</span>` : ''}</span>`
+  }).join('')
+  const total = Object.values(form.base_stats).reduce((a, b) => a + b, 0)
+  const baseTotal = Object.values(base.base_stats).reduce((a, b) => a + b, 0)
+  // Champions treats hidden abilities like any other, so they join the same list.
+  const abilities = [...form.abilities, form.hidden_ability].filter(Boolean)
+    .map((a) => `<li>${esc(a)}</li>`).join('')
+  return `<div class="panel">
+    <div>
+      <p class="section-label">Type</p>${pills(form.types)}
+      <p class="section-label" style="margin-top:14px">Abilities <span class="num">7</span></p>
+      <ul class="abilities">${abilities}</ul>
+    </div>
+    <div>
+      <p class="section-label">Base stats <span class="num">8</span></p>
+      <div class="stats">${stats}
+        <span class="label total">Total</span><span class="value total">${total}</span>
+        <span class="total">${form === base ? '' : `<span class="delta">+${total - baseTotal}</span>`}</span>
+      </div>
+    </div>
+  </div>`
+}
+
+function sheet(index, selected, titleId, closable) {
+  const p = POKEMON[index]
+  const forms = [p, ...p.megas]
+  const form = forms[selected]
+  const title = selected ? form.name : p.species
+  const tabs = p.megas.length
+    ? `<div class="tabs" role="tablist">${forms.map((f, i) =>
+        `<button class="tab" role="tab" data-tab="${i}" aria-selected="${i === selected}">${esc(i ? f.name : p.form || 'Base form')}</button>`).join('')}
+        <span class="num" style="align-self:center;margin-left:4px">6</span></div>`
+    : ''
+  return `${closable ? '<button class="close" aria-label="Close">×</button>' : ''}
+    <div class="head">
+      <div class="sprite-wrap">${sprite(form, title)}${ribbon(p)}</div>
+      <div>
+        <p class="dex">#${String(p.dex).padStart(3, '0')}${p.form ? ' · ' + esc(p.form) : ''}</p>
+        <h3 id="${titleId}">${esc(title)}</h3>
+        ${pills(form.types)}
+      </div>
+    </div>
+    ${tabs}
+    ${panel(form, p)}
+    <div class="footer"><span>${p.points} pts <span class="num">9</span></span>
+      <span style="display:flex;gap:10px;align-items:center">
+        <span class="favorite-inline">${favoriteButton(p, index)}</span>
+        <span class="ghost-btn">Existing action: Draft</span></span></div>`
+}
+
+// Each mounted sheet re-renders itself when its tab or a favorite changes.
+const sheets = []
+function mount(container, index, titleId, closable) {
+  let selected = 0
+  const render = () => {
+    container.innerHTML = sheet(index, selected, titleId, closable)
+    container.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => {
+      selected = Number(tab.dataset.tab); render()
+      container.querySelector(`[data-tab="${selected}"]`).focus()
+    }))
+    container.querySelector('.close')?.addEventListener('click', close)
+  }
+  render()
+  sheets.push({ container, index, render })
+}
+
+const grid = document.getElementById('grid')
+const renderGrid = () => { grid.innerHTML = POKEMON.map(card).join('') }
+renderGrid()
+const staticSheet = document.createElement('div')
+staticSheet.className = 'sheet sheet-static'
+document.getElementById('static-sheet').append(staticSheet)
+mount(staticSheet, 0, 'static-title', false)
+
+const backdrop = document.getElementById('backdrop')
+const live = document.getElementById('live-sheet')
+let opener = null
+function close() {
+  backdrop.classList.remove('open')
+  sheets.splice(sheets.findIndex((s) => s.container === live), 1)
+  opener?.grid.querySelector(`[data-index="${opener.index}"]`)?.focus()
+}
+document.addEventListener('click', (event) => {
+  const favorite = event.target.closest('[data-favorite]')
+  if (favorite) {
+    const index = Number(favorite.dataset.favorite)
+    favorites.has(index) ? favorites.delete(index) : favorites.add(index)
+    const host = favorite.closest('.sheet, .grid')
+    renderGrid()
+    sheets.filter((s) => s.index === index).forEach((s) => s.render())
+    // Re-rendering replaced the button, so return focus to its replacement.
+    host.querySelector(`[data-favorite="${index}"]`)?.focus()
+    return
+  }
+  const button = event.target.closest('.card-main')
+  if (!button) return
+  opener = { grid: button.closest('.grid'), index: Number(button.dataset.index) }
+  mount(live, opener.index, 'live-title', true)
+  backdrop.classList.add('open')
+  live.querySelector('.close').focus()
+})
+backdrop.addEventListener('click', (event) => { if (event.target === backdrop) close() })
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && backdrop.classList.contains('open')) close() })
+</script>
+</body>
+</html>

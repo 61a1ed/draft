@@ -32,9 +32,11 @@ import type { Draftable, LeagueSnapshot, Session, Team } from './lib/types'
 import { teamAvatarStyle, teamName } from './lib/teamPresentation'
 import { Catalog, PokemonImage } from './components/Catalog'
 import { Modal } from './components/Modal'
+import { PokemonDetails } from './components/PokemonDetails'
 import { LeagueSetup } from './components/LeagueSetup'
 import { Tournament } from './components/Tournament'
 import { Availability } from './components/Availability'
+import { ThemeToggle } from './components/ThemeToggle'
 
 type View = 'draft' | 'catalog' | 'tournament' | 'availability' | 'teams' | 'activity' | 'settings'
 
@@ -363,6 +365,7 @@ export default function App() {
   if (mode === 'disconnected')
     return (
       <main className="loading-page empty-state">
+        <ThemeToggle className="floating" />
         <img src="/favicon.svg" alt="" />
         <h2>{draft.sessionCheckFailed ? 'We couldn’t load your account' : 'Pokémon Draft'}</h2>
         {!draft.sessionCheckFailed && (
@@ -560,6 +563,7 @@ export default function App() {
             <span className="user-avatar small">
               {initials(session?.user.display_name ?? 'Guest')}
             </span>
+            <ThemeToggle />
           </div>
         </header>
         <main>
@@ -1006,18 +1010,7 @@ export default function App() {
           title={snapshot ? 'Pick details' : 'Pokémon details'}
           onClose={() => setSelected(null)}
         >
-          <div className="pick-preview">
-            <div className={`pokemon-art color-${(selected.item.dex ?? selected.item.id) % 6}`}>
-              <PokemonImage item={selected.item} />
-            </div>
-            <span className="eyebrow">
-              {selected.item.dex !== null
-                ? `POKÉDEX #${String(selected.item.dex).padStart(3, '0')}`
-                : 'DRAFTABLE'}
-            </span>
-            <h2>{selected.item.name}</h2>
-            <p>{selected.item.point_cost} points</p>
-          </div>
+          <PokemonDetails key={selected.item.id} item={selected.item} />
           {snapshot && (
             <div className="pick-summary">
               <span>

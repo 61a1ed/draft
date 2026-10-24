@@ -177,7 +177,9 @@ def run(args):
         else:
             port = args.db_port if args.db_port is not None else 55440
             catalog = load_catalog(
-                PROJECT.parent / "pokemon_catalog.csv", PROJECT.parent / "showdown"
+                PROJECT.parent / "pokemon_catalog.csv",
+                PROJECT.parent / "showdown",
+                PROJECT.parent / "pokemon_details.json",
             )
         if port in (args.api_port, args.web_port):
             raise RuntimeError("Server ports must differ")
