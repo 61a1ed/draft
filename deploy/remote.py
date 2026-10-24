@@ -460,6 +460,8 @@ def local_check(config):
             raise RuntimeError(f"Install {command} and add it to PATH")
     if not config.catalog_csv.is_file() or not config.image_root.is_dir():
         raise ValueError("CATALOG_CSV and IMAGE_ROOT must identify the local catalog inputs")
+    if config.catalog_details is not None and not config.catalog_details.is_file():
+        raise ValueError("CATALOG_DETAILS must identify the local Showdown details JSON")
     print(f"Configuration valid: {config.name} in {config.region}")
     print(f"Site: {config.public_url}")
     print(f"Google callback: {config.public_url}{config.callback_path}")

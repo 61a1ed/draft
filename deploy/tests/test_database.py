@@ -21,7 +21,7 @@ REVISION = "a" * 40
 def config(tmp_path):
     return SimpleNamespace(
         name="draft", state_dir=tmp_path, catalog_csv=tmp_path / "catalog.csv",
-        image_root=tmp_path / "images",
+        image_root=tmp_path / "images", catalog_details=None,
     )
 
 
@@ -148,7 +148,12 @@ def test_verification_sanitizes_connection_failure_and_restores_environment(tmp_
     assert os.environ["PGPASSWORD"] == "ambient-secret"
 
 
-def test_import_runs_local_files_in_selected_revision_environment(config, monkeypatch):
+@pytest.mark.parametrize("with_details", [False, True])
+def test_import_runs_local_files_in_selected_revision_environment(
+    config, monkeypatch, with_details
+):
+    if with_details:
+        config.catalog_details = config.state_dir / "details.json"
     backend = config.state_dir / "draft_backend"
     backend.mkdir()
 
@@ -164,10 +169,13 @@ def test_import_runs_local_files_in_selected_revision_environment(config, monkey
     database.run_database(config, {}, "import", REVISION)
     args, options = calls[0]
     assert args[2] == str(backend / "scripts/deployment_db.py")
-    assert args[3:] == (
+    expected = (
         "import", "--name", "draft", "--revision", REVISION,
         "--csv", str(config.catalog_csv), "--image-root", str(config.image_root),
     )
+    if with_details:
+        expected += ("--details", str(config.catalog_details))
+    assert args[3:] == expected
     assert options["env"] == {"PGSSLMODE": "verify-ca"}
     assert options["cwd"] == backend
     assert len(calls) == 1

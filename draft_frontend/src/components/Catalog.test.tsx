@@ -245,7 +245,8 @@ describe('catalog cards', () => {
 })
 
 describe('catalog search filters', () => {
-  const searchBox = () => control('Search Pokémon by name or Pokédex number')
+  const searchBox = () =>
+    control('Search Pokémon by name, Pokédex number, type, ability, or move')
   const options = () => renderer!.root.findAllByProps({ role: 'option' }).map(text)
   const option = (label: string) =>
     renderer!.root.findAllByProps({ role: 'option' }).find((node) => text(node) === label)!
@@ -289,6 +290,29 @@ describe('catalog search filters', () => {
         abilities: ['Chlorophyll'],
       },
     ]
+  })
+
+  it.each<[string, string[]]>([
+    [' GRASS ', ['Bulbasaur', 'Oddish']],
+    ['overgrow', ['Bulbasaur']],
+    ['chloro', ['Bulbasaur', 'Oddish']],
+    ['LIGHT SCREEN', ['Bulbasaur', 'Pikachu']],
+    ['water', ['Squirtle']],
+    ['pikachu', ['Pikachu']],
+    ['25', ['Pikachu']],
+    ['missing', []],
+  ])('searches %s without selecting a suggestion', async (query, expected) => {
+    await render()
+    await change(searchBox(), query)
+    expect(cardNames()).toEqual(expected)
+  })
+
+  it('combines typed move searches with selected filters', async () => {
+    await render()
+    await change(searchBox(), 'grass')
+    await click(option('Grass type'))
+    await change(searchBox(), 'light screen')
+    expect(cardNames()).toEqual(['Bulbasaur'])
   })
 
   it('suggests type, ability, move, and Mega filters and combines selected ones', async () => {
@@ -407,7 +431,7 @@ describe('catalog favorites', () => {
     await render()
     await showFavorites()
     await click(button('In budget'))
-    await change(control('Search Pokémon by name or Pokédex number'), 'bulba')
+    await change(control('Search Pokémon by name, Pokédex number, type, ability, or move'), 'bulba')
     expect(cardNames()).toEqual(['Bulbasaur'])
     await click(control('Move Bulbasaur earlier'))
     expect(api.setFavoritesOrder).toHaveBeenCalledWith({

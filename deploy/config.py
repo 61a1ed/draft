@@ -18,6 +18,7 @@ class Config:
     ssh_cidrs: tuple[str, ...] = ()
     catalog_csv: Path | None = None
     image_root: Path | None = None
+    catalog_details: Path | None = None
     oidc_client_id: str = field(default="", repr=False)
     oidc_client_secret: str = field(default="", repr=False)
     callback_path: str = ""
@@ -186,6 +187,10 @@ def load_config(path: str | Path, *, action="check", host=None) -> Config:
         options.update(
             catalog_csv=_path(values, "CATALOG_CSV", path.parent),
             image_root=_path(values, "IMAGE_ROOT", path.parent),
+            catalog_details=(
+                _path(values, "CATALOG_DETAILS", path.parent)
+                if values.get("CATALOG_DETAILS") is not None else None
+            ),
         )
     if action in {
         "check", "create-key", "create-instance", "open-ports", "allocate-ip", "attach-ip",

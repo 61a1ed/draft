@@ -27,6 +27,7 @@ GOOGLE_OIDC_JSON = r"""{
 
 CATALOG_CSV = "../../pokemon_catalog.csv"
 IMAGE_ROOT = "../../showdown"
+CATALOG_DETAILS = "../../pokemon_details.json"  # Types, abilities, stats, Megas, and moves.
 # STATE_DIR = "./draft-preprod"  # Default: deploy/private/NAME; keep it gitignored.
 UV_VERSION = "0.12.20"
 NODE_VERSION = "24.22.0"
