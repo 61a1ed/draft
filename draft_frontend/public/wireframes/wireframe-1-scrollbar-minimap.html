@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wireframe 1 — Scrollbar & Viewport Minimap</title>
+  <style>
+    :root {
+      --bg: #0f0e14;
+      --panel: #16141a;
+      --border: #2b2e43;
+      --purple: #7761d9;
+      --purple-light: #a693f5;
+      --ink: #d5d7e1;
+      --muted: #85889b;
+      --amber: #f2b24c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      padding: 24px 32px;
+    }
+    .top-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .top-nav a { color: var(--purple-light); text-decoration: none; font-weight: 600; }
+    .sim-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: #1d1927;
+      border: 1px solid #3d315b;
+      padding: 12px 18px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    .sim-bar label { font-size: 13px; font-weight: 700; color: #dcd5f8; }
+    .sim-bar input[type="range"] { flex: 1; accent-color: var(--purple); cursor: pointer; }
+    .sim-pill {
+      background: var(--purple);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      min-width: 120px;
+      text-align: center;
+    }
+    /* Sticky Filter Bar + Minimap Strip */
+    .sticky-header {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+    }
+    .controls-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .fake-search {
+      flex: 1;
+      background: #0f0e14;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .clear-btn {
+      background: var(--purple);
+      color: #fff;
+      border: 0;
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    /* THE MINIMAP STRIP */
+    .minimap-wrap {
+      position: relative;
+      background: #121017;
+      border: 1px solid #262235;
+      border-radius: 8px;
+      padding: 8px 10px 4px;
+      user-select: none;
+    }
+    .minimap-label-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 700;
+    }
+    .minimap-bars {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(20, 1fr);
+      gap: 4px;
+      height: 36px;
+      align-items: end;
+    }
+    .mini-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100%;
+      justify-content: flex-end;
+      cursor: pointer;
+    }
+    .mini-bar-shell {
+      width: 100%;
+      background: #231e30;
+      border-radius: 2px 2px 0 0;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+    .mini-bar-Ghost {
+      width: 100%;
+      background: repeating-linear-gradient(
+        -45deg,
+        #2b253a,
+        #2b253a 2px,
+        #1e192a 2px,
+        #1e192a 4px
+      );
+      transition: height 0.2s;
+    }
+    .mini-bar-fill {
+      width: 100%;
+      background: var(--purple);
+      transition: height 0.2s, background 0.2s;
+    }
+    .mini-col.scarce .mini-bar-fill { background: var(--amber); }
+    .mini-cost {
+      font-size: 9px;
+      color: var(--muted);
+      margin-top: 3px;
+      font-variant-numeric: tabular-nums;
+    }
+    /* Viewport Lens */
+    .viewport-lens {
+      position: absolute;
+      top: 22px;
+      bottom: 16px;
+      left: 10px;
+      width: 24%;
+      border: 2px solid var(--purple-light);
+      background: rgba(119, 97, 217, 0.14);
+      border-radius: 5px;
+      pointer-events: none;
+      transition: left 0.08s ease-out, width 0.08s ease-out;
+    }
+    /* Big Board Below */
+    .board-scroll {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 12px;
+      scroll-behavior: smooth;
+    }
+    .tier-col {
+      flex: 0 0 175px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .tier-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #252232;
+    }
+    .tier-head strong { font-size: 16px; }
+    .tier-head span { font-size: 11px; color: var(--muted); }
+    .mon-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 7px;
+      border-radius: 6px;
+      background: #1b1822;
+      margin-bottom: 4px;
+      font-size: 11px;
+    }
+    .mon-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #2f2842;
+      display: grid;
+      place-items: center;
+      font-size: 9px;
+    }
+    .mon-item.taken {
+      opacity: 0.35;
+      text-decoration: line-through;
+      filter: grayscale(1);
+    }
+  </style>
+</head>
+<body>
+  <div class="top-nav">
+    <div><strong>Wireframe 1:</strong> Scrollbar &amp; Viewport Minimap (VS Code / RTS Radar Style)</div>
+    <a href="index.html">← Back to all 5 Wireframes</a>
+  </div>
+
+  <div class="sim-bar">
+    <label for="draftSlider">Simulate Draft Progress:</label>
+    <input id="draftSlider" type="range" min="0" max="90" value="25" />
+    <span class="sim-pill" id="simLabel">Round 3 (25% drafted)</span>
+  </div>
+
+  <div class="sticky-header">
+    <div class="controls-row">
+      <div class="fake-search">🔍 Search name, Pokédex number, type, ability, or move...</div>
+      <button class="clear-btn">Clear filters</button>
+    </div>
+
+    <div class="minimap-wrap">
+      <div class="minimap-label-row">
+        <span>Pool Mana Curve Minimap (Click any bar to jump to tier)</span>
+        <span id="poolTotals">195 / 260 Available · ■ Solid = Left · ▨ Hatched = Drafted</span>
+      </div>
+      <div class="minimap-bars" id="minimapBars"></div>
+      <div class="viewport-lens" id="viewportLens"></div>
+    </div>
+  </div>
+
+  <div class="board-scroll" id="boardScroll"></div>
+
+  <script>
+    // Tiers 20 down to 1 with total counts resembling regulation_m-c_eligible_pokemon.csv
+    const TIERS = [
+      { cost: 20, total: 5, names: ['Flutter Mane', 'Calyrex-I', 'Urshifu-R', 'Miraidon', 'Koraidon'] },
+      { cost: 19, total: 6, names: ['Dragapult', 'Chien-Pao', 'Sneasler', 'Raging Bolt', 'Ogerpon-W', 'Landorus-I'] },
+      { cost: 18, total: 8, names: ['Incineroar', 'Rillaboom', 'Gholdengo', 'Ursaluna-B', 'Archaludon', 'Tornadus', 'Roaring Moon', 'Chi-Yu'] },
+      { cost: 17, total: 12, names: ['Kingambit', 'Amoonguss', 'Clefable', 'Aerodactyl', 'Gouging Fire', 'Iron Hands', 'Walking Wake', 'Zapdos', 'Heatran', 'Kartana', 'Tapu Koko', 'Baxcalibur'] },
+      { cost: 16, total: 14, names: ['Venusaur', 'Ninetales-A', 'Pelipper', 'Dondozo', 'Volcarona', 'Annihilape', 'Iron Valiant', 'Garchomp', 'Latios', 'Cresselia', 'Celesteela', 'ferrothorn', 'Scizor', 'Tyranitar'] },
+      { cost: 15, total: 15, names: ['Arcanine-H', 'Gyarados', 'Tauros-A', 'Ting-Lu', 'gliscor', 'Palafin', 'Meowscarada', 'Primarina', 'Porygon2', 'Hydreigon', 'Salamence', 'Aegislash', 'Metagross', 'Excadrill', 'Suicune'] },
+      { cost: 14, total: 11, names: ['Blastoise', 'Ninetales', 'Tauros-B', 'Weavile', 'Grimmsnarl', 'Torkoal', 'Garganacl', 'Corviknight', 'Rotom-W', 'Togekiss', 'Mamoswine'] },
+      { cost: 13, total: 9, names: ['Arcanine', 'Whimsicott', 'Farigiraf', 'Indeedee-F', 'Bisharp', 'Milotic', 'Chandelure', 'Hatterene', 'Breloom'] },
+      { cost: 12, total: 16, names: ['Slowbro', 'Sinistcha', 'Politoed', 'Gothitelle', 'Talonflame', 'Mimikyu', 'Lucario', 'Krookodile', 'Azumarill', 'Gastrodon', 'Darmanitan', 'Empoleon', 'Infernape', 'Roserade', 'hippowdon', 'Magnezone'] },
+      { cost: 11, total: 13, names: ['Alakazam', 'Tauros-C', 'Smeargle', 'Murkrow', 'comfey', 'Goodra-H', 'Snorlax', 'Gengar', 'Mandibuzz', 'Skarmory', 'Swampert', 'Blaziken', 'Sceptile'] },
+      { cost: 10, total: 12, names: ['Slowbro-G', 'Pinsir', 'Kilowattrel', 'Maushold', 'Tsareena', 'Tatsugiri', 'Armarouge', 'Ceruledge', 'Umbreon', 'Espeon', 'Flygon', 'Haxorus'] },
+      { cost: 9, total: 10, names: ['Tauros', 'Abomasnow', 'Bronzong', 'Klefki', 'Sableye', 'Reuniclus', 'Conkeldurr', 'Noivern', 'Dragalge', 'Clawitzer'] },
+      { cost: 8, total: 11, names: ['Pidgeot', 'Raichu', 'Vaporeon', ' Gallade', 'Gardevoir', 'Toxtricity', 'Obstagoon', 'Ribombee', 'Araquanid', 'Mudsdale', 'Salazzle'] },
+      { cost: 7, total: 13, names: ['Beedrill', 'Victreebel', 'Electrode', 'Weezing-G', 'Ditto', 'Qwilfish-H', 'Avalugg-H', 'Scrafty', 'Zoroark', 'Cinccino', 'Galvantula', 'Frosmoth', 'cramorant'] },
+      { cost: 6, total: 15, names: ['Charizard', 'Vileplume', 'Jolteon', 'lapras', 'Pincurchin', 'Pachirisu', 'Raichu-A', 'Scream Tail', 'Braviary', 'Mienshao', 'Drifblim', 'Mismagius', 'Honchkrow', 'Sharpedo', 'Camerupt'] },
+      { cost: 5, total: 14, names: ['Starmie', 'Hitmontop', 'Alcremie', 'Lilligant', 'Torterra', 'Luxray', 'Staraptor', 'Floatzel', 'Ambipom', 'Spiritomb', 'Froslass', 'Cryogonal', 'Stunfisk', 'Golurk'] },
+      { cost: 4, total: 18, names: ['Machamp', 'Kangaskhan', 'Clefairy', 'vulpix', 'Coalossal', 'Sandaconda', 'flapple', 'Appletun', 'Perrserker', 'Cursola', 'Sirfetchd', 'Mr. Rime', 'Runerigus', 'Falinks', 'Morpeko', 'Copperajah', 'Duraludon', 'Pyroar'] },
+      { cost: 3, total: 16, names: ['Arbok', 'Sandslash', 'Golduck', 'Primeape', 'poliwrath', 'Tentacruel', 'Rapidash', 'Dodrio', 'Dewgong', 'Muk', 'Cloyster', 'Hypno', 'Kingler', 'Exeggutor', 'Marowak', 'Hitmonlee'] },
+      { cost: 2, total: 14, names: ['Pikachu', 'Wigglytuff', 'Persian-A', 'Flareon', 'Noctowl', 'Ledian', 'Ariados', 'Lanturn', 'Xatu', 'Ampharos', 'Bellossom', 'Sudowoodo', 'jumpluff', 'Quagsire'] },
+      { cost: 1, total: 12, names: ['Persian', 'Farfetchd', 'Mr. Mime', 'Dunsparce', 'Girafarig', 'Shuckle', 'Magcargo', 'Corsola', 'Delibird', 'Mantine', 'Smeargle-B', 'Luvdisc'] },
+    ];
+    const MAX_TOTAL = 18;
+    const minimapBars = document.getElementById('minimapBars');
+    const boardScroll = document.getElementById('boardScroll');
+    const draftSlider = document.getElementById('draftSlider');
+    const simLabel = document.getElementById('simLabel');
+    const poolTotals = document.getElementById('poolTotals');
+    const viewportLens = document.getElementById('viewportLens');
+
+    function isDrafted(cost, idx, pct) {
+      // Higher tiers get drafted faster early on
+      const tierWeight = (cost / 20) * 1.35 + 0.35;
+      const threshold = (pct / 100) * tierWeight;
+      const pseudoRand = ((cost * 17 + idx * 31) % 100) / 100;
+      return pseudoRand < threshold;
+    }
+
+    function render(pct) {
+      minimapBars.innerHTML = '';
+      boardScroll.innerHTML = '';
+      let totalMon = 0;
+      let totalLeft = 0;
+
+      TIERS.forEach((tier, tierIdx) => {
+        let left = 0;
+        tier.names.forEach((_, idx) => {
+          if (!isDrafted(tier.cost, idx, pct)) left++;
+        });
+        totalMon += tier.names.length;
+        totalLeft += left;
+
+        const draftedCount = tier.names.length - left;
+        const totalHeightPct = (tier.names.length / MAX_TOTAL) * 100;
+        const leftHeightPct = tier.names.length ? (left / tier.names.length) * 100 : 0;
+        const ghostHeightPct = 100 - leftHeightPct;
+
+        // Minimap bar
+        const col = document.createElement('div');
+        col.className = 'mini-col' + (left > 0 && left <= 2 ? ' scarce' : '');
+        col.title = `${tier.cost} pts: ${left}/${tier.names.length} remaining`;
+        col.innerHTML = `
+          <div class="mini-bar-shell" style="height: ${totalHeightPct}%">
+            <div class="mini-bar-Ghost" style="height: ${ghostHeightPct}%"></div>
+            <div class="mini-bar-fill" style="height: ${leftHeightPct}%"></div>
+          </div>
+          <span class="mini-cost">${tier.cost}</span>
+        `;
+        col.onclick = () => {
+          const target = boardScroll.children[tierIdx];
+          if (target) target.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+        };
+        minimapBars.appendChild(col);
+
+        // Board column
+        const bCol = document.createElement('div');
+        bCol.className = 'tier-col';
+        bCol.innerHTML = `
+          <div class="tier-head">
+            <strong>${tier.cost} pts</strong>
+            <span>${left}/${tier.names.length} left</span>
+          </div>
+          ${tier.names.map((name, idx) => {
+            const taken = isDrafted(tier.cost, idx, pct);
+            return `
+              <div class="mon-item ${taken ? 'taken' : ''}">
+                <span class="mon-dot">●</span>
+                <span>${name}</span>
+              </div>
+            `;
+          }).join('')}
+        `;
+        boardScroll.appendChild(bCol);
+      });
+
+      const round = Math.max(1, Math.min(10, Math.floor(pct / 9) + 1));
+      simLabel.textContent = pct === 0 ? 'Pre-Draft (0% drafted)' : `Round ${round} (${pct}% drafted)`;
+      poolTotals.textContent = `${totalLeft} / ${totalMon} Available · ■ Solid = Left · ▨ Hatched = Drafted`;
+      updateLens();
+    }
+
+    function updateLens() {
+      const maxScroll = boardScroll.scrollWidth - boardScroll.clientWidth;
+      const ratio = boardScroll.clientWidth / boardScroll.scrollWidth;
+      const progress = maxScroll > 0 ? boardScroll.scrollLeft / maxScroll : 0;
+      const barWidth = minimapBars.clientWidth;
+      const lensW = Math.max(40, barWidth * ratio);
+      const lensLeft = 10 + (barWidth - lensW) * progress;
+      viewportLens.style.width = lensW + 'px';
+      viewportLens.style.left = lensLeft + 'px';
+    }
+
+    boardScroll.addEventListener('scroll', updateLens);
+    window.addEventListener('resize', updateLens);
+    draftSlider.addEventListener('input', (e) => render(Number(e.target.value)));
+    render(25);
+  </script>
+</body>
+</html>

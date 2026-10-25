@@ -17,6 +17,14 @@ import { api } from '../lib/api'
 import type { Draftable, LeagueSnapshot } from '../lib/types'
 import type { FavoritesListSnapshot } from '../lib/favoritesTypes'
 import type { FavoritesController } from '../lib/useFavorites'
+import {
+  buildAllFilters,
+  filterKey,
+  INITIAL_CATALOG_FILTERS,
+  matchesFilter,
+  type CatalogFilterState,
+  type SearchFilter,
+} from '../lib/catalogFilters'
 import { Modal } from './Modal'
 import { PointsRibbon, TypePills } from './PokemonParts'
 
@@ -43,19 +51,6 @@ export function PokemonImage({
 
 type ListDialog = { kind: 'create' } | { kind: 'rename' | 'delete'; list: FavoritesListSnapshot }
 
-type SearchFilter = { kind: 'type' | 'ability' | 'move' | 'mega'; value: string; label: string }
-
-const MEGA_FILTER: SearchFilter = { kind: 'mega', value: 'mega', label: 'Has Mega Evolution' }
-const filterKey = (filter: SearchFilter) => `${filter.kind}:${filter.value}`
-
-function matchesFilter(item: Draftable, filter: SearchFilter) {
-  if (filter.kind === 'type') return !!item.types?.includes(filter.value)
-  if (filter.kind === 'ability')
-    return !!item.abilities?.includes(filter.value) || item.hidden_ability === filter.value
-  if (filter.kind === 'move') return !!item.moves?.some((move) => move.name === filter.value)
-  return item.megas.length > 0
-}
-
 export function Catalog({
   catalog,
   snapshot,
@@ -63,6 +58,8 @@ export function Catalog({
   legacyWatchlist = [],
   busy = false,
   onSelect,
+  filterState,
+  onFilterStateChange,
 }: {
   catalog: Draftable[]
   snapshot: LeagueSnapshot | null
@@ -70,16 +67,39 @@ export function Catalog({
   legacyWatchlist?: number[]
   busy?: boolean
   onSelect: (item: Draftable) => void
+  filterState?: CatalogFilterState
+  onFilterStateChange?: (
+    updater: CatalogFilterState | ((current: CatalogFilterState) => CatalogFilterState),
+  ) => void
 }) {
-  const [search, setSearch] = useState('')
-  const [filters, setFilters] = useState<SearchFilter[]>([])
+  const [localFilterState, setLocalFilterState] =
+    useState<CatalogFilterState>(INITIAL_CATALOG_FILTERS)
+  const activeFilterState = filterState ?? localFilterState
+  const updateFilterState = (
+    updater: CatalogFilterState | ((current: CatalogFilterState) => CatalogFilterState),
+  ) => {
+    if (onFilterStateChange) onFilterStateChange(updater)
+    else setLocalFilterState(updater)
+  }
+  const { search, filters, affordable } = activeFilterState
+  const setSearch = (next: string) =>
+    updateFilterState((current) => ({ ...current, search: next }))
+  const setFilters = (
+    updater: SearchFilter[] | ((current: SearchFilter[]) => SearchFilter[]),
+  ) =>
+    updateFilterState((current) => ({
+      ...current,
+      filters: typeof updater === 'function' ? updater(current.filters) : updater,
+    }))
+  const setAffordable = (next: boolean) =>
+    updateFilterState((current) => ({ ...current, affordable: next }))
+
   const [suggestOpen, setSuggestOpen] = useState(false)
   const [highlight, setHighlight] = useState(0)
   const [tab, setTab] = useState<'available' | 'all' | 'favorites' | 'legacy'>(
     snapshot ? 'available' : 'all',
   )
   const [sort, setSort] = useState('dex')
-  const [affordable, setAffordable] = useState(false)
   const [dialog, setDialog] = useState<ListDialog | null>(null)
   const [name, setName] = useState('')
   const list = favorites.state
@@ -93,38 +113,7 @@ export function Catalog({
   )
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
   const remaining = activeTeam?.points_remaining
-  const allFilters = useMemo(() => {
-    const types = new Set<string>()
-    const abilities = new Set<string>()
-    const moves = new Set<string>()
-    let anyMega = false
-    for (const item of catalog) {
-      item.types?.forEach((type) => types.add(type))
-      item.abilities?.forEach((ability) => abilities.add(ability))
-      if (item.hidden_ability) abilities.add(item.hidden_ability)
-      item.moves?.forEach((move) => moves.add(move.name))
-      anyMega ||= item.megas.length > 0
-    }
-    const sorted = (values: Set<string>) => [...values].sort((a, b) => a.localeCompare(b))
-    return [
-      ...sorted(types).map((value): SearchFilter => ({
-        kind: 'type',
-        value,
-        label: `${value} type`,
-      })),
-      ...sorted(abilities).map((value): SearchFilter => ({
-        kind: 'ability',
-        value,
-        label: `${value} ability`,
-      })),
-      ...sorted(moves).map((value): SearchFilter => ({
-        kind: 'move',
-        value,
-        label: `${value} move`,
-      })),
-      ...(anyMega ? [MEGA_FILTER] : []),
-    ]
-  }, [catalog])
+  const allFilters = useMemo(() => buildAllFilters(catalog), [catalog])
   const suggestions = useMemo(() => {
     const query = search.trim().toLowerCase()
     if (!query) return []
@@ -345,119 +334,145 @@ export function Catalog({
           bookmark Pokémon to copy them into it. Only you can view your account favorites.
         </p>
       )}
-      <div className="catalog-controls">
-        <div className="search-field">
-          <Search size={18} />
-          <input
-            type="search"
-            role="combobox"
-            aria-label="Search Pokémon by name or Pokédex number"
-            aria-autocomplete="list"
-            aria-expanded={showSuggestions}
-            aria-controls="catalog-search-suggestions"
-            aria-activedescendant={showSuggestions ? `catalog-suggestion-${highlight}` : undefined}
-            placeholder="Search name, Pokédex number, type, ability, or move..."
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value)
-              setSuggestOpen(true)
-              setHighlight(0)
-            }}
-            onFocus={() => setSuggestOpen(true)}
-            onBlur={() => setSuggestOpen(false)}
-            onKeyDown={(event) => {
-              if (event.key === 'Backspace' && !search && filters.length) {
-                removeFilter(filters[filters.length - 1])
-              } else if (!showSuggestions) {
-                return
-              } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                event.preventDefault()
-                const step = event.key === 'ArrowDown' ? 1 : -1
-                setHighlight((highlight + step + suggestions.length) % suggestions.length)
-              } else if (event.key === 'Enter') {
-                event.preventDefault()
-                addFilter(suggestions[Math.min(highlight, suggestions.length - 1)])
-              } else if (event.key === 'Escape') {
-                setSuggestOpen(false)
+      <div className="sticky-filter-bar">
+        <div className="catalog-controls">
+          <div className="search-field">
+            <Search size={18} />
+            <input
+              type="search"
+              role="combobox"
+              aria-label="Search Pokémon by name or Pokédex number"
+              aria-autocomplete="list"
+              aria-expanded={showSuggestions}
+              aria-controls="catalog-search-suggestions"
+              aria-activedescendant={
+                showSuggestions ? `catalog-suggestion-${highlight}` : undefined
               }
-            }}
-          />
-          {search && (
-            <button className="icon-button" aria-label="Clear search" onClick={() => setSearch('')}>
-              <X size={15} />
-            </button>
-          )}
-          {showSuggestions && (
-            <ul
-              className="search-suggestions"
-              id="catalog-search-suggestions"
-              role="listbox"
-              aria-label="Search filters"
+              placeholder="Search name, Pokédex number, type, ability, or move..."
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value)
+                setSuggestOpen(true)
+                setHighlight(0)
+              }}
+              onFocus={() => setSuggestOpen(true)}
+              onBlur={() => setSuggestOpen(false)}
+              onKeyDown={(event) => {
+                if (event.key === 'Backspace' && !search && filters.length) {
+                  removeFilter(filters[filters.length - 1])
+                } else if (!showSuggestions) {
+                  return
+                } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  const step = event.key === 'ArrowDown' ? 1 : -1
+                  setHighlight((highlight + step + suggestions.length) % suggestions.length)
+                } else if (event.key === 'Enter') {
+                  event.preventDefault()
+                  addFilter(suggestions[Math.min(highlight, suggestions.length - 1)])
+                } else if (event.key === 'Escape') {
+                  setSuggestOpen(false)
+                }
+              }}
+            />
+            {search && (
+              <button
+                className="icon-button"
+                aria-label="Clear search"
+                onClick={() => setSearch('')}
+              >
+                <X size={15} />
+              </button>
+            )}
+            {showSuggestions && (
+              <ul
+                className="search-suggestions"
+                id="catalog-search-suggestions"
+                role="listbox"
+                aria-label="Search filters"
+              >
+                {suggestions.map((filter, index) => (
+                  <li
+                    key={filterKey(filter)}
+                    id={`catalog-suggestion-${index}`}
+                    role="option"
+                    aria-selected={index === highlight}
+                    className={index === highlight ? 'highlighted' : ''}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setHighlight(index)}
+                    onClick={() => addFilter(filter)}
+                  >
+                    {filter.label}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <label className="sort-control">
+            <ArrowDownWideNarrow size={16} />
+            <select
+              aria-label="Sort Pokémon"
+              value={sort}
+              onChange={(event) => {
+                setSort(event.target.value)
+              }}
             >
-              {suggestions.map((filter, index) => (
-                <li
-                  key={filterKey(filter)}
-                  id={`catalog-suggestion-${index}`}
-                  role="option"
-                  aria-selected={index === highlight}
-                  className={index === highlight ? 'highlighted' : ''}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setHighlight(index)}
-                  onClick={() => addFilter(filter)}
-                >
-                  {filter.label}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <label className="sort-control">
-          <ArrowDownWideNarrow size={16} />
-          <select
-            aria-label="Sort Pokémon"
-            value={sort}
-            onChange={(event) => {
-              setSort(event.target.value)
+              {tab === 'favorites' && <option value="saved">Saved order</option>}
+              <option value="dex">Pokédex order</option>
+              <option value="price-high">Points: high to low</option>
+              <option value="price-low">Points: low to high</option>
+              <option value="name">Name: A to Z</option>
+            </select>
+          </label>
+          <button
+            className={`filter-button ${affordable ? 'active' : ''}`}
+            title="Show picks within the current team's budget"
+            aria-pressed={affordable}
+            disabled={!activeTeam}
+            onClick={() => {
+              setAffordable(!affordable)
             }}
           >
-            {tab === 'favorites' && <option value="saved">Saved order</option>}
-            <option value="dex">Pokédex order</option>
-            <option value="price-high">Points: high to low</option>
-            <option value="price-low">Points: low to high</option>
-            <option value="name">Name: A to Z</option>
-          </select>
-        </label>
-        <button
-          className={`filter-button ${affordable ? 'active' : ''}`}
-          title="Show picks within the current team's budget"
-          aria-pressed={affordable}
-          disabled={!activeTeam}
-          onClick={() => {
-            setAffordable(!affordable)
-          }}
-        >
-          <SlidersHorizontal size={16} />
-          <span>In budget</span>
-        </button>
-      </div>
-      {filters.length > 0 && (
-        <div className="search-filter-chips" aria-label="Active search filters">
-          {filters.map((filter) => (
-            <span className="search-filter-chip" key={filterKey(filter)}>
-              {filter.label}
-              <button
-                aria-label={`Remove ${filter.label} filter`}
-                onClick={() => removeFilter(filter)}
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-          <button className="button text-button" onClick={() => setFilters([])}>
-            Clear filters
+            <SlidersHorizontal size={16} />
+            <span>In budget</span>
           </button>
         </div>
-      )}
+            {(filters.length > 0 || affordable) && (
+              <div className="search-filter-chips" aria-label="Active search filters">
+                {filters.map((filter) => (
+                  <span className="search-filter-chip" key={filterKey(filter)}>
+                    {filter.label}
+                    <button
+                      aria-label={`Remove ${filter.label} filter`}
+                      onClick={() => removeFilter(filter)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+                {affordable && (
+                  <span className="search-filter-chip">
+                    In budget
+                    <button
+                      aria-label="Remove In budget filter"
+                      onClick={() => setAffordable(false)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                )}
+                <button
+                  className="button clear-filters-button"
+                  onClick={() => {
+                    setSearch('')
+                    setFilters([])
+                    setAffordable(false)
+                  }}
+                >
+                  Clear filters
+                </button>
+              </div>
+            )}
+      </div>
       <div className="pokemon-grid">
         {filtered.map((item) => {
           const taken = drafted.has(item.id)

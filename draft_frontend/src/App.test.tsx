@@ -2,6 +2,7 @@ import { act, type ReactNode } from 'react'
 import { create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { BigBoard } from './components/BigBoard'
 import { Catalog } from './components/Catalog'
 import { LeagueSetup } from './components/LeagueSetup'
 import { api } from './lib/api'
@@ -24,6 +25,9 @@ vi.mock('./components/LeagueSetup', () => ({
 vi.mock('./components/Catalog', () => ({
   Catalog: vi.fn(() => <section data-testid="catalog">Available Pokémon</section>),
   PokemonImage: () => <span>Pokémon image</span>,
+}))
+vi.mock('./components/BigBoard', () => ({
+  BigBoard: vi.fn(() => <section data-testid="big-board">Draft Big Board</section>),
 }))
 vi.mock('./components/Tournament', () => ({ Tournament: () => <section>Tournament</section> }))
 vi.mock('./components/Availability', () => ({
@@ -317,17 +321,34 @@ describe('account catalog and favorites', () => {
     })
   })
 
-  it('shares the selected favorites controller between the draft room and catalog', async () => {
+  it('shares the selected favorites controller and filter state between the draft room and catalog', async () => {
     await render()
     await navigate('Draft room')
-    expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
+    expect(vi.mocked(BigBoard).mock.lastCall?.[0].favorites).toBe(favorites)
+    expect(vi.mocked(BigBoard).mock.lastCall?.[0].filterState).toEqual({
+      search: '',
+      filters: [],
+      affordable: false,
+    })
 
+    await act(async () => {
+      vi.mocked(BigBoard).mock.lastCall?.[0].onFilterStateChange?.({
+        search: 'pika',
+        filters: [{ kind: 'type', value: 'Electric', label: 'Electric type' }],
+        affordable: true,
+      })
+    })
     await navigate('Catalog & favorites')
     expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
     expect(vi.mocked(Catalog).mock.lastCall?.[0].snapshot).toBe(draft.snapshot)
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].filterState).toEqual({
+      search: 'pika',
+      filters: [{ kind: 'type', value: 'Electric', label: 'Electric type' }],
+      affordable: true,
+    })
 
     await selectLeague(league('drafting', 8))
-    expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
+    expect(vi.mocked(BigBoard).mock.lastCall?.[0].favorites).toBe(favorites)
     expect(vi.mocked(useFavorites).mock.lastCall?.[0].userId).toBe(11)
   })
 
@@ -417,6 +438,7 @@ describe('league navigation and team presentation', () => {
       })
       expect(renderer!.root.findByProps({ 'aria-label': 'Team setup needed' })).toBeDefined()
       expect(renderer!.root.findAllByProps({ 'data-testid': 'catalog' })).toHaveLength(0)
+      expect(renderer!.root.findAllByProps({ 'data-testid': 'big-board' })).toHaveLength(0)
     },
   )
 
@@ -427,7 +449,7 @@ describe('league navigation and team presentation', () => {
       await render()
 
       expect(heading()).toBe('Draft room')
-      expect(renderer!.root.findByProps({ 'data-testid': 'catalog' })).toBeDefined()
+      expect(renderer!.root.findByProps({ 'data-testid': 'big-board' })).toBeDefined()
       expect(LeagueSetup).not.toHaveBeenCalled()
     },
   )

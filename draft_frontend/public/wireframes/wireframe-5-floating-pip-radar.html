@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wireframe 5 — Floating Corner Radar PiP</title>
+  <style>
+    :root {
+      --bg: #0f0e14;
+      --panel: #16141a;
+      --border: #2b2e43;
+      --purple: #7761d9;
+      --purple-light: #a693f5;
+      --ink: #d5d7e1;
+      --muted: #85889b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      padding: 24px 32px 120px;
+    }
+    .top-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .top-nav a { color: var(--purple-light); text-decoration: none; font-weight: 600; }
+    .board-mock {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 16px;
+    }
+    .col-mock {
+      flex: 0 0 170px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      min-height: 440px;
+    }
+    /* FLOATING PIP RADAR */
+    .floating-pip {
+      position: fixed;
+      right: 28px;
+      bottom: 24px;
+      width: 340px;
+      background: rgba(22, 20, 26, 0.94);
+      backdrop-filter: blur(12px);
+      border: 1px solid #453769;
+      border-radius: 14px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65);
+      padding: 14px 16px;
+      z-index: 100;
+      transition: width 0.2s, height 0.2s;
+    }
+    .floating-pip.minimized {
+      width: 215px;
+      padding: 10px 14px;
+    }
+    .floating-pip.minimized .pip-body { display: none; }
+    .pip-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+    .pip-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #e4dff7;
+    }
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #5ec294;
+      box-shadow: 0 0 0 3px rgba(94, 194, 148, 0.2);
+    }
+    .pip-toggle {
+      background: #262038;
+      border: 0;
+      color: var(--purple-light);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .pip-body { margin-top: 12px; }
+    .pip-bars {
+      display: grid;
+      grid-template-columns: repeat(20, 1fr);
+      gap: 3px;
+      height: 56px;
+      align-items: end;
+      background: #100e14;
+      padding: 8px 6px 4px;
+      border-radius: 8px;
+      border: 1px solid #262134;
+    }
+    .p-col {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+    }
+    .p-shell {
+      width: 100%;
+      background: #231d30;
+      border-radius: 2px 2px 0 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      overflow: hidden;
+    }
+    .p-fill {
+      width: 100%;
+      background: var(--purple);
+      transition: height 0.2s;
+    }
+    .scrubber-row {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .scrubber-row input { flex: 1; accent-color: var(--purple); cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="top-nav">
+    <div><strong>Wireframe 5:</strong> Floating Corner "Picture-in-Picture" Radar with Round Time-Travel Scrubber</div>
+    <a href="index.html">← Back to all 5 Wireframes</a>
+  </div>
+
+  <p style="font-size:13px; color:var(--muted); margin-bottom:18px;">
+    Look at the <strong>bottom-right corner</strong> of the screen: this minimap floats over the workspace like a strategy-game radar, can be collapsed to a tiny pill with one click, and includes a <strong>Round History Scrubber</strong> to replay how the board drained from Round 1 to the current pick.
+  </p>
+
+  <div class="board-mock" id="boardMock"></div>
+
+  <!-- FLOATING PIP MINIMAP -->
+  <aside class="floating-pip" id="floatingPip">
+    <div class="pip-head" onclick="togglePip()">
+      <div class="pip-title">
+        <span class="live-dot"></span>
+        <span id="pipTitleText">Pool Radar · 182 left</span>
+      </div>
+      <button class="pip-toggle" id="pipBtn">Minimize –</button>
+    </div>
+
+    <div class="pip-body">
+      <div class="pip-bars" id="pipBars"></div>
+      <div class="scrubber-row">
+        <span>R1</span>
+        <input id="roundScrubber" type="range" min="0" max="85" value="35" onclick="event.stopPropagation()" />
+        <span id="roundTag" style="color:#d5d7e1; font-weight:700;">Live (R4)</span>
+      </div>
+    </div>
+  </aside>
+
+  <script>
+    const COUNTS = [5,6,8,12,14,15,11,9,16,13,12,10,11,13,15,14,18,16,14,12];
+    const pipBars = document.getElementById('pipBars');
+    const boardMock = document.getElementById('boardMock');
+    const scrubber = document.getElementById('roundScrubber');
+    const roundTag = document.getElementById('roundTag');
+    const pipTitleText = document.getElementById('pipTitleText');
+    const floatingPip = document.getElementById('floatingPip');
+    const pipBtn = document.getElementById('pipBtn');
+
+    // Populate background board mock
+    boardMock.innerHTML = COUNTS.slice(0, 8).map((c, i) => `
+      <div class="col-mock">
+        <strong style="font-size:15px;">${20 - i} pts</strong>
+        <span style="display:block; font-size:11px; color:#85889b; margin:4px 0 12px;">${c} Pokémon in tier</span>
+        <div style="height:28px; background:#1d1926; border-radius:6px; margin-bottom:6px;"></div>
+        <div style="height:28px; background:#1d1926; border-radius:6px; margin-bottom:6px;"></div>
+        <div style="height:28px; background:#1d1926; border-radius:6px; margin-bottom:6px;"></div>
+      </div>
+    `).join('');
+
+    function togglePip() {
+      const min = floatingPip.classList.toggle('minimized');
+      pipBtn.textContent = min ? 'Expand +' : 'Minimize –';
+    }
+
+    function render(pct) {
+      pipBars.innerHTML = '';
+      let leftSum = 0;
+      COUNTS.forEach((total, i) => {
+        const cost = 20 - i;
+        const speed = 0.55 + (cost / 20) * 0.95;
+        const left = Math.max(0, Math.round(total * (1 - (pct / 100) * speed)));
+        leftSum += left;
+        const hPct = (total / 18) * 100;
+        const fillPct = total ? (left / total) * 100 : 0;
+
+        const col = document.createElement('div');
+        col.className = 'p-col';
+        col.title = `${cost} pts: ${left}/${total}`;
+        col.innerHTML = `
+          <div class="p-shell" style="height:${hPct}%">
+            <div class="p-fill" style="height:${fillPct}%"></div>
+          </div>
+        `;
+        pipBars.appendChild(col);
+      });
+      const r = Math.max(1, Math.floor(pct / 10) + 1);
+      roundTag.textContent = pct == 35 ? 'Live (R4)' : `R${r}`;
+      pipTitleText.textContent = `Pool Radar · ${leftSum} left`;
+    }
+
+    scrubber.addEventListener('input', (e) => render(Number(e.target.value)));
+    render(35);
+  </script>
+</body>
+</html>

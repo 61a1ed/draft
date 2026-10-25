@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mana Curve Minimap — 5 Interactive HTML Wireframes</title>
+  <style>
+    :root {
+      --bg: #0f0e14;
+      --panel: #16141a;
+      --border: #2b2e43;
+      --purple: #7761d9;
+      --purple-light: #a693f5;
+      --ink: #d5d7e1;
+      --muted: #85889b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      padding: 36px 40px;
+      max-width: 1100px;
+      margin-inline: auto;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p.lead { margin: 0 0 28px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+      gap: 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      text-decoration: none;
+      color: inherit;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .card:hover {
+      transform: translateY(-2px);
+      border-color: var(--purple-light);
+    }
+    .badge {
+      align-self: flex-start;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      background: #231d34;
+      color: var(--purple-light);
+      padding: 3px 8px;
+      border-radius: 999px;
+    }
+    .card h2 { margin: 0; font-size: 17px; color: #ece8fa; }
+    .card p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.55; flex: 1; }
+    .open-link { font-size: 12px; font-weight: 700; color: var(--purple-light); margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Mana Curve Minimap — 5 Interactive Wireframes</h1>
+  <p class="lead">
+    Each wireframe below is an interactive prototype with a live slider so you can test how the Mana Curve Minimap visualizes the draft pool draining from Round 1 to the end of the draft.
+  </p>
+
+  <div class="grid">
+    <a class="card" href="wireframe-1-scrollbar-minimap.html">
+      <span class="badge">Option 1 · Sticky Filter Bar</span>
+      <h2>Scrollbar &amp; Viewport Lens Minimap</h2>
+      <p>Sits as a 36px strip at the bottom of the frozen filter bar. Shows solid remaining bars vs. hatched drafted bars, plus a sliding lens that tracks and jumps your horizontal scroll position on the Big Board.</p>
+      <span class="open-link">Open interactive prototype →</span>
+    </a>
+
+    <a class="card" href="wireframe-2-waterline-sparkline.html">
+      <span class="badge">Option 2 · Header Sparkline</span>
+      <h2>"Waterline Erosion" Silhouette</h2>
+      <p>Embeds a smooth area chart in the Draft Board header. Compares the dashed "Initial Pool Roof" against the live "Remaining Waterline" and tracks the shifting Average Point Cost of remaining Pokémon.</p>
+      <span class="open-link">Open interactive prototype →</span>
+    </a>
+
+    <a class="card" href="wireframe-3-sidebar-pacing.html">
+      <span class="badge">Option 3 · Right Sidebar Card</span>
+      <h2>Sidebar Pacing &amp; Budget Wall</h2>
+      <p>Places a compact mana curve right above Your Roster in the right sidebar, complete with a dynamic "Max Cap Wall" and "Avg Pts/Slot Pace Line" that shift as you spend points.</p>
+      <span class="open-link">Open interactive prototype →</span>
+    </a>
+
+    <a class="card" href="wireframe-4-depletion-equalizer.html">
+      <span class="badge">Option 4 · Discrete Blocks</span>
+      <h2>Segmented "Equalizer" Heatmap</h2>
+      <p>Each Pokémon is an individual LED block in its point-cost stack. As picks happen, blocks switch off and tiers shift color from Healthy Green to Thinning Amber to Critical Red.</p>
+      <span class="open-link">Open interactive prototype →</span>
+    </a>
+
+    <a class="card" href="wireframe-5-floating-pip-radar.html">
+      <span class="badge">Option 5 · Corner Overlay</span>
+      <h2>Floating Corner Radar + Scrubber</h2>
+      <p>A collapsible bottom-right Picture-in-Picture radar that takes zero layout space and includes a Round 1 → Live scrubber to replay how the board drained.</p>
+      <span class="open-link">Open interactive prototype →</span>
+    </a>
+  </div>
+</body>
+</html>

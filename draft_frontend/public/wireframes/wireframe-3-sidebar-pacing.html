@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wireframe 3 — Sidebar Pacing & Budget Wall</title>
+  <style>
+    :root {
+      --bg: #0f0e14;
+      --panel: #16141a;
+      --border: #2b2e43;
+      --purple: #7761d9;
+      --purple-light: #a693f5;
+      --ink: #d5d7e1;
+      --muted: #85889b;
+      --mint: #5ec294;
+      --coral: #e07f75;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      padding: 24px 32px;
+    }
+    .top-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .top-nav a { color: var(--purple-light); text-decoration: none; font-weight: 600; }
+    .sim-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: #1d1927;
+      border: 1px solid #3d315b;
+      padding: 12px 18px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    .sim-bar label { font-size: 13px; font-weight: 700; color: #dcd5f8; }
+    .sim-bar input[type="range"] { flex: 1; accent-color: var(--purple); cursor: pointer; }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 290px;
+      gap: 24px;
+      align-items: start;
+    }
+    .fake-board {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      min-height: 460px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+    }
+    .aside-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    /* SIDEBAR MINIMAP CARD */
+    .minimap-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .card-head h3 { margin: 0; font-size: 13px; color: #dcd5f8; }
+    .mini-badge {
+      font-size: 10px;
+      background: #231c35;
+      color: var(--purple-light);
+      padding: 3px 7px;
+      border-radius: 999px;
+      font-weight: 700;
+    }
+    .curve-box {
+      position: relative;
+      height: 88px;
+      background: #110f16;
+      border: 1px solid #252034;
+      border-radius: 8px;
+      padding: 14px 8px 18px;
+      display: grid;
+      grid-template-columns: repeat(20, 1fr);
+      gap: 2px;
+      align-items: end;
+    }
+    .c-bar-wrap {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      position: relative;
+    }
+    .c-bar-bg {
+      width: 100%;
+      background: #231e30;
+      border-radius: 2px 2px 0 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      overflow: hidden;
+    }
+    .c-bar-fill {
+      width: 100%;
+      background: var(--purple);
+      transition: height 0.2s;
+    }
+    .c-bar-wrap.over-cap .c-bar-fill {
+      background: var(--coral);
+      opacity: 0.45;
+    }
+    .c-lbl {
+      position: absolute;
+      bottom: -14px;
+      font-size: 8px;
+      color: var(--muted);
+    }
+    .marker-line {
+      position: absolute;
+      top: 4px;
+      bottom: 16px;
+      width: 2px;
+      pointer-events: none;
+      transition: left 0.2s;
+    }
+    .marker-line.cap { background: var(--coral); }
+    .marker-line.pace { background: var(--mint); }
+    .marker-tag {
+      position: absolute;
+      top: -2px;
+      transform: translateX(-50%);
+      font-size: 8px;
+      font-weight: 800;
+      padding: 1px 4px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    .marker-line.cap .marker-tag { background: var(--coral); color: #16141a; }
+    .marker-line.pace .marker-tag { background: var(--mint); color: #16141a; top: 10px; }
+    .pacing-stats {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      font-size: 11px;
+    }
+    .p-stat {
+      background: #1b1726;
+      border-radius: 6px;
+      padding: 7px 9px;
+    }
+    .p-stat span { display: block; font-size: 10px; color: var(--muted); }
+    .p-stat strong { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="top-nav">
+    <div><strong>Wireframe 3:</strong> Sidebar "Deckbuilder Mana Curve &amp; Budget Wall" (MTG Arena / Hearthstone Style)</div>
+    <a href="index.html">← Back to all 5 Wireframes</a>
+  </div>
+
+  <div class="sim-bar">
+    <label for="pickSlider">Simulate Your Draft Turn &amp; Spending:</label>
+    <input id="pickSlider" type="range" min="0" max="5" value="2" />
+    <span id="turnDesc" style="font-size:12px; font-weight:700; color:#a693f5;">2 / 6 Picks Made · 46 pts left</span>
+  </div>
+
+  <div class="layout">
+    <div class="fake-board">
+      <div>
+        <h3 style="color:#d5d7e1; margin-bottom:6px;">← Main Draft Room Big Board</h3>
+        <p style="font-size:13px; max-width:420px;">In this layout, the Big Board stays 100% clean on the left, while the Mana Curve Minimap lives in the right-hand sidebar directly above your Team Roster.</p>
+      </div>
+    </div>
+
+    <aside class="aside-stack">
+      <!-- SIDEBAR MINIMAP -->
+      <section class="minimap-card">
+        <div class="card-head">
+          <h3>Pool Mana Curve</h3>
+          <span class="mini-badge" id="poolLeftBadge">188 left</span>
+        </div>
+
+        <div class="curve-box" id="curveBox"></div>
+
+        <div class="pacing-stats">
+          <div class="p-stat">
+            <span>Max Affordable</span>
+            <strong style="color:var(--coral)" id="maxCapVal">18 pts</strong>
+          </div>
+          <div class="p-stat">
+            <span>Avg Pts / Open Slot</span>
+            <strong style="color:var(--mint)" id="paceVal">11.5 pts</strong>
+          </div>
+        </div>
+      </section>
+
+      <!-- EXISTING TEAM ROSTER CARD -->
+      <section class="minimap-card">
+        <div class="card-head">
+          <h3>Your Roster</h3>
+          <span class="mini-badge" id="slotsBadge">2 / 6</span>
+        </div>
+        <p style="font-size:11px; color:var(--muted); margin:0;">
+          As you draft Pokémon, the <strong style="color:var(--coral)">Max Cap Wall</strong> and <strong style="color:var(--mint)">Avg Pace Line</strong> shift across the mana curve automatically.
+        </p>
+      </section>
+    </aside>
+  </div>
+
+  <script>
+    const TIER_COUNTS = [5,6,8,12,14,15,11,9,16,13,12,10,11,13,15,14,18,16,14,12]; // 20 down to 1
+    const SCENARIOS = [
+      { picks: 0, budget: 80, pct: 5 },
+      { picks: 1, budget: 62, pct: 20 },
+      { picks: 2, budget: 46, pct: 38 },
+      { picks: 3, budget: 29, pct: 55 },
+      { picks: 4, budget: 15, pct: 72 },
+      { picks: 5, budget: 7,  pct: 88 },
+    ];
+
+    const curveBox = document.getElementById('curveBox');
+    const pickSlider = document.getElementById('pickSlider');
+    const turnDesc = document.getElementById('turnDesc');
+    const poolLeftBadge = document.getElementById('poolLeftBadge');
+    const maxCapVal = document.getElementById('maxCapVal');
+    const paceVal = document.getElementById('paceVal');
+    const slotsBadge = document.getElementById('slotsBadge');
+
+    function render(stepIdx) {
+      const s = SCENARIOS[stepIdx];
+      const openSlots = 6 - s.picks;
+      // Must leave at least 1 pt per remaining slot if standard rules, or raw remaining:
+      const maxAffordable = Math.min(20, s.budget);
+      const avgPace = s.budget / openSlots;
+
+      curveBox.innerHTML = '';
+      let totalLeft = 0;
+
+      TIER_COUNTS.forEach((total, i) => {
+        const cost = 20 - i;
+        const speed = 0.5 + (cost / 20) * 0.9;
+        const left = Math.max(0, Math.round(total * (1 - (s.pct / 100) * speed)));
+        totalLeft += left;
+
+        const hPct = (total / 18) * 100;
+        const fillPct = total ? (left / total) * 100 : 0;
+        const overCap = cost > maxAffordable;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'c-bar-wrap' + (overCap ? ' over-cap' : '');
+        wrap.innerHTML = `
+          <div class="c-bar-bg" style="height:${hPct}%">
+            <div class="c-bar-fill" style="height:${fillPct}%"></div>
+          </div>
+          ${cost % 5 === 0 || cost === 1 ? `<span class="c-lbl">${cost}</span>` : ''}
+        `;
+        curveBox.appendChild(wrap);
+      });
+
+      // Position lines (20 is left=4%, 1 is right=96%)
+      const costToLeftPct = (c) => 4 + ((20 - Math.max(1, Math.min(20, c))) / 19) * 92;
+
+      const capLine = document.createElement('div');
+      capLine.className = 'marker-line cap';
+      capLine.style.left = costToLeftPct(maxAffordable) + '%';
+      capLine.innerHTML = `<span class="marker-tag">CAP ${maxAffordable}p</span>`;
+      curveBox.appendChild(capLine);
+
+      const paceLine = document.createElement('div');
+      paceLine.className = 'marker-line pace';
+      paceLine.style.left = costToLeftPct(avgPace) + '%';
+      paceLine.innerHTML = `<span class="marker-tag">PACE ${avgPace.toFixed(1)}p</span>`;
+      curveBox.appendChild(paceLine);
+
+      turnDesc.textContent = `${s.picks} / 6 Picks Made · ${s.budget} pts remaining`;
+      poolLeftBadge.textContent = `${totalLeft} left`;
+      maxCapVal.textContent = `${maxAffordable} pts`;
+      paceVal.textContent = `${avgPace.toFixed(1)} pts/pick`;
+      slotsBadge.textContent = `${s.picks} / 6`;
+    }
+
+    pickSlider.addEventListener('input', (e) => render(Number(e.target.value)));
+    render(2);
+  </script>
+</body>
+</html>

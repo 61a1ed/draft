@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wireframe 4 — Segmented Depletion Equalizer</title>
+  <style>
+    :root {
+      --bg: #0f0e14;
+      --panel: #16141a;
+      --border: #2b2e43;
+      --purple: #7761d9;
+      --purple-light: #a693f5;
+      --ink: #d5d7e1;
+      --muted: #85889b;
+      --mint: #4ec994;
+      --amber: #f2b24c;
+      --red: #e05c5c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      padding: 24px 32px;
+    }
+    .top-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .top-nav a { color: var(--purple-light); text-decoration: none; font-weight: 600; }
+    .sim-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: #1d1927;
+      border: 1px solid #3d315b;
+      padding: 12px 18px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    .sim-bar label { font-size: 13px; font-weight: 700; color: #dcd5f8; }
+    .sim-bar input[type="range"] { flex: 1; accent-color: var(--purple); cursor: pointer; }
+    /* Equalizer HUD */
+    .eq-hud {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 18px;
+    }
+    .eq-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      font-size: 12px;
+    }
+    .eq-legend {
+      display: flex;
+      gap: 14px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .eq-legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+    .eq-grid {
+      display: grid;
+      grid-template-columns: repeat(20, 1fr);
+      gap: 6px;
+      height: 110px;
+      align-items: end;
+      padding: 10px 10px 6px;
+      background: #110f16;
+      border: 1px solid #252034;
+      border-radius: 8px;
+    }
+    .eq-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      cursor: pointer;
+    }
+    .eq-stack {
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 2px;
+      width: 100%;
+    }
+    .pip {
+      height: 4px;
+      width: 100%;
+      border-radius: 1px;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .pip.taken {
+      background: #252131 !important;
+      opacity: 0.45;
+    }
+    .pip.just-picked {
+      background: #ffffff !important;
+      box-shadow: 0 0 6px #fff;
+    }
+    .eq-cost {
+      margin-top: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .eq-col.active .eq-cost { color: #fff; }
+    .detail-banner {
+      background: #1b1726;
+      border: 1px solid #352b4c;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="top-nav">
+    <div><strong>Wireframe 4:</strong> Segmented "Equalizer" Heatmap (Audio Spectrum / F1 Telemetry Style)</div>
+    <a href="index.html">← Back to all 5 Wireframes</a>
+  </div>
+
+  <div class="sim-bar">
+    <label for="draftSlider">Simulate Draft Progress (Watch individual Pokémon blocks turn off):</label>
+    <input id="draftSlider" type="range" min="0" max="90" value="30" />
+  </div>
+
+  <div class="eq-hud">
+    <div class="eq-header">
+      <strong>Tier Depletion Equalizer (1 Block = 1 Pokémon in Tier)</strong>
+      <div class="eq-legend">
+        <span><i class="dot" style="background:var(--mint)"></i> Healthy (&gt;50%)</span>
+        <span><i class="dot" style="background:var(--amber)"></i> Thinning (20–50%)</span>
+        <span><i class="dot" style="background:var(--red)"></i> Critical (1–2 left)</span>
+        <span><i class="dot" style="background:#252131"></i> Drafted</span>
+      </div>
+    </div>
+
+    <div class="eq-grid" id="eqGrid"></div>
+  </div>
+
+  <div class="detail-banner" id="detailBanner">
+    <span>Hover or click any point-cost stack above to inspect that tier's exact remaining Pokémon.</span>
+    <strong style="color:var(--purple-light)">Live Telemetry</strong>
+  </div>
+
+  <script>
+    const TIERS = [
+      { cost: 20, total: 5 }, { cost: 19, total: 6 }, { cost: 18, total: 8 }, { cost: 17, total: 12 },
+      { cost: 16, total: 14 }, { cost: 15, total: 15 }, { cost: 14, total: 11 }, { cost: 13, total: 9 },
+      { cost: 12, total: 16 }, { cost: 11, total: 13 }, { cost: 10, total: 12 }, { cost: 9, total: 10 },
+      { cost: 8, total: 11 }, { cost: 7, total: 13 }, { cost: 6, total: 15 }, { cost: 5, total: 14 },
+      { cost: 4, total: 18 }, { cost: 3, total: 16 }, { cost: 2, total: 14 }, { cost: 1, total: 12 }
+    ];
+    const eqGrid = document.getElementById('eqGrid');
+    const slider = document.getElementById('draftSlider');
+    const detailBanner = document.getElementById('detailBanner');
+
+    function render(pct) {
+      eqGrid.innerHTML = '';
+      TIERS.forEach((t) => {
+        const speed = 0.5 + (t.cost / 20) * 1.05;
+        const left = Math.max(0, Math.round(t.total * (1 - (pct / 100) * speed)));
+        const ratio = left / t.total;
+        const color = left <= 2 ? 'var(--red)' : ratio <= 0.5 ? 'var(--amber)' : 'var(--mint)';
+
+        const col = document.createElement('div');
+        col.className = 'eq-col';
+        let pipsHtml = '';
+        for (let i = 0; i < t.total; i++) {
+          const isTaken = i >= left;
+          pipsHtml += `<span class="pip ${isTaken ? 'taken' : ''}" style="background:${color}"></span>`;
+        }
+        col.innerHTML = `
+          <div class="eq-stack">${pipsHtml}</div>
+          <span class="eq-cost">${t.cost}</span>
+        `;
+        col.onmouseenter = () => {
+          detailBanner.innerHTML = `
+            <span><strong>${t.cost}-Point Tier:</strong> ${left} of ${t.total} Pokémon remaining (${Math.round(ratio*100)}% available)</span>
+            <strong style="color:${color}">${left === 0 ? 'DEPLETED' : left <= 2 ? 'CRITICAL SCARCITY' : 'AVAILABLE'}</strong>
+          `;
+        };
+        eqGrid.appendChild(col);
+      });
+    }
+
+    slider.addEventListener('input', (e) => render(Number(e.target.value)));
+    render(30);
+  </script>
+</body>
+</html>

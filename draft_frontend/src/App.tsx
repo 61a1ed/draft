@@ -30,7 +30,9 @@ import { useDraft } from './lib/useDraft'
 import { useFavorites } from './lib/useFavorites'
 import type { Draftable, LeagueSnapshot, Session, Team } from './lib/types'
 import { teamAvatarStyle, teamName } from './lib/teamPresentation'
+import { INITIAL_CATALOG_FILTERS, type CatalogFilterState } from './lib/catalogFilters'
 import { Catalog, PokemonImage } from './components/Catalog'
+import { BigBoard } from './components/BigBoard'
 import { Modal } from './components/Modal'
 import { PokemonDetails } from './components/PokemonDetails'
 import { LeagueSetup } from './components/LeagueSetup'
@@ -315,11 +317,15 @@ export default function App() {
   } | null>(null)
   const closeTestSignIn = useCallback(() => setTestSignIn(false), [])
   const [chargePoints, setChargePoints] = useState(true)
+  const [filterState, setFilterState] = useState<CatalogFilterState>(INITIAL_CATALOG_FILTERS)
   useEffect(() => {
     setSelected(null)
     setConfirmAction(null)
     setAvailabilityContext(null)
   }, [draft.leagueId, mode, session?.user.id])
+  useEffect(() => {
+    setFilterState(INITIAL_CATALOG_FILTERS)
+  }, [mode, session?.user.id])
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
   const myTeam = snapshot?.teams.find((team) => team.manager_user_id === session?.user.id)
   const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
@@ -651,6 +657,8 @@ export default function App() {
               legacyWatchlist={legacyWatchlist}
               busy={draft.busy}
               onSelect={openPick}
+              filterState={filterState}
+              onFilterStateChange={setFilterState}
             />
           ) : !snapshot ? (
             <div className="card empty-state">
@@ -768,14 +776,14 @@ export default function App() {
                     </div>
                   </div>
                   <div className="draft-layout">
-                    <Catalog
+                    <BigBoard
                       key={session!.user.id}
                       catalog={catalog}
                       snapshot={snapshot}
                       favorites={favorites}
-                      legacyWatchlist={legacyWatchlist}
-                      busy={draft.busy}
                       onSelect={openPick}
+                      filterState={filterState}
+                      onFilterStateChange={setFilterState}
                     />
                     <aside className="draft-aside">
                       {rosterTeam && (
