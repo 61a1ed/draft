@@ -147,7 +147,11 @@ export function Catalog({
             filters.every((filter) => matchesFilter(item, filter)) &&
             (!query ||
               item.name.toLowerCase().includes(query) ||
-              String(item.dex ?? '').includes(query))
+              String(item.dex ?? '').includes(query) ||
+              item.types?.some((type) => type.toLowerCase().includes(query)) ||
+              item.abilities?.some((ability) => ability.toLowerCase().includes(query)) ||
+              item.hidden_ability?.toLowerCase().includes(query) ||
+              item.moves?.some((move) => move.name.toLowerCase().includes(query)))
           )
         })
         .sort((a, b) =>
@@ -341,7 +345,7 @@ export function Catalog({
             <input
               type="search"
               role="combobox"
-              aria-label="Search Pokémon by name or Pokédex number"
+              aria-label="Search Pokémon by name, Pokédex number, type, ability, or move"
               aria-autocomplete="list"
               aria-expanded={showSuggestions}
               aria-controls="catalog-search-suggestions"

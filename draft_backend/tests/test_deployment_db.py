@@ -1,5 +1,7 @@
 """Deployment connection isolation, incomplete-state protection, and mTLS checks."""
 
+import base64
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -141,3 +143,43 @@ def test_import_refuses_busy_initialization_before_reading_marker(environment, m
     with pytest.raises(RuntimeError, match="Another database initialization or catalog import"):
         deployment.import_data({}, "test", REVISION, Path("catalog.csv"), Path("images"))
     assert not any("completion" in query for query, _ in conn.queries)
+
+
+def test_import_cli_loads_details_and_moves_before_writing(environment, tmp_path, monkeypatch):
+    csv_path = tmp_path / "catalog.csv"
+    csv_path.write_text("dex,species,form,points,image_path\n25,Pikachu,,10,pokemon.png\n")
+    (tmp_path / "pokemon.png").write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg=="
+    ))
+    details_path = tmp_path / "details.json"
+    details_path.write_text(json.dumps({
+        "pokemon": [{
+            "dex": 25, "form": "", "types": ["Electric"], "abilities": ["Static"],
+            "hidden_ability": "Lightning Rod",
+            "base_stats": {"hp": 35, "attack": 55, "defense": 40, "special_attack": 50,
+                           "special_defense": 50, "speed": 90},
+            "moves": ["Thunderbolt"],
+        }],
+        "moves": [{"name": "Thunderbolt", "type": "Electric", "category": "Special",
+                   "power": 90, "accuracy": 100, "pp": 16, "description": "May paralyze."}],
+    }))
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    conn = Connection([
+        [('dl_importer', True, 'CN=dl_importer')], [(True,)],
+        [(123, "postgres", "postgres")], [("test", REVISION, 1)],
+    ])
+    monkeypatch.setattr(deployment.psycopg, "connect", lambda **kwargs: conn)
+    imported = []
+    monkeypatch.setattr(
+        deployment, "import_catalog_connection",
+        lambda conn, pokemon, images: imported.extend(pokemon),
+    )
+    deployment.main([
+        "import", "--name", "test", "--revision", REVISION,
+        "--csv", str(csv_path), "--image-root", str(tmp_path), "--details", str(details_path),
+    ])
+    assert imported[0].details.types == ("Electric",)
+    assert imported[0].details.hidden_ability == "Lightning Rod"
+    assert imported[0].moves[0].name == "Thunderbolt"
+    assert imported[0].moves[0].power == 90

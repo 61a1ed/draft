@@ -154,10 +154,11 @@ def initialize(options: dict[str, str], name: str, revision: str, password: str)
 
 
 def import_data(
-    options: dict[str, str], name: str, revision: str, csv_path: Path, image_root: Path
+    options: dict[str, str], name: str, revision: str, csv_path: Path, image_root: Path,
+    details_path: Path | None = None,
 ) -> tuple[int, int]:
     validate_identity(name, revision)
-    pokemon, images = load_catalog(csv_path, image_root)
+    pokemon, images = load_catalog(csv_path, image_root, details_path)
     with psycopg.connect(**options, dbname=DATABASE, user="dl_importer") as conn:
         check_connection(conn, "dl_importer")
         lock_catalog(conn)
@@ -173,6 +174,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--revision", required=True)
     parser.add_argument("--csv", type=Path)
     parser.add_argument("--image-root", type=Path)
+    parser.add_argument("--details", type=Path, help="Showdown catalog details JSON")
     args = parser.parse_args(argv)
     if args.action == "import" and (args.csv is None or args.image_root is None):
         parser.error("import requires --csv and --image-root")
@@ -192,7 +194,7 @@ def main(argv: list[str] | None = None) -> None:
                   if created else "Database is already initialized.")
         elif args.action == "import":
             count, images = import_data(
-                options, args.name, args.revision, args.csv, args.image_root
+                options, args.name, args.revision, args.csv, args.image_root, args.details
             )
             print(f"Imported {count} Pokémon and {images} unique PNG images.")
     except (psycopg.Error, OSError, ValueError, RuntimeError, csv.Error) as exc:

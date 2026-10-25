@@ -36,9 +36,9 @@ def show_steps(config_path):
     for action in ("check", *CLOUD_STEPS):
         print(remote.command_text([*prefix, action]))
     print("Existing machine: use its saved state.json, SSH key and known_hosts.")
-    print("Install, prepare, initialize, import, then activate:")
+    print("Install, prepare, initialize, activate migrations, then import:")
     for action in (
-        "setup", "open-db-port", "verify-db", "prepare", "init-db", "import-catalog", "deploy",
+        "setup", "open-db-port", "verify-db", "prepare", "init-db", "deploy", "import-catalog",
     ):
         args = [] if action in {"setup", "open-db-port", "verify-db"} else ["--revision", "HEAD"]
         print(remote.command_text([*prefix, action, *args]))

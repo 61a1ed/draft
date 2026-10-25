@@ -50,6 +50,14 @@ def test_default_state_stays_under_deploy_private(tmp_path):
     assert config.state_dir == Path(__file__).resolve().parents[1] / "private" / "example"
 
 
+def test_catalog_details_path_is_optional_and_relative_to_settings(tmp_path):
+    assert load_config(settings(tmp_path), action="import-catalog").catalog_details is None
+    config = load_config(
+        settings(tmp_path, CATALOG_DETAILS="details.json"), action="import-catalog"
+    )
+    assert config.catalog_details == tmp_path / "details.json"
+
+
 def test_legacy_automated_dns_setting_requires_manual_transition(tmp_path):
     with pytest.raises(ValueError, match="manage DNS manually"):
         load_config(settings(tmp_path, HOSTED_ZONE_ID="ZEXAMPLE"))

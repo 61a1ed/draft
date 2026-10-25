@@ -396,7 +396,7 @@ connection allowed to `SET ROLE dl_owner`, then import:
 uv run python scripts/import_catalog.py ../pokemon_catalog.csv --image-root ../showdown --details ../pokemon_details.json
 ```
 
-`--details` adds types, abilities, base stats, and Mega Evolutions from the saved
+`--details` adds types, abilities, base stats, Mega Evolutions, and learned moves from the saved
 Showdown snapshot; see `scripts/README.md` to refresh it.
 
 The import validates all rows and reads all files before opening its database
@@ -412,7 +412,7 @@ Only large images are exported from `min_pokemon`. The supplied source contains
 to run the same import elsewhere, preserving the relative image paths.
 
 Catalog responses include `id`, `name`, `point_cost`, `dex`, `species`, `form`,
-`types`, `abilities`, `hidden_ability`, `base_stats`, `image_url`, and `megas`.
+`types`, `abilities`, `hidden_ability`, `base_stats`, `image_url`, `megas`, and `moves`.
 `base_stats` has `hp`, `attack`, `defense`, `special_attack`, `special_defense`,
 and `speed`. Each Mega has `id`, `name`, the same detail fields, and an
 `image_url` (null when no sprite exists). Display names include nonempty forms in

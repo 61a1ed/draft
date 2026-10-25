@@ -203,8 +203,3 @@ fallbacks if the font service is unavailable.
   stale forms require review, and uncertain writes are refreshed without replay.
 - `src/lib/*.test.*`: API, OAuth, and lifecycle regression tests.
 - `public/`: app favicon and generic image placeholder.
-
-Live integration was exercised against native PostgreSQL through the Vite proxy,
-including local sign-in, SQL scenario selection, catalog images, persisted picks,
-undo, SQL-only changes arriving through SSE, and refreshing after scenario replacement.
-Google OAuth still requires real credentials and was not exercised.

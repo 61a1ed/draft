@@ -99,6 +99,8 @@ def run_database(config, state, action, revision, *, host=None):
         args = [action, "--name", config.name, "--revision", revision]
         if action == "import":
             args += ["--csv", str(config.catalog_csv), "--image-root", str(config.image_root)]
+            if config.catalog_details is not None:
+                args += ["--details", str(config.catalog_details)]
         remote.run(
             str(python), "-u", str(backend / "scripts/deployment_db.py"), *args,
             env=env, cwd=backend, timeout=900,

@@ -171,8 +171,8 @@ uv run --project deploy python deploy/manage.py open-db-port
 uv run --project deploy python deploy/manage.py verify-db
 uv run --project deploy python deploy/manage.py prepare
 uv run --project deploy python deploy/manage.py init-db
-uv run --project deploy python deploy/manage.py import-catalog
 uv run --project deploy python deploy/manage.py deploy
+uv run --project deploy python deploy/manage.py import-catalog
 ```
 
 These are separate steps:
@@ -199,14 +199,17 @@ These are separate steps:
    certificate to create the fresh database, initialize its schema, and create
    `dl_importer`. The importer can assume `dl_owner` (schema-owner privileges)
    but has no PostgreSQL superuser, role-creation or database-creation privileges.
-6. `import-catalog` reads the local CSV and referenced images and writes directly
-   through psycopg with the importer certificate. There is no archive upload or
-   remote importer process.
-7. `deploy` starts the candidate, which applies pending migrations as `dl_owner`
+6. `deploy` starts the candidate, which applies pending migrations as `dl_owner`
    and closes its privileged connection before opening the ordinary gateway pool.
    It checks readiness, switches Caddy and retires the previous release. It
    prepares the selected revision if needed. A migration failure prevents the
    candidate from becoming ready and leaves the old release active.
+7. `import-catalog` reads the local CSV, referenced images, and optional
+   `CATALOG_DETAILS` JSON and writes directly through psycopg with the importer
+   certificate. Set `CATALOG_DETAILS = "../../pokemon_details.json"` in
+   `deploy/private/settings.py` to import types, abilities, base stats, Mega
+   Evolutions, and learned moves. Run after `deploy` so the required tables exist.
+   There is no archive upload or remote importer process.
 
 Before deploying startup migrations to an existing host, rerun `setup` to install
 the local peer-authentication mapping and add `MIGRATION_DATABASE_URL`. This does
@@ -274,6 +277,20 @@ writes and live updates. DNS records are never saved or restored by the scripts;
 remove `HOSTED_ZONE_ID` if upgrading an older settings module.
 
 ## Update, inspect or roll back
+
+Deploying code applies schema migrations but does not populate catalog metadata.
+After deploying changes to `pokemon_details.json`, run `import-catalog` with
+`CATALOG_DETAILS` configured and the same committed backend revision. Without that
+setting, imports update the CSV fields and images while preserving existing
+details; they do not add any new battle details or moves. The selected revision
+must support the `--details` deployment import option.
+
+```text
+uv run --project deploy python deploy/manage.py import-catalog --revision FULL_COMMIT_ID
+```
+
+Reload the page after importing to refetch the catalog. The Moves tab and search
+suggestions are built from the imported data; empty move lists hide the tab.
 
 ```text
 uv run --project deploy python deploy/manage.py prepare --revision FULL_COMMIT_ID

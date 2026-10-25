@@ -216,7 +216,7 @@ Credentials are read from the environment and not printed in import errors.
 uv run python scripts/import_catalog.py ../pokemon_catalog.csv --image-root ../showdown
 ```
 
-Types, abilities, base stats, and Mega Evolutions come from a saved snapshot of
+Types, abilities, base stats, Mega Evolutions, and learned moves come from a saved snapshot of
 Showdown's Pokédex, `../pokemon_details.json`. Refresh it only when the catalog
 CSV or Showdown data changes; it is the only step that uses the network. Each CSV
 row is matched to Showdown by its sprite filename (e.g. `raichu-alola.png`).
@@ -228,7 +228,7 @@ uv run python scripts/import_catalog.py ../pokemon_catalog.csv --image-root ../s
 ```
 
 With `--details`, every CSV row needs a dex/form entry in the snapshot, and each
-imported Pokémon's Megas are replaced. Without it, stored details are kept.
+imported Pokémon's Megas and moves are replaced. Without it, stored details are kept.
 `scripts/dev.py` always imports the snapshot.
 
 The importer sends local image bytes to PostgreSQL. The destination needs no
