@@ -34,7 +34,7 @@ import { INITIAL_CATALOG_FILTERS, type CatalogFilterState } from './lib/catalogF
 import { Catalog, PokemonImage } from './components/Catalog'
 import { BigBoard } from './components/BigBoard'
 import { DraftBoard } from './components/DraftBoard'
-import { TurnBanner } from './components/TurnBanner'
+import { FloatingTurnTracker, TurnBanner } from './components/TurnBanner'
 import { Modal } from './components/Modal'
 import { PokemonDetails } from './components/PokemonDetails'
 import { LeagueSetup } from './components/LeagueSetup'
@@ -892,6 +892,19 @@ export default function App() {
             </>
           )}
         </main>
+        {snapshot &&
+          session &&
+          snapshot.state.status === 'drafting' &&
+          view !== 'draft' &&
+          view !== 'board' && (
+            <FloatingTurnTracker
+              snapshot={snapshot}
+              catalog={catalog}
+              userId={session.user.id}
+              onSelectPick={openPick}
+              onGoToDraft={() => setView('draft')}
+            />
+          )}
       </div>
       {help && (
         <Modal title="Draft rules" onClose={() => setHelp(false)}>

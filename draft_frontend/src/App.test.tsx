@@ -565,4 +565,52 @@ describe('league navigation and team presentation', () => {
       renderer!.root.findByProps({ 'aria-label': 'Draft picks by round and team' }),
     ).toBeDefined()
   })
+
+  it('shows the floating corner draft tracker on non-draft views during an active draft and hides it in Draft room and Draft board', async () => {
+    draft.snapshot = league('drafting')
+    await render()
+
+    // In Draft room: full TurnBanner is shown, floating tracker is hidden
+    expect(heading()).toBe('Draft room')
+    expect(
+      renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
+    ).toHaveLength(0)
+
+    // In Draft board: full TurnBanner is shown, floating tracker is hidden
+    await navigate('Draft board')
+    expect(
+      renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
+    ).toHaveLength(0)
+
+    // In Catalog & favorites: floating tracker appears with YOUR TURN state, minimize toggle, and Pick Now CTA
+    await navigate('Catalog & favorites')
+    const tracker = renderer!.root.findByProps({ 'aria-label': 'Floating live draft tracker' })
+    expect(tracker.props.className).toContain('is-your-turn')
+    expect(text(tracker)).toContain('YOUR TURN')
+    expect(text(tracker)).toContain('Team #1 (You)')
+    expect(text(tracker)).toContain('Next (1.02)')
+    expect(text(tracker)).toContain('Blackbirds')
+    expect(text(tracker)).toContain('Your subseq:')
+    expect(text(tracker)).toContain('2.02 (#4 · in 3)')
+
+    // Minimize and expand the floating tracker
+    const minBtn = tracker.findByProps({ 'aria-label': 'Minimize live draft tracker' })
+    await act(async () => minBtn.props.onClick())
+    expect(tracker.props.className).toContain('is-minimized')
+    expect(text(tracker)).not.toContain('Next (1.02)')
+
+    const expBtn = tracker.findByProps({ 'aria-label': 'Expand live draft tracker' })
+    await act(async () => expBtn.props.onClick())
+    expect(tracker.props.className).not.toContain('is-minimized')
+
+    // Clicking "Pick Now" returns to the Draft room
+    const cta = tracker
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Pick Now'))!
+    await act(async () => cta.props.onClick())
+    expect(heading()).toBe('Draft room')
+    expect(
+      renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
+    ).toHaveLength(0)
+  })
 })

@@ -6447,3 +6447,319 @@ main {
   }
 }
 
+/* ---------- Floating Corner Live Draft Tracker (Non-Draft Views) ---------- */
+.floating-turn-tracker {
+  position: fixed;
+  right: 24px;
+  bottom: 22px;
+  z-index: 95;
+  width: 348px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 15px;
+  border-radius: 14px;
+  background: light-dark(#2d2d43f5, #1b1829f5);
+  border: 1.5px solid light-dark(#3d3d5c, #3d3458);
+  color: #f8f5ff;
+  backdrop-filter: blur(10px);
+  box-shadow: light-dark(
+    0 12px 32px rgba(24, 20, 44, 0.24),
+    0 14px 38px rgba(0, 0, 0, 0.65)
+  );
+  transition:
+    width 0.2s,
+    padding 0.2s,
+    border-radius 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.floating-turn-tracker.is-your-turn {
+  background: linear-gradient(
+    135deg,
+    light-dark(#322461f8, #271b4af8) 0%,
+    light-dark(#49328af8, #3a246ef8) 55%,
+    light-dark(#2d2d43f8, #1d1830f8) 100%
+  );
+  border: 2px solid #ffd166;
+  animation: your-turn-halo 2.2s ease-in-out infinite;
+}
+
+.floating-turn-tracker.is-minimized {
+  width: auto;
+  padding: 9px 14px;
+  border-radius: 999px;
+}
+
+.floating-tracker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.floating-tracker-current {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+
+.floating-tracker-current .pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #bfa6ff;
+  box-shadow: 0 0 0 3px rgba(191, 166, 255, 0.22);
+  animation: db-pulse 1.4s infinite;
+  flex-shrink: 0;
+}
+
+.floating-your-turn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffd166, #ffb703);
+  color: #1e1633;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.floating-tracker-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  font-family: 'Manrope', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.floating-tracker-team {
+  font-size: 12px;
+  font-weight: 800;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floating-tracker-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.floating-tracker-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.floating-turn-tracker.is-your-turn .floating-tracker-timer {
+  color: #ffd166;
+}
+
+.floating-tracker-toggle {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e4dcff;
+  transition: background 0.15s;
+}
+
+.floating-tracker-toggle:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.floating-tracker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.floating-tracker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.floating-tracker-box {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: light-dark(rgba(255, 255, 255, 0.08), rgba(15, 14, 20, 0.55));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.floating-tracker-box.is-you-ondeck {
+  border: 1.5px dashed #ffd166;
+  background: rgba(255, 209, 102, 0.12);
+}
+
+.floating-box-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: light-dark(#cbc3e3, #a89fc4);
+  white-space: nowrap;
+}
+
+.floating-box-poke-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  min-width: 0;
+}
+
+.floating-box-poke-btn:not(:disabled):hover .floating-box-meta strong {
+  text-decoration: underline;
+  color: #ffd166;
+}
+
+.floating-box-poke-btn:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.floating-box-sprite {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.floating-box-sprite img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.floating-box-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.floating-box-meta strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+}
+
+.floating-box-meta small {
+  display: block;
+  font-size: 10px;
+  color: light-dark(#cfc8e6, #b3abc9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floating-box-empty {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.floating-tracker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.floating-subsequent {
+  font-size: 11px;
+  color: light-dark(#d8d0f0, #bfb8d9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floating-subsequent strong {
+  font-family: 'Manrope', sans-serif;
+  font-weight: 800;
+  color: #ffd166;
+  font-variant-numeric: tabular-nums;
+}
+
+.floating-tracker-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.floating-tracker-cta:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.floating-turn-tracker.is-your-turn .floating-tracker-cta {
+  background: #ffd166;
+  color: #1e1633;
+}
+
+.floating-turn-tracker.is-your-turn .floating-tracker-cta:hover {
+  background: #ffda75;
+}
+
+@media (max-width: 620px) {
+  .floating-turn-tracker {
+    right: 12px;
+    bottom: 74px;
+    width: calc(100vw - 24px);
+  }
+}
+
+
