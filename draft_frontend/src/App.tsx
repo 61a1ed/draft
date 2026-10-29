@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  AlertTriangle,
   BookOpen,
   Bookmark,
   CalendarDays,
   Check,
   ChevronDown,
-  Clock3,
   HelpCircle,
   History,
   LayoutGrid,
@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Settings2,
   ShieldCheck,
+  Table2,
   Target,
   Trophy,
   Users,
@@ -33,6 +34,8 @@ import { teamAvatarStyle, teamName } from './lib/teamPresentation'
 import { INITIAL_CATALOG_FILTERS, type CatalogFilterState } from './lib/catalogFilters'
 import { Catalog, PokemonImage } from './components/Catalog'
 import { BigBoard } from './components/BigBoard'
+import { DraftBoard } from './components/DraftBoard'
+import { FloatingTurnTracker, TurnBanner } from './components/TurnBanner'
 import { Modal } from './components/Modal'
 import { PokemonDetails } from './components/PokemonDetails'
 import { LeagueSetup } from './components/LeagueSetup'
@@ -40,7 +43,8 @@ import { Tournament } from './components/Tournament'
 import { Availability } from './components/Availability'
 import { ThemeToggle } from './components/ThemeToggle'
 
-type View = 'draft' | 'catalog' | 'tournament' | 'availability' | 'teams' | 'activity' | 'settings'
+type View =
+  'draft' | 'board' | 'catalog' | 'tournament' | 'availability' | 'teams' | 'activity' | 'settings'
 
 type AvailabilityContext = {
   owner: string
@@ -51,6 +55,7 @@ type AvailabilityContext = {
 type SelectedPick = { item: Draftable; revision: number; teamId: number | null }
 const navItems = [
   { id: 'draft', label: 'Draft room', icon: LayoutGrid },
+  { id: 'board', label: 'Draft board', icon: Table2 },
   { id: 'catalog', label: 'Catalog & favorites', icon: Bookmark },
   { id: 'tournament', label: 'Tournament', icon: Trophy },
   { id: 'availability', label: 'Availability', icon: CalendarDays },
@@ -66,42 +71,6 @@ function initials(name: string) {
     .map((word) => word[0])
     .join('')
     .toUpperCase()
-}
-
-function Countdown({ snapshot }: { snapshot: LeagueSnapshot }) {
-  const [now, setNow] = useState(Date.now())
-  const timing = useMemo(() => {
-    const receivedAt = Date.now()
-    return { receivedAt, offset: new Date(snapshot.server_now).getTime() - receivedAt }
-  }, [snapshot.server_now])
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  const seconds = snapshot.state.deadline
-    ? Math.max(
-        0,
-        Math.ceil(
-          (new Date(snapshot.state.deadline).getTime() -
-            Math.max(now, timing.receivedAt) -
-            timing.offset) /
-            1000,
-        ),
-      )
-    : null
-  return (
-    <div className="countdown">
-      <span>
-        <Clock3 size={14} />
-        {seconds === 0 ? 'Overtime' : 'Pick timer'}
-      </span>
-      <strong>
-        {seconds === null
-          ? '—:—'
-          : `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`}
-      </strong>
-    </div>
-  )
 }
 
 function TeamRoster({
@@ -311,6 +280,7 @@ export default function App() {
   const [create, setCreate] = useState(false)
   const [help, setHelp] = useState(false)
   const [selected, setSelected] = useState<SelectedPick | null>(null)
+  const [confirmPick, setConfirmPick] = useState(false)
   const [confirmAction, setConfirmAction] = useState<{
     kind: 'start' | 'undo'
     revision: number
@@ -320,6 +290,7 @@ export default function App() {
   const [filterState, setFilterState] = useState<CatalogFilterState>(INITIAL_CATALOG_FILTERS)
   useEffect(() => {
     setSelected(null)
+    setConfirmPick(false)
     setConfirmAction(null)
     setAvailabilityContext(null)
   }, [draft.leagueId, mode, session?.user.id])
@@ -331,13 +302,13 @@ export default function App() {
   const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
   const can = (kind: string) => snapshot?.actions.some((action) => action.kind === kind) ?? false
   const commissioner = snapshot?.league.commissioner_user_id === session?.user.id
-  const currentRound =
-    snapshot && snapshot.state.team_count
-      ? Math.min(
-          snapshot.league.roster_size,
-          Math.floor(snapshot.state.active_pick_count / snapshot.state.team_count) + 1,
-        )
-      : 1
+  const pickingForOther = Boolean(
+    snapshot?.state.status === 'drafting' &&
+      commissioner &&
+      activeTeam &&
+      activeTeam.manager_user_id !== session?.user.id,
+  )
+  const activeManager = draft.users.find((user) => user.id === activeTeam?.manager_user_id)
   const selectedTaken =
     selected && snapshot?.rosters.some((pick) => pick.draftable_id === selected.item.id)
   const pickChanged =
@@ -356,6 +327,7 @@ export default function App() {
       revision: snapshot?.revision ?? -1,
       teamId: snapshot?.state.next_team_id ?? null,
     })
+    setConfirmPick(false)
     setChargePoints(true)
   }
 
@@ -559,6 +531,7 @@ export default function App() {
               aria-label="Refresh all data"
               onClick={() => {
                 setSelected(null)
+                setConfirmPick(false)
                 setConfirmAction(null)
                 void draft.refreshData()
               }}
@@ -679,70 +652,17 @@ export default function App() {
             <>
               {view === 'draft' && (
                 <>
-                  <section className="turn-banner">
-                    <div className="turn-copy">
-                      <span className="turn-label">
-                        <span className="pulse-dot" />
-                        {snapshot.state.status === 'setup'
-                          ? 'SETUP'
-                          : snapshot.state.status === 'completed'
-                            ? 'COMPLETED'
-                            : activeTeam?.manager_user_id === session?.user.id
-                              ? 'YOUR TURN'
-                              : 'CURRENT TURN'}
-                      </span>
-                      <h2>
-                        {snapshot.state.status === 'setup'
-                          ? 'Draft not started'
-                          : snapshot.state.status === 'completed'
-                            ? 'Draft complete'
-                            : activeTeam
-                              ? teamName(activeTeam)
-                              : 'Next team'}
-                      </h2>
-                      <p>
-                        {snapshot.state.status === 'setup' ? (
-                          'Complete team names, colors, and draft order in League settings before starting.'
-                        ) : snapshot.state.status === 'completed' ? (
-                          `${snapshot.state.active_pick_count} of ${snapshot.state.required_pick_count} picks completed.`
-                        ) : (
-                          <>
-                            Round {currentRound}
-                            <span>·</span>Pick {snapshot.state.next_pick_number} of{' '}
-                            {snapshot.state.required_pick_count}
-                          </>
-                        )}
-                      </p>
-                      {snapshot.state.status === 'completed' && (
-                        <button
-                          className="button banner-button"
-                          onClick={() => setView('tournament')}
-                        >
-                          Open tournament <ArrowRight size={15} />
-                        </button>
-                      )}
-                      {snapshot.state.status === 'setup' && (
-                        <button
-                          className="button banner-button"
-                          onClick={() =>
-                            can('start')
-                              ? setConfirmAction({ kind: 'start', revision: snapshot.revision })
-                              : setView('settings')
-                          }
-                        >
-                          {can('start') ? 'Start draft' : 'League settings'}
-                          <ArrowRight size={15} />
-                        </button>
-                      )}
-                    </div>
-                    <div className="banner-art" aria-hidden="true">
-                      <div className="pokeball-ring" />
-                    </div>
-                    {snapshot.state.status === 'drafting' && <Countdown snapshot={snapshot} />}
-                    {snapshot.state.status === 'completed' && (
-                      <Trophy className="complete-trophy" size={55} />
-                    )}
-                  </section>
+                  <TurnBanner
+                    snapshot={snapshot}
+                    catalog={catalog}
+                    userId={session!.user.id}
+                    onSelectPick={openPick}
+                    onOpenSettings={() => setView('settings')}
+                    onStartDraft={() =>
+                      setConfirmAction({ kind: 'start', revision: snapshot.revision })
+                    }
+                    onOpenTournament={() => setView('tournament')}
+                  />
                   <div className="stats-grid">
                     <div className="stat-card">
                       <span className="stat-icon lavender">
@@ -841,6 +761,19 @@ export default function App() {
                     </aside>
                   </div>
                 </>
+              )}
+              {view === 'board' && (
+                <DraftBoard
+                  snapshot={snapshot}
+                  catalog={catalog}
+                  userId={session!.user.id}
+                  onSelect={openPick}
+                  onOpenSettings={() => setView('settings')}
+                  onStartDraft={() =>
+                    setConfirmAction({ kind: 'start', revision: snapshot.revision })
+                  }
+                  onOpenTournament={() => setView('tournament')}
+                />
               )}
               {view === 'teams' && (
                 <div className="teams-grid">
@@ -971,6 +904,19 @@ export default function App() {
             </>
           )}
         </main>
+        {snapshot &&
+          session &&
+          snapshot.state.status === 'drafting' &&
+          view !== 'draft' &&
+          view !== 'board' && (
+            <FloatingTurnTracker
+              snapshot={snapshot}
+              catalog={catalog}
+              userId={session.user.id}
+              onSelectPick={openPick}
+              onGoToDraft={() => setView('draft')}
+            />
+          )}
       </div>
       {help && (
         <Modal title="Draft rules" onClose={() => setHelp(false)}>
@@ -1013,16 +959,39 @@ export default function App() {
           }}
         />
       )}
-      {selected && (
+      {selected && !confirmPick && (
         <Modal
           title={snapshot ? 'Pick details' : 'Pokémon details'}
-          onClose={() => setSelected(null)}
+          onClose={() => {
+            setSelected(null)
+            setConfirmPick(false)
+          }}
         >
           <PokemonDetails key={selected.item.id} item={selected.item} />
+          {pickingForOther && activeTeam && (
+            <div className="commissioner-pick-warning" role="alert">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>Commissioner override — Picking for {teamName(activeTeam)}</strong>
+                <p>
+                  It is currently{' '}
+                  {activeManager
+                    ? `${activeManager.display_name}’s (${teamName(activeTeam)})`
+                    : `${teamName(activeTeam)}’s`}{' '}
+                  turn, not yours. Any pick you submit will be added to their roster.
+                </p>
+              </div>
+            </div>
+          )}
           {snapshot && (
-            <div className="pick-summary">
+            <div className={`pick-summary ${pickingForOther ? 'is-proxy-pick' : ''}`}>
               <span>
-                Drafting for<strong>{activeTeam ? teamName(activeTeam) : 'No active turn'}</strong>
+                Drafting for
+                <strong>
+                  {activeTeam
+                    ? `${teamName(activeTeam)}${activeTeam.manager_user_id === session?.user.id ? ' (You)' : ' (Other manager)'}`
+                    : 'No active turn'}
+                </strong>
               </span>
               <span>
                 Points after pick
@@ -1063,16 +1032,23 @@ export default function App() {
           ) : null}
           {snapshot && (
             <button
-              className="button primary full-width"
+              className={`button ${pickingForOther ? 'warning' : 'primary'} full-width`}
               disabled={!pickAllowed || draft.busy}
               onClick={async () => {
-                await draft.draftAction('pick', selected.item.id, chargePoints)
-                setSelected(null)
+                if (pickingForOther) {
+                  setConfirmPick(true)
+                  return
+                }
+                if (await draft.draftAction('pick', selected.item.id, chargePoints)) {
+                  setSelected(null)
+                }
               }}
             >
               {draft.busy
                 ? 'Submitting pick…'
-                : `Draft ${selected.item.species || selected.item.name}`}
+                : pickingForOther && activeTeam
+                  ? `Draft ${selected.item.species || selected.item.name} for ${teamName(activeTeam)}`
+                  : `Draft ${selected.item.species || selected.item.name}`}
               <ArrowRight size={17} />
             </button>
           )}
@@ -1115,6 +1091,78 @@ export default function App() {
               {favorites.error}
             </p>
           )}
+        </Modal>
+      )}
+      {selected && confirmPick && snapshot && (
+        <Modal
+          title="Are you sure?"
+          onClose={() => setConfirmPick(false)}
+        >
+          <div className="commissioner-pick-warning" role="alert">
+            <AlertTriangle size={18} />
+            <div>
+              <strong>
+                You are picking on behalf of {activeTeam ? teamName(activeTeam) : 'another team'}
+              </strong>
+              <p>
+                As league commissioner, you are about to draft{' '}
+                <strong>{selected.item.species || selected.item.name}</strong> for{' '}
+                <strong>
+                  {activeTeam ? teamName(activeTeam) : 'another team'}
+                  {activeManager ? ` (${activeManager.display_name})` : ''}
+                </strong>
+                , not your own team.
+              </p>
+            </div>
+          </div>
+          <div className="pick-summary is-proxy-pick">
+            <span>
+              Pokémon
+              <strong>{selected.item.species || selected.item.name}</strong>
+            </span>
+            <span>
+              Drafting for
+              <strong>{activeTeam ? teamName(activeTeam) : '—'}</strong>
+            </span>
+            <span>
+              Point cost
+              <strong>{chargePoints ? `${cost} pts` : '0 pts (Waived)'}</strong>
+            </span>
+            <span>
+              Points after pick
+              <strong>{activeTeam ? activeTeam.points_remaining - cost : '—'}</strong>
+            </span>
+          </div>
+          {pickChanged && (
+            <p className="selection-notice">
+              The draft has changed. Go back and select again to review the latest turn.
+            </p>
+          )}
+          <div className="modal-actions">
+            <button
+              className="button secondary"
+              disabled={draft.busy}
+              onClick={() => setConfirmPick(false)}
+            >
+              <ArrowLeft size={15} />
+              Go back
+            </button>
+            <button
+              className="button warning"
+              disabled={!pickAllowed || draft.busy}
+              onClick={async () => {
+                if (await draft.draftAction('pick', selected.item.id, chargePoints)) {
+                  setConfirmPick(false)
+                  setSelected(null)
+                }
+              }}
+            >
+              {draft.busy
+                ? 'Submitting pick…'
+                : `Yes, draft for ${activeTeam ? teamName(activeTeam) : 'team'}`}
+              <ArrowRight size={15} />
+            </button>
+          </div>
         </Modal>
       )}
       {confirmAction && snapshot && (

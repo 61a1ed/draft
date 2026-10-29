@@ -550,4 +550,172 @@ describe('league navigation and team presentation', () => {
       color: '#ffffff',
     })
   })
+
+  it('places Draft board between Draft room and Catalog & favorites in the navigation and renders the snake grid', async () => {
+    draft.snapshot = league('drafting')
+    await render()
+
+    const nav = renderer!.root.findByProps({ 'aria-label': 'Main navigation' })
+    const labels = nav.findAllByType('button').map((btn) => btn.props['aria-label'])
+    expect(labels.slice(0, 3)).toEqual(['Draft room', 'Draft board', 'Catalog & favorites'])
+
+    await navigate('Draft board')
+    expect(heading()).toBe('Draft board')
+    expect(
+      renderer!.root.findByProps({ 'aria-label': 'Draft picks by round and team' }),
+    ).toBeDefined()
+  })
+
+  it('shows the floating corner draft tracker on non-draft views during an active draft and hides it in Draft room and Draft board', async () => {
+    draft.snapshot = league('drafting')
+    await render()
+
+    // In Draft room: full TurnBanner is shown, floating tracker is hidden
+    expect(heading()).toBe('Draft room')
+    expect(
+      renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
+    ).toHaveLength(0)
+
+    // In Draft board: full TurnBanner is shown, floating tracker is hidden
+    await navigate('Draft board')
+    expect(
+      renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
+    ).toHaveLength(0)
+
+    // In Catalog & favorites: floating tracker appears with YOUR TURN state, minimize toggle, and Pick Now CTA
+    await navigate('Catalog & favorites')
+    const tracker = renderer!.root.findByProps({ 'aria-label': 'Floating live draft tracker' })
+    expect(tracker.props.className).toContain('is-your-turn')
+    expect(text(tracker)).toContain('YOUR TURN')
+    expect(text(tracker)).toContain('Team #1 (You)')
+    expect(text(tracker)).toContain('Next (1.02)')
+    expect(text(tracker)).toContain('Blackbirds')
+    expect(text(tracker)).toContain('Your subseq:')
+    expect(text(tracker)).toContain('2.02 (#4 · in 3)')
+
+    // Minimize and expand the floating tracker
+    const minBtn = tracker.findByProps({ 'aria-label': 'Minimize live draft tracker' })
+    await act(async () => minBtn.props.onClick())
+    expect(tracker.props.className).toContain('is-minimized')
+    expect(text(tracker)).not.toContain('Next (1.02)')
+
+    const expBtn = tracker.findByProps({ 'aria-label': 'Expand live draft tracker' })
+    await act(async () => expBtn.props.onClick())
+    expect(tracker.props.className).not.toContain('is-minimized')
+
+    // Clicking "Pick Now" returns to the Draft room
+    const cta = tracker
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Pick Now'))!
+    await act(async () => cta.props.onClick())
+    expect(heading()).toBe('Draft room')
+    expect(
+      renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
+    ).toHaveLength(0)
+  })
+
+  it('warns the commissioner and asks for confirmation when picking on another team’s behalf', async () => {
+    const snap = league('drafting')
+    snap.state.next_pick_number = 2
+    snap.state.next_team_id = 2 // Blackbirds (manager_user_id: 22, Bob), while signed-in user is 11 (Alice, commissioner)
+    snap.actions = [
+      {
+        league_id: 7,
+        revision: 5,
+        actor_user_id: 11,
+        kind: 'pick',
+        pick_number: 2,
+        target_pick_id: null,
+      },
+    ]
+    draft.snapshot = snap
+    await render()
+
+    const banner = renderer!.root.findByProps({ 'aria-label': 'On the clock status banner' })
+    expect(banner.props.className).toContain('is-proxy-turn')
+    expect(text(banner)).toContain('COMMISSIONER OVERRIDE — NOT YOUR TURN')
+    expect(text(banner)).toContain('Blackbirds')
+
+    // Open Pikachu pick modal
+    await act(async () => vi.mocked(BigBoard).mock.lastCall?.[0].onSelect(draft.catalog[0]))
+
+    const pickDialog = renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Pick details' })
+    expect(text(pickDialog)).toContain('Commissioner override — Picking for Blackbirds')
+    expect(text(pickDialog)).toContain('Bob’s (Blackbirds)')
+    expect(text(pickDialog)).toContain('Blackbirds (Other manager)')
+
+    const draftBtn = pickDialog
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Draft Pikachu for Blackbirds'))!
+    expect(draftBtn.props.className).toContain('warning')
+
+    // Clicking the draft button opens the "Are you sure?" confirmation modal instead of immediately submitting
+    await act(async () => draftBtn.props.onClick())
+    expect(draft.draftAction).not.toHaveBeenCalled()
+
+    const confirmDialog = renderer!.root.findByProps({
+      role: 'dialog',
+      'aria-label': 'Are you sure?',
+    })
+    expect(text(confirmDialog)).toContain('You are picking on behalf of Blackbirds')
+    expect(text(confirmDialog)).toContain('Pikachu')
+    expect(text(confirmDialog)).toContain('12 pts')
+
+    // Going back returns to Pick details without submitting
+    const backBtn = confirmDialog
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Go back'))!
+    await act(async () => backBtn.props.onClick())
+    expect(draft.draftAction).not.toHaveBeenCalled()
+    expect(renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Pick details' })).toBeDefined()
+
+    // Open confirmation again and confirm the pick
+    const draftBtnAgain = renderer!.root
+      .findByProps({ role: 'dialog', 'aria-label': 'Pick details' })
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Draft Pikachu for Blackbirds'))!
+    await act(async () => draftBtnAgain.props.onClick())
+
+    const confirmBtn = renderer!.root
+      .findByProps({ role: 'dialog', 'aria-label': 'Are you sure?' })
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Yes, draft for Blackbirds'))!
+    await act(async () => confirmBtn.props.onClick())
+
+    expect(draft.draftAction).toHaveBeenCalledExactlyOnceWith('pick', 25, true)
+    expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
+  })
+
+  it('submits immediately without an extra confirmation popup when picking for your own team', async () => {
+    const snap = league('drafting')
+    snap.state.next_pick_number = 1
+    snap.state.next_team_id = 1 // Team #1 (manager_user_id: 11, Alice)
+    snap.actions = [
+      {
+        league_id: 7,
+        revision: 5,
+        actor_user_id: 11,
+        kind: 'pick',
+        pick_number: 1,
+        target_pick_id: null,
+      },
+    ]
+    draft.snapshot = snap
+    await render()
+
+    await act(async () => vi.mocked(BigBoard).mock.lastCall?.[0].onSelect(draft.catalog[0]))
+
+    const pickDialog = renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Pick details' })
+    expect(text(pickDialog)).not.toContain('Commissioner override')
+    expect(text(pickDialog)).toContain('Team #1 (You)')
+
+    const draftBtn = pickDialog
+      .findAllByType('button')
+      .find((btn) => text(btn) === 'Draft Pikachu')!
+    expect(draftBtn.props.className).toContain('primary')
+
+    await act(async () => draftBtn.props.onClick())
+    expect(draft.draftAction).toHaveBeenCalledExactlyOnceWith('pick', 25, true)
+    expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
+  })
 })

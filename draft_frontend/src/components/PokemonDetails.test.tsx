@@ -114,12 +114,7 @@ describe('Pokémon details', () => {
     expect(abilities()).toEqual(['Blaze', 'Solar Power'])
     expect(text(statRow('Sp. Atk'))).toBe('Sp. Atk109')
     expect(text(statRow('Total'))).toBe('Total534')
-    expect(tabs().map(text)).toEqual([
-      'Base form',
-      'Mega Charizard X',
-      'Mega Charizard Y',
-      'Moves',
-    ])
+    expect(tabs().map(text)).toEqual(['Base form', 'Mega Charizard X', 'Mega Charizard Y', 'Moves'])
     expect(tabs()[0].props['aria-selected']).toBe(true)
     expect(tabs()[3].props.className).toContain('moves-tab')
   })
@@ -129,10 +124,7 @@ describe('Pokémon details', () => {
     await act(async () => tabs()[3].props.onClick())
     expect(tabs()[3].props['aria-selected']).toBe(true)
     const moveRows = () =>
-      root()
-        .findByProps({ 'aria-label': 'Learned moves' })
-        .findByType('tbody')
-        .findAllByType('tr')
+      root().findByProps({ 'aria-label': 'Learned moves' }).findByType('tbody').findAllByType('tr')
     expect(moveRows().map((row) => text(row.findByType('strong')))).toEqual([
       'Air Slash',
       'Dragon Dance',
@@ -154,9 +146,7 @@ describe('Pokémon details', () => {
     expect(moveRows().map((row) => text(row.findByType('strong')))).toEqual(['Dragon Dance'])
 
     await act(async () =>
-      root()
-        .findByProps({ 'aria-label': 'Remove Status category filter' })
-        .props.onClick(),
+      root().findByProps({ 'aria-label': 'Remove Status category filter' }).props.onClick(),
     )
     expect(moveRows()).toHaveLength(3)
 

@@ -245,8 +245,7 @@ describe('catalog cards', () => {
 })
 
 describe('catalog search filters', () => {
-  const searchBox = () =>
-    control('Search Pokémon by name, Pokédex number, type, ability, or move')
+  const searchBox = () => control('Search Pokémon by name, Pokédex number, type, ability, or move')
   const options = () => renderer!.root.findAllByProps({ role: 'option' }).map(text)
   const option = (label: string) =>
     renderer!.root.findAllByProps({ role: 'option' }).find((node) => text(node) === label)!

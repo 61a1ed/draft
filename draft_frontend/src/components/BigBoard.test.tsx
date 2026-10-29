@@ -160,7 +160,9 @@ afterEach(async () => {
 describe('BigBoard', () => {
   it('groups Pokémon by point cost descending, marks drafted items as taken, and opens details on click', async () => {
     await render()
-    const columns = renderer!.root.findAllByProps({ className: 'big-board-column  over-budget-tier' })
+    const columns = renderer!.root.findAllByProps({
+      className: 'big-board-column  over-budget-tier',
+    })
     expect(columns).toHaveLength(2) // 12pt and 6pt are over 5pt budget
     const tier12 = control('12 point tier')
     const tier6 = control('6 point tier')
@@ -202,21 +204,43 @@ describe('BigBoard', () => {
     expect(renderer!.root.findAllByProps({ 'aria-label': '4 point tier' })).toHaveLength(1)
   })
 
-  it('renders a collapsible equalizer minimap, jumps to a tier on click, and provides a top horizontal scrollbar', async () => {
-    await render()
+  it('renders a collapsible equalizer minimap, centers a tier horizontally on click without vertical scroll, and provides a top horizontal scrollbar', async () => {
+    const boardScrollTo = vi.fn()
+    const colScrollIntoView = vi.fn()
+    await act(async () => {
+      renderer = create(<BigBoard {...props} />, {
+        createNodeMock: (element) => {
+          const elProps = element.props as { 'aria-label'?: string }
+          if (elProps['aria-label'] === 'Point tiers') {
+            return { clientWidth: 800, scrollWidth: 2000, scrollTo: boardScrollTo, scrollLeft: 0 }
+          }
+          if (elProps['aria-label'] === '6 point tier') {
+            return { offsetLeft: 500, offsetWidth: 184, scrollIntoView: colScrollIntoView }
+          }
+          return {}
+        },
+      })
+    })
     // Top horizontal scrollbar is rendered right above the board
     const topScroll = control('Horizontal board scroll')
     expect(topScroll).toBeDefined()
 
-    // Equalizer minimap shows stacks for each tier and can jump to a tier
+    // Equalizer minimap shows stacks for each tier and centers the clicked tier horizontally
+    const jump6 = control('Jump to 6 point tier, 1 of 1 remaining')
+    expect(jump6).toBeDefined()
+    await act(async () => jump6.props.onClick())
+
+    // 500 - (800 - 184) / 2 = 500 - 308 = 192
+    expect(boardScrollTo).toHaveBeenCalledWith({ left: 192, behavior: 'smooth' })
+    expect(colScrollIntoView).not.toHaveBeenCalled()
+
     const jump12 = control('Jump to 12 point tier, 1 of 2 remaining')
-    expect(jump12).toBeDefined()
-    const pips12 = jump12.findAllByType('span').filter((s) => s.props.className?.includes('equalizer-pip'))
+    const pips12 = jump12
+      .findAllByType('span')
+      .filter((s) => s.props.className?.includes('equalizer-pip'))
     expect(pips12).toHaveLength(2)
     expect(pips12[0].props.className).not.toContain('taken')
     expect(pips12[1].props.className).toContain('taken')
-
-    await act(async () => jump12.props.onClick())
 
     // Collapse and re-expand the minimap
     const collapseBtn = control('Collapse pool minimap')
