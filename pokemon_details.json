@@ -2189,6 +2189,15 @@
    "description": "1.5× damage if foe holds an item. Removes item."
   },
   {
+   "name": "Kowtow Cleave",
+   "type": "Dark",
+   "category": "Physical",
+   "power": 85,
+   "accuracy": null,
+   "pp": 12,
+   "description": "This move does not check accuracy."
+  },
+  {
    "name": "Lash Out",
    "type": "Dark",
    "category": "Physical",
@@ -4586,7 +4595,7 @@
  "pokemon": [
   {
    "dex": 3,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Venusaur",
    "types": [
     "Grass",
@@ -4689,7 +4698,7 @@
   },
   {
    "dex": 6,
-   "form": "",
+   "form": "Original, Mega X, Mega Y",
    "showdown_name": "Charizard",
    "types": [
     "Fire",
@@ -4829,7 +4838,7 @@
   },
   {
    "dex": 9,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Blastoise",
    "types": [
     "Water"
@@ -4946,7 +4955,7 @@
   },
   {
    "dex": 15,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Beedrill",
    "types": [
     "Bug",
@@ -5045,7 +5054,7 @@
   },
   {
    "dex": 18,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Pidgeot",
    "types": [
     "Normal",
@@ -5300,7 +5309,7 @@
   },
   {
    "dex": 26,
-   "form": "",
+   "form": "Original, Mega X, Mega Y",
    "showdown_name": "Raichu",
    "types": [
     "Electric"
@@ -5528,7 +5537,7 @@
   },
   {
    "dex": 36,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Clefable",
    "types": [
     "Fairy"
@@ -6596,7 +6605,7 @@
   },
   {
    "dex": 71,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Victreebel",
    "types": [
     "Grass",
@@ -6701,7 +6710,7 @@
   },
   {
    "dex": 80,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Slowbro",
    "types": [
     "Water",
@@ -7018,7 +7027,7 @@
   },
   {
    "dex": 94,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Gengar",
    "types": [
     "Ghost",
@@ -7140,7 +7149,7 @@
   },
   {
    "dex": 115,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Kangaskhan",
    "types": [
     "Normal"
@@ -7252,7 +7261,7 @@
   },
   {
    "dex": 121,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Starmie",
    "types": [
     "Water",
@@ -7463,7 +7472,7 @@
   },
   {
    "dex": 127,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Pinsir",
    "types": [
     "Bug"
@@ -7871,7 +7880,7 @@
   },
   {
    "dex": 130,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Gyarados",
    "types": [
     "Water",
@@ -8252,7 +8261,7 @@
   },
   {
    "dex": 142,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Aerodactyl",
    "types": [
     "Rock",
@@ -8464,7 +8473,7 @@
   },
   {
    "dex": 149,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Dragonite",
    "types": [
     "Dragon",
@@ -8593,7 +8602,7 @@
   },
   {
    "dex": 154,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Meganium",
    "types": [
     "Grass"
@@ -8875,7 +8884,7 @@
   },
   {
    "dex": 160,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Feraligatr",
    "types": [
     "Water"
@@ -9092,7 +9101,7 @@
   },
   {
    "dex": 181,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Ampharos",
    "types": [
     "Electric"
@@ -9878,7 +9887,7 @@
   },
   {
    "dex": 208,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Steelix",
    "types": [
     "Steel",
@@ -10080,7 +10089,7 @@
   },
   {
    "dex": 212,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Scizor",
    "types": [
     "Bug",
@@ -10192,7 +10201,7 @@
   },
   {
    "dex": 214,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Heracross",
    "types": [
     "Bug",
@@ -10305,7 +10314,7 @@
   },
   {
    "dex": 227,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Skarmory",
    "types": [
     "Steel",
@@ -10404,7 +10413,7 @@
   },
   {
    "dex": 229,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Houndoom",
    "types": [
     "Dark",
@@ -10518,7 +10527,7 @@
   },
   {
    "dex": 248,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Tyranitar",
    "types": [
     "Rock",
@@ -10656,7 +10665,7 @@
   },
   {
    "dex": 254,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Sceptile",
    "types": [
     "Grass"
@@ -10779,7 +10788,7 @@
   },
   {
    "dex": 257,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Blaziken",
    "types": [
     "Fire",
@@ -10904,7 +10913,7 @@
   },
   {
    "dex": 260,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Swampert",
    "types": [
     "Water",
@@ -11105,7 +11114,7 @@
   },
   {
    "dex": 282,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Gardevoir",
    "types": [
     "Psychic",
@@ -11232,7 +11241,7 @@
   },
   {
    "dex": 302,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Sableye",
    "types": [
     "Dark",
@@ -11367,7 +11376,7 @@
   },
   {
    "dex": 303,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Mawile",
    "types": [
     "Steel",
@@ -11485,7 +11494,7 @@
   },
   {
    "dex": 306,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Aggron",
    "types": [
     "Steel",
@@ -11614,7 +11623,7 @@
   },
   {
    "dex": 308,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Medicham",
    "types": [
     "Fighting",
@@ -11737,7 +11746,7 @@
   },
   {
    "dex": 310,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Manectric",
    "types": [
     "Electric"
@@ -11917,7 +11926,7 @@
   },
   {
    "dex": 319,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Sharpedo",
    "types": [
     "Water",
@@ -12021,7 +12030,7 @@
   },
   {
    "dex": 323,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Camerupt",
    "types": [
     "Fire",
@@ -12216,7 +12225,7 @@
   },
   {
    "dex": 334,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Altaria",
    "types": [
     "Dragon",
@@ -12472,7 +12481,7 @@
   },
   {
    "dex": 354,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Banette",
    "types": [
     "Ghost"
@@ -12584,7 +12593,7 @@
   },
   {
    "dex": 358,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Chimecho",
    "types": [
     "Psychic"
@@ -12694,7 +12703,7 @@
   },
   {
    "dex": 359,
-   "form": "",
+   "form": "Original, Mega, Mega Z",
    "showdown_name": "Absol",
    "types": [
     "Dark"
@@ -12832,7 +12841,7 @@
   },
   {
    "dex": 362,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Glalie",
    "types": [
     "Ice"
@@ -12931,7 +12940,7 @@
   },
   {
    "dex": 373,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Salamence",
    "types": [
     "Dragon",
@@ -13039,7 +13048,7 @@
   },
   {
    "dex": 376,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Metagross",
    "types": [
     "Steel",
@@ -13459,7 +13468,7 @@
   },
   {
    "dex": 398,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Staraptor",
    "types": [
     "Normal",
@@ -13890,7 +13899,7 @@
   },
   {
    "dex": 428,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Lopunny",
    "types": [
     "Normal"
@@ -14090,7 +14099,7 @@
   },
   {
    "dex": 445,
-   "form": "",
+   "form": "Original, Mega, Mega Z",
    "showdown_name": "Garchomp",
    "types": [
     "Dragon",
@@ -14215,7 +14224,7 @@
   },
   {
    "dex": 448,
-   "form": "",
+   "form": "Original, Mega, Mega Z",
    "showdown_name": "Lucario",
    "types": [
     "Fighting",
@@ -14546,7 +14555,7 @@
   },
   {
    "dex": 460,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Abomasnow",
    "types": [
     "Grass",
@@ -15220,7 +15229,7 @@
   },
   {
    "dex": 475,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Gallade",
    "types": [
     "Psychic",
@@ -15373,7 +15382,7 @@
   },
   {
    "dex": 478,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Froslass",
    "types": [
     "Ice",
@@ -15964,7 +15973,7 @@
   },
   {
    "dex": 500,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Emboar",
    "types": [
     "Fire",
@@ -16727,7 +16736,7 @@
   },
   {
    "dex": 530,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Excadrill",
    "types": [
     "Ground",
@@ -17028,7 +17037,7 @@
   },
   {
    "dex": 545,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Scolipede",
    "types": [
     "Bug",
@@ -18009,7 +18018,7 @@
   },
   {
    "dex": 604,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Eelektross",
    "types": [
     "Electric"
@@ -18128,7 +18137,7 @@
   },
   {
    "dex": 609,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Chandelure",
    "types": [
     "Ghost",
@@ -18478,7 +18487,7 @@
   },
   {
    "dex": 623,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Golurk",
    "types": [
     "Ground",
@@ -18786,7 +18795,7 @@
   },
   {
    "dex": 652,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Chesnaught",
    "types": [
     "Grass",
@@ -18919,7 +18928,7 @@
   },
   {
    "dex": 655,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Delphox",
    "types": [
     "Fire",
@@ -19037,7 +19046,7 @@
   },
   {
    "dex": 658,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Greninja",
    "types": [
     "Water",
@@ -19469,7 +19478,7 @@
   },
   {
    "dex": 670,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Floette",
    "types": [
     "Fairy"
@@ -20396,7 +20405,7 @@
   },
   {
    "dex": 689,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Barbaracle",
    "types": [
     "Rock",
@@ -20515,7 +20524,7 @@
   },
   {
    "dex": 691,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Dragalge",
    "types": [
     "Poison",
@@ -21023,7 +21032,7 @@
   },
   {
    "dex": 701,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Hawlucha",
    "types": [
     "Fighting",
@@ -21562,7 +21571,7 @@
   },
   {
    "dex": 711,
-   "form": "Jumbo",
+   "form": "Small, Average, Large, Jumbo",
    "showdown_name": "Gourgeist-Super",
    "types": [
     "Ghost",
@@ -21580,261 +21589,6 @@
     "special_attack": 58,
     "special_defense": 75,
     "speed": 54
-   },
-   "megas": [],
-   "moves": [
-    "Ally Switch",
-    "Attract",
-    "Brutal Swing",
-    "Bullet Seed",
-    "Confuse Ray",
-    "Curse",
-    "Dark Pulse",
-    "Destiny Bond",
-    "Disable",
-    "Endure",
-    "Energy Ball",
-    "Explosion",
-    "Facade",
-    "Fire Blast",
-    "Flamethrower",
-    "Focus Blast",
-    "Foul Play",
-    "Giga Drain",
-    "Giga Impact",
-    "Grass Knot",
-    "Grassy Glide",
-    "Gyro Ball",
-    "Hex",
-    "Hyper Beam",
-    "Hypnosis",
-    "Imprison",
-    "Leech Seed",
-    "Light Screen",
-    "Moonblast",
-    "Mystical Fire",
-    "Nasty Plot",
-    "Pain Split",
-    "Phantom Force",
-    "Poltergeist",
-    "Power Whip",
-    "Protect",
-    "Psychic",
-    "Rest",
-    "Rock Slide",
-    "Round",
-    "Safeguard",
-    "Scary Face",
-    "Seed Bomb",
-    "Self-Destruct",
-    "Shadow Ball",
-    "Shadow Sneak",
-    "Skill Swap",
-    "Skitter Smack",
-    "Sleep Talk",
-    "Sludge Bomb",
-    "Snore",
-    "Solar Beam",
-    "Substitute",
-    "Sunny Day",
-    "Thief",
-    "Trick",
-    "Trick Room",
-    "Trick-or-Treat",
-    "Will-O-Wisp",
-    "Worry Seed"
-   ]
-  },
-  {
-   "dex": 711,
-   "form": "Large",
-   "showdown_name": "Gourgeist-Large",
-   "types": [
-    "Ghost",
-    "Grass"
-   ],
-   "abilities": [
-    "Pickup",
-    "Frisk"
-   ],
-   "hidden_ability": "Insomnia",
-   "base_stats": {
-    "hp": 75,
-    "attack": 95,
-    "defense": 122,
-    "special_attack": 58,
-    "special_defense": 75,
-    "speed": 69
-   },
-   "megas": [],
-   "moves": [
-    "Ally Switch",
-    "Attract",
-    "Brutal Swing",
-    "Bullet Seed",
-    "Confuse Ray",
-    "Curse",
-    "Dark Pulse",
-    "Destiny Bond",
-    "Disable",
-    "Endure",
-    "Energy Ball",
-    "Explosion",
-    "Facade",
-    "Fire Blast",
-    "Flamethrower",
-    "Focus Blast",
-    "Foul Play",
-    "Giga Drain",
-    "Giga Impact",
-    "Grass Knot",
-    "Grassy Glide",
-    "Gyro Ball",
-    "Hex",
-    "Hyper Beam",
-    "Hypnosis",
-    "Imprison",
-    "Leech Seed",
-    "Light Screen",
-    "Moonblast",
-    "Mystical Fire",
-    "Nasty Plot",
-    "Pain Split",
-    "Phantom Force",
-    "Poltergeist",
-    "Power Whip",
-    "Protect",
-    "Psychic",
-    "Rest",
-    "Rock Slide",
-    "Round",
-    "Safeguard",
-    "Scary Face",
-    "Seed Bomb",
-    "Self-Destruct",
-    "Shadow Ball",
-    "Shadow Sneak",
-    "Skill Swap",
-    "Skitter Smack",
-    "Sleep Talk",
-    "Sludge Bomb",
-    "Snore",
-    "Solar Beam",
-    "Substitute",
-    "Sunny Day",
-    "Thief",
-    "Trick",
-    "Trick Room",
-    "Trick-or-Treat",
-    "Will-O-Wisp",
-    "Worry Seed"
-   ]
-  },
-  {
-   "dex": 711,
-   "form": "Medium",
-   "showdown_name": "Gourgeist",
-   "types": [
-    "Ghost",
-    "Grass"
-   ],
-   "abilities": [
-    "Pickup",
-    "Frisk"
-   ],
-   "hidden_ability": "Insomnia",
-   "base_stats": {
-    "hp": 65,
-    "attack": 90,
-    "defense": 122,
-    "special_attack": 58,
-    "special_defense": 75,
-    "speed": 84
-   },
-   "megas": [],
-   "moves": [
-    "Ally Switch",
-    "Attract",
-    "Brutal Swing",
-    "Bullet Seed",
-    "Confuse Ray",
-    "Curse",
-    "Dark Pulse",
-    "Destiny Bond",
-    "Disable",
-    "Endure",
-    "Energy Ball",
-    "Explosion",
-    "Facade",
-    "Fire Blast",
-    "Flamethrower",
-    "Focus Blast",
-    "Foul Play",
-    "Giga Drain",
-    "Giga Impact",
-    "Grass Knot",
-    "Grassy Glide",
-    "Gyro Ball",
-    "Hex",
-    "Hyper Beam",
-    "Hypnosis",
-    "Imprison",
-    "Leech Seed",
-    "Light Screen",
-    "Moonblast",
-    "Mystical Fire",
-    "Nasty Plot",
-    "Pain Split",
-    "Phantom Force",
-    "Poltergeist",
-    "Power Whip",
-    "Protect",
-    "Psychic",
-    "Rest",
-    "Rock Slide",
-    "Round",
-    "Safeguard",
-    "Scary Face",
-    "Seed Bomb",
-    "Self-Destruct",
-    "Shadow Ball",
-    "Shadow Sneak",
-    "Skill Swap",
-    "Skitter Smack",
-    "Sleep Talk",
-    "Sludge Bomb",
-    "Snore",
-    "Solar Beam",
-    "Substitute",
-    "Sunny Day",
-    "Thief",
-    "Trick",
-    "Trick Room",
-    "Trick-or-Treat",
-    "Will-O-Wisp",
-    "Worry Seed"
-   ]
-  },
-  {
-   "dex": 711,
-   "form": "Small",
-   "showdown_name": "Gourgeist-Small",
-   "types": [
-    "Ghost",
-    "Grass"
-   ],
-   "abilities": [
-    "Pickup",
-    "Frisk"
-   ],
-   "hidden_ability": "Insomnia",
-   "base_stats": {
-    "hp": 55,
-    "attack": 85,
-    "defense": 122,
-    "special_attack": 58,
-    "special_defense": 75,
-    "speed": 99
    },
    "megas": [],
    "moves": [
@@ -22584,7 +22338,7 @@
   },
   {
    "dex": 740,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Crabominable",
    "types": [
     "Fighting",
@@ -23522,7 +23276,7 @@
   },
   {
    "dex": 768,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Golisopod",
    "types": [
     "Bug",
@@ -23720,7 +23474,7 @@
   },
   {
    "dex": 780,
-   "form": "",
+   "form": "Original, Mega",
    "showdown_name": "Drampa",
    "types": [
     "Normal",
@@ -24570,7 +24324,7 @@
   },
   {
    "dex": 849,
-   "form": "Amped",
+   "form": "Amped, Low Key",
    "showdown_name": "Toxtricity",
    "types": [
     "Electric",
@@ -24659,99 +24413,6 @@
     "Volt Switch",
     "Wild Charge",
     "Zap Cannon"
-   ]
-  },
-  {
-   "dex": 849,
-   "form": "Low Key",
-   "showdown_name": "Toxtricity-Low-Key",
-   "types": [
-    "Electric",
-    "Poison"
-   ],
-   "abilities": [
-    "Punk Rock",
-    "Minus"
-   ],
-   "hidden_ability": "Technician",
-   "base_stats": {
-    "hp": 75,
-    "attack": 98,
-    "defense": 70,
-    "special_attack": 114,
-    "special_defense": 70,
-    "speed": 75
-   },
-   "megas": [],
-   "moves": [
-    "Acid Spray",
-    "Belch",
-    "Boomburst",
-    "Brick Break",
-    "Charge",
-    "Charge Beam",
-    "Charm",
-    "Discharge",
-    "Drain Punch",
-    "Eerie Impulse",
-    "Electric Terrain",
-    "Electro Ball",
-    "Electroweb",
-    "Encore",
-    "Endeavor",
-    "Endure",
-    "Facade",
-    "Fire Punch",
-    "Flail",
-    "Fling",
-    "Giga Impact",
-    "Gunk Shot",
-    "Helping Hand",
-    "Hex",
-    "Hyper Beam",
-    "Hyper Voice",
-    "Magnetic Flux",
-    "Mega Kick",
-    "Metal Sound",
-    "Noble Roar",
-    "Nuzzle",
-    "Overdrive",
-    "Parabolic Charge",
-    "Payback",
-    "Poison Jab",
-    "Protect",
-    "Psychic Noise",
-    "Rain Dance",
-    "Rest",
-    "Rising Voltage",
-    "Round",
-    "Scary Face",
-    "Screech",
-    "Sleep Talk",
-    "Sludge Bomb",
-    "Sludge Wave",
-    "Snarl",
-    "Snore",
-    "Stored Power",
-    "Substitute",
-    "Sunny Day",
-    "Swagger",
-    "Taunt",
-    "Tearful Look",
-    "Thief",
-    "Throat Chop",
-    "Thunder",
-    "Thunder Fang",
-    "Thunder Punch",
-    "Thunder Wave",
-    "Thunderbolt",
-    "Toxic",
-    "Toxic Spikes",
-    "Trailblaze",
-    "Uproar",
-    "Venoshock",
-    "Volt Switch",
-    "Wild Charge"
    ]
   },
   {
@@ -26979,7 +26640,7 @@
   },
   {
    "dex": 931,
-   "form": "Blue Plumage",
+   "form": "Green, Blue, Yellow, White",
    "showdown_name": "Squawkabilly-Blue",
    "types": [
     "Normal",
@@ -26990,210 +26651,6 @@
     "Hustle"
    ],
    "hidden_ability": "Guts",
-   "base_stats": {
-    "hp": 82,
-    "attack": 96,
-    "defense": 51,
-    "special_attack": 45,
-    "special_defense": 51,
-    "speed": 92
-   },
-   "megas": [],
-   "moves": [
-    "Aerial Ace",
-    "Air Cutter",
-    "Air Slash",
-    "Brave Bird",
-    "Copycat",
-    "Double-Edge",
-    "Dual Wingbeat",
-    "Endeavor",
-    "Endure",
-    "Facade",
-    "Fake Tears",
-    "Feather Dance",
-    "Final Gambit",
-    "Flatter",
-    "Fly",
-    "Foul Play",
-    "Giga Impact",
-    "Heat Wave",
-    "Helping Hand",
-    "Hurricane",
-    "Hyper Beam",
-    "Hyper Voice",
-    "Lash Out",
-    "Lunge",
-    "Parting Shot",
-    "Pounce",
-    "Protect",
-    "Quick Attack",
-    "Rest",
-    "Reversal",
-    "Roost",
-    "Scary Face",
-    "Seed Bomb",
-    "Sleep Talk",
-    "Substitute",
-    "Sunny Day",
-    "Swagger",
-    "Tailwind",
-    "Taunt",
-    "Thief",
-    "Torment",
-    "U-turn",
-    "Uproar"
-   ]
-  },
-  {
-   "dex": 931,
-   "form": "Green Plumage",
-   "showdown_name": "Squawkabilly",
-   "types": [
-    "Normal",
-    "Flying"
-   ],
-   "abilities": [
-    "Intimidate",
-    "Hustle"
-   ],
-   "hidden_ability": "Guts",
-   "base_stats": {
-    "hp": 82,
-    "attack": 96,
-    "defense": 51,
-    "special_attack": 45,
-    "special_defense": 51,
-    "speed": 92
-   },
-   "megas": [],
-   "moves": [
-    "Aerial Ace",
-    "Air Cutter",
-    "Air Slash",
-    "Brave Bird",
-    "Copycat",
-    "Double-Edge",
-    "Dual Wingbeat",
-    "Endeavor",
-    "Endure",
-    "Facade",
-    "Fake Tears",
-    "Feather Dance",
-    "Final Gambit",
-    "Flatter",
-    "Fly",
-    "Foul Play",
-    "Giga Impact",
-    "Heat Wave",
-    "Helping Hand",
-    "Hurricane",
-    "Hyper Beam",
-    "Hyper Voice",
-    "Lash Out",
-    "Lunge",
-    "Parting Shot",
-    "Pounce",
-    "Protect",
-    "Quick Attack",
-    "Rest",
-    "Reversal",
-    "Roost",
-    "Scary Face",
-    "Seed Bomb",
-    "Sleep Talk",
-    "Substitute",
-    "Sunny Day",
-    "Swagger",
-    "Tailwind",
-    "Taunt",
-    "Thief",
-    "Torment",
-    "U-turn",
-    "Uproar"
-   ]
-  },
-  {
-   "dex": 931,
-   "form": "White Plumage",
-   "showdown_name": "Squawkabilly-White",
-   "types": [
-    "Normal",
-    "Flying"
-   ],
-   "abilities": [
-    "Intimidate",
-    "Hustle"
-   ],
-   "hidden_ability": "Sheer Force",
-   "base_stats": {
-    "hp": 82,
-    "attack": 96,
-    "defense": 51,
-    "special_attack": 45,
-    "special_defense": 51,
-    "speed": 92
-   },
-   "megas": [],
-   "moves": [
-    "Aerial Ace",
-    "Air Cutter",
-    "Air Slash",
-    "Brave Bird",
-    "Copycat",
-    "Double-Edge",
-    "Dual Wingbeat",
-    "Endeavor",
-    "Endure",
-    "Facade",
-    "Fake Tears",
-    "Feather Dance",
-    "Final Gambit",
-    "Flatter",
-    "Fly",
-    "Foul Play",
-    "Giga Impact",
-    "Heat Wave",
-    "Helping Hand",
-    "Hurricane",
-    "Hyper Beam",
-    "Hyper Voice",
-    "Lash Out",
-    "Lunge",
-    "Parting Shot",
-    "Pounce",
-    "Protect",
-    "Quick Attack",
-    "Rest",
-    "Reversal",
-    "Roost",
-    "Scary Face",
-    "Seed Bomb",
-    "Sleep Talk",
-    "Substitute",
-    "Sunny Day",
-    "Swagger",
-    "Tailwind",
-    "Taunt",
-    "Thief",
-    "Torment",
-    "U-turn",
-    "Uproar"
-   ]
-  },
-  {
-   "dex": 931,
-   "form": "Yellow Plumage",
-   "showdown_name": "Squawkabilly-Yellow",
-   "types": [
-    "Normal",
-    "Flying"
-   ],
-   "abilities": [
-    "Intimidate",
-    "Hustle"
-   ],
-   "hidden_ability": "Sheer Force",
    "base_stats": {
     "hp": 82,
     "attack": 96,
@@ -28371,8 +27828,86 @@
    ]
   },
   {
-   "dex": 998,
+   "dex": 983,
    "form": "",
+   "showdown_name": "Kingambit",
+   "types": [
+    "Dark",
+    "Steel"
+   ],
+   "abilities": [
+    "Defiant",
+    "Supreme Overlord"
+   ],
+   "hidden_ability": "Pressure",
+   "base_stats": {
+    "hp": 100,
+    "attack": 135,
+    "defense": 120,
+    "special_attack": 60,
+    "special_defense": 85,
+    "speed": 50
+   },
+   "megas": [],
+   "moves": [
+    "Aerial Ace",
+    "Air Slash",
+    "Assurance",
+    "Brick Break",
+    "Dark Pulse",
+    "Dig",
+    "Endure",
+    "Facade",
+    "Flash Cannon",
+    "Fling",
+    "Focus Blast",
+    "Foul Play",
+    "Giga Impact",
+    "Grass Knot",
+    "Guillotine",
+    "Hyper Beam",
+    "Iron Defense",
+    "Iron Head",
+    "Kowtow Cleave",
+    "Lash Out",
+    "Low Kick",
+    "Low Sweep",
+    "Mean Look",
+    "Metal Burst",
+    "Metal Sound",
+    "Night Slash",
+    "Poison Jab",
+    "Protect",
+    "Quick Guard",
+    "Rain Dance",
+    "Rest",
+    "Reversal",
+    "Rock Tomb",
+    "Sandstorm",
+    "Scary Face",
+    "Shadow Claw",
+    "Slash",
+    "Sleep Talk",
+    "Snarl",
+    "Spite",
+    "Stealth Rock",
+    "Steel Beam",
+    "Stone Edge",
+    "Substitute",
+    "Sucker Punch",
+    "Swords Dance",
+    "Taunt",
+    "Thief",
+    "Throat Chop",
+    "Thunder Wave",
+    "Torment",
+    "X-Scissor",
+    "Zen Headbutt"
+   ]
+  },
+  {
+   "dex": 998,
+   "form": "Original, Mega",
    "showdown_name": "Baxcalibur",
    "types": [
     "Dragon",
