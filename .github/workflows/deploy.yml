@@ -1,0 +1,78 @@
+name: Deploy preprod
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-preprod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy selected commit to preprod
+    runs-on: ubuntu-latest
+    environment: preprod
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out selected commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.20"
+          python-version: "3.12"
+          enable-cache: false
+
+      - name: Install deployment dependencies
+        run: uv sync --project deploy --locked --no-dev
+
+      # Bundle root: settings.py, state.json, id_rsa, known_hosts.
+      # settings.py: STATE_DIR = "."
+      # state.json: "private_key": "deploy/private/id_rsa"
+      # The runner must already be allowed through the host's SSH firewall.
+      - name: Restore deployment bundle
+        env:
+          DEPLOY_BUNDLE_B64: ${{ secrets.DEPLOY_BUNDLE_B64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$DEPLOY_BUNDLE_B64" ]]; then
+            echo "Missing DEPLOY_BUNDLE_B64 in the preprod environment." >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p deploy/private
+          printf '%s' "$DEPLOY_BUNDLE_B64" \
+            | base64 --decode \
+            | tar --extract --gzip --file=- \
+                --directory=deploy/private --no-same-owner --no-same-permissions
+          for file in settings.py state.json id_rsa known_hosts; do
+            if [[ ! -s "deploy/private/$file" ]]; then
+              echo "Deployment bundle is missing a nonempty $file." >&2
+              exit 1
+            fi
+          done
+          chmod 700 deploy/private
+          chmod 600 deploy/private/{settings.py,state.json,id_rsa,known_hosts}
+
+      - name: Deploy selected commit
+        run: |
+          uv run --locked --no-dev --project deploy python deploy/manage.py deploy \
+            --revision "$GITHUB_SHA"
+
+      - name: Check public site
+        run: uv run --locked --no-dev --project deploy python deploy/manage.py smoke
+
+      - name: Remove deployment inputs
+        if: always()
+        run: rm -rf -- deploy/private
