@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  AlertTriangle,
   BookOpen,
   Bookmark,
   CalendarDays,
@@ -279,6 +280,7 @@ export default function App() {
   const [create, setCreate] = useState(false)
   const [help, setHelp] = useState(false)
   const [selected, setSelected] = useState<SelectedPick | null>(null)
+  const [confirmPick, setConfirmPick] = useState(false)
   const [confirmAction, setConfirmAction] = useState<{
     kind: 'start' | 'undo'
     revision: number
@@ -288,6 +290,7 @@ export default function App() {
   const [filterState, setFilterState] = useState<CatalogFilterState>(INITIAL_CATALOG_FILTERS)
   useEffect(() => {
     setSelected(null)
+    setConfirmPick(false)
     setConfirmAction(null)
     setAvailabilityContext(null)
   }, [draft.leagueId, mode, session?.user.id])
@@ -299,6 +302,13 @@ export default function App() {
   const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
   const can = (kind: string) => snapshot?.actions.some((action) => action.kind === kind) ?? false
   const commissioner = snapshot?.league.commissioner_user_id === session?.user.id
+  const pickingForOther = Boolean(
+    snapshot?.state.status === 'drafting' &&
+      commissioner &&
+      activeTeam &&
+      activeTeam.manager_user_id !== session?.user.id,
+  )
+  const activeManager = draft.users.find((user) => user.id === activeTeam?.manager_user_id)
   const selectedTaken =
     selected && snapshot?.rosters.some((pick) => pick.draftable_id === selected.item.id)
   const pickChanged =
@@ -317,6 +327,7 @@ export default function App() {
       revision: snapshot?.revision ?? -1,
       teamId: snapshot?.state.next_team_id ?? null,
     })
+    setConfirmPick(false)
     setChargePoints(true)
   }
 
@@ -520,6 +531,7 @@ export default function App() {
               aria-label="Refresh all data"
               onClick={() => {
                 setSelected(null)
+                setConfirmPick(false)
                 setConfirmAction(null)
                 void draft.refreshData()
               }}
@@ -947,16 +959,39 @@ export default function App() {
           }}
         />
       )}
-      {selected && (
+      {selected && !confirmPick && (
         <Modal
           title={snapshot ? 'Pick details' : 'Pokémon details'}
-          onClose={() => setSelected(null)}
+          onClose={() => {
+            setSelected(null)
+            setConfirmPick(false)
+          }}
         >
           <PokemonDetails key={selected.item.id} item={selected.item} />
+          {pickingForOther && activeTeam && (
+            <div className="commissioner-pick-warning" role="alert">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>Commissioner override — Picking for {teamName(activeTeam)}</strong>
+                <p>
+                  It is currently{' '}
+                  {activeManager
+                    ? `${activeManager.display_name}’s (${teamName(activeTeam)})`
+                    : `${teamName(activeTeam)}’s`}{' '}
+                  turn, not yours. Any pick you submit will be added to their roster.
+                </p>
+              </div>
+            </div>
+          )}
           {snapshot && (
-            <div className="pick-summary">
+            <div className={`pick-summary ${pickingForOther ? 'is-proxy-pick' : ''}`}>
               <span>
-                Drafting for<strong>{activeTeam ? teamName(activeTeam) : 'No active turn'}</strong>
+                Drafting for
+                <strong>
+                  {activeTeam
+                    ? `${teamName(activeTeam)}${activeTeam.manager_user_id === session?.user.id ? ' (You)' : ' (Other manager)'}`
+                    : 'No active turn'}
+                </strong>
               </span>
               <span>
                 Points after pick
@@ -997,16 +1032,23 @@ export default function App() {
           ) : null}
           {snapshot && (
             <button
-              className="button primary full-width"
+              className={`button ${pickingForOther ? 'warning' : 'primary'} full-width`}
               disabled={!pickAllowed || draft.busy}
               onClick={async () => {
-                await draft.draftAction('pick', selected.item.id, chargePoints)
-                setSelected(null)
+                if (pickingForOther) {
+                  setConfirmPick(true)
+                  return
+                }
+                if (await draft.draftAction('pick', selected.item.id, chargePoints)) {
+                  setSelected(null)
+                }
               }}
             >
               {draft.busy
                 ? 'Submitting pick…'
-                : `Draft ${selected.item.species || selected.item.name}`}
+                : pickingForOther && activeTeam
+                  ? `Draft ${selected.item.species || selected.item.name} for ${teamName(activeTeam)}`
+                  : `Draft ${selected.item.species || selected.item.name}`}
               <ArrowRight size={17} />
             </button>
           )}
@@ -1049,6 +1091,78 @@ export default function App() {
               {favorites.error}
             </p>
           )}
+        </Modal>
+      )}
+      {selected && confirmPick && snapshot && (
+        <Modal
+          title="Are you sure?"
+          onClose={() => setConfirmPick(false)}
+        >
+          <div className="commissioner-pick-warning" role="alert">
+            <AlertTriangle size={18} />
+            <div>
+              <strong>
+                You are picking on behalf of {activeTeam ? teamName(activeTeam) : 'another team'}
+              </strong>
+              <p>
+                As league commissioner, you are about to draft{' '}
+                <strong>{selected.item.species || selected.item.name}</strong> for{' '}
+                <strong>
+                  {activeTeam ? teamName(activeTeam) : 'another team'}
+                  {activeManager ? ` (${activeManager.display_name})` : ''}
+                </strong>
+                , not your own team.
+              </p>
+            </div>
+          </div>
+          <div className="pick-summary is-proxy-pick">
+            <span>
+              Pokémon
+              <strong>{selected.item.species || selected.item.name}</strong>
+            </span>
+            <span>
+              Drafting for
+              <strong>{activeTeam ? teamName(activeTeam) : '—'}</strong>
+            </span>
+            <span>
+              Point cost
+              <strong>{chargePoints ? `${cost} pts` : '0 pts (Waived)'}</strong>
+            </span>
+            <span>
+              Points after pick
+              <strong>{activeTeam ? activeTeam.points_remaining - cost : '—'}</strong>
+            </span>
+          </div>
+          {pickChanged && (
+            <p className="selection-notice">
+              The draft has changed. Go back and select again to review the latest turn.
+            </p>
+          )}
+          <div className="modal-actions">
+            <button
+              className="button secondary"
+              disabled={draft.busy}
+              onClick={() => setConfirmPick(false)}
+            >
+              <ArrowLeft size={15} />
+              Go back
+            </button>
+            <button
+              className="button warning"
+              disabled={!pickAllowed || draft.busy}
+              onClick={async () => {
+                if (await draft.draftAction('pick', selected.item.id, chargePoints)) {
+                  setConfirmPick(false)
+                  setSelected(null)
+                }
+              }}
+            >
+              {draft.busy
+                ? 'Submitting pick…'
+                : `Yes, draft for ${activeTeam ? teamName(activeTeam) : 'team'}`}
+              <ArrowRight size={15} />
+            </button>
+          </div>
         </Modal>
       )}
       {confirmAction && snapshot && (

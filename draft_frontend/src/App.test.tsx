@@ -613,4 +613,109 @@ describe('league navigation and team presentation', () => {
       renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
     ).toHaveLength(0)
   })
+
+  it('warns the commissioner and asks for confirmation when picking on another team’s behalf', async () => {
+    const snap = league('drafting')
+    snap.state.next_pick_number = 2
+    snap.state.next_team_id = 2 // Blackbirds (manager_user_id: 22, Bob), while signed-in user is 11 (Alice, commissioner)
+    snap.actions = [
+      {
+        league_id: 7,
+        revision: 5,
+        actor_user_id: 11,
+        kind: 'pick',
+        pick_number: 2,
+        target_pick_id: null,
+      },
+    ]
+    draft.snapshot = snap
+    await render()
+
+    const banner = renderer!.root.findByProps({ 'aria-label': 'On the clock status banner' })
+    expect(banner.props.className).toContain('is-proxy-turn')
+    expect(text(banner)).toContain('COMMISSIONER OVERRIDE — NOT YOUR TURN')
+    expect(text(banner)).toContain('Blackbirds')
+
+    // Open Pikachu pick modal
+    await act(async () => vi.mocked(BigBoard).mock.lastCall?.[0].onSelect(draft.catalog[0]))
+
+    const pickDialog = renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Pick details' })
+    expect(text(pickDialog)).toContain('Commissioner override — Picking for Blackbirds')
+    expect(text(pickDialog)).toContain('Bob’s (Blackbirds)')
+    expect(text(pickDialog)).toContain('Blackbirds (Other manager)')
+
+    const draftBtn = pickDialog
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Draft Pikachu for Blackbirds'))!
+    expect(draftBtn.props.className).toContain('warning')
+
+    // Clicking the draft button opens the "Are you sure?" confirmation modal instead of immediately submitting
+    await act(async () => draftBtn.props.onClick())
+    expect(draft.draftAction).not.toHaveBeenCalled()
+
+    const confirmDialog = renderer!.root.findByProps({
+      role: 'dialog',
+      'aria-label': 'Are you sure?',
+    })
+    expect(text(confirmDialog)).toContain('You are picking on behalf of Blackbirds')
+    expect(text(confirmDialog)).toContain('Pikachu')
+    expect(text(confirmDialog)).toContain('12 pts')
+
+    // Going back returns to Pick details without submitting
+    const backBtn = confirmDialog
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Go back'))!
+    await act(async () => backBtn.props.onClick())
+    expect(draft.draftAction).not.toHaveBeenCalled()
+    expect(renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Pick details' })).toBeDefined()
+
+    // Open confirmation again and confirm the pick
+    const draftBtnAgain = renderer!.root
+      .findByProps({ role: 'dialog', 'aria-label': 'Pick details' })
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Draft Pikachu for Blackbirds'))!
+    await act(async () => draftBtnAgain.props.onClick())
+
+    const confirmBtn = renderer!.root
+      .findByProps({ role: 'dialog', 'aria-label': 'Are you sure?' })
+      .findAllByType('button')
+      .find((btn) => text(btn).includes('Yes, draft for Blackbirds'))!
+    await act(async () => confirmBtn.props.onClick())
+
+    expect(draft.draftAction).toHaveBeenCalledExactlyOnceWith('pick', 25, true)
+    expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
+  })
+
+  it('submits immediately without an extra confirmation popup when picking for your own team', async () => {
+    const snap = league('drafting')
+    snap.state.next_pick_number = 1
+    snap.state.next_team_id = 1 // Team #1 (manager_user_id: 11, Alice)
+    snap.actions = [
+      {
+        league_id: 7,
+        revision: 5,
+        actor_user_id: 11,
+        kind: 'pick',
+        pick_number: 1,
+        target_pick_id: null,
+      },
+    ]
+    draft.snapshot = snap
+    await render()
+
+    await act(async () => vi.mocked(BigBoard).mock.lastCall?.[0].onSelect(draft.catalog[0]))
+
+    const pickDialog = renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Pick details' })
+    expect(text(pickDialog)).not.toContain('Commissioner override')
+    expect(text(pickDialog)).toContain('Team #1 (You)')
+
+    const draftBtn = pickDialog
+      .findAllByType('button')
+      .find((btn) => text(btn) === 'Draft Pikachu')!
+    expect(draftBtn.props.className).toContain('primary')
+
+    await act(async () => draftBtn.props.onClick())
+    expect(draft.draftAction).toHaveBeenCalledExactlyOnceWith('pick', 25, true)
+    expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
+  })
 })
