@@ -1,6 +1,9 @@
 name: Deploy preprod
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -8,6 +11,7 @@ permissions:
 
 concurrency:
   group: deploy-preprod
+  # Finish an active deployment; newer pending runs replace older pending runs.
   cancel-in-progress: false
 
 jobs:
