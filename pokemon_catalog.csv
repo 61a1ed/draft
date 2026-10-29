@@ -1,51 +1,51 @@
 dex,species,form,points,image_path
-3,Venusaur,,16,sprites/home-centered/venusaur.png
-6,Charizard,,22,sprites/home-centered/charizard.png
-9,Blastoise,,14,sprites/home-centered/blastoise.png
-15,Beedrill,,7,sprites/home-centered/beedrill.png
-18,Pidgeot,,8,sprites/home-centered/pidgeot.png
+3,Venusaur,"Original, Mega",17,sprites/home-centered/venusaur.png
+6,Charizard,"Original, Mega X, Mega Y",23,sprites/home-centered/charizard.png
+9,Blastoise,"Original, Mega",13,sprites/home-centered/blastoise.png
+15,Beedrill,"Original, Mega",7,sprites/home-centered/beedrill.png
+18,Pidgeot,"Original, Mega",8,sprites/home-centered/pidgeot.png
 24,Arbok,,3,sprites/home-centered/arbok.png
 25,Pikachu,,2,sprites/home-centered/pikachu.png
-26,Raichu,,19,sprites/home-centered/raichu.png
+26,Raichu,"Original, Mega X, Mega Y",19,sprites/home-centered/raichu.png
 26,Raichu,Alolan,3,sprites/home-centered/raichu-alola.png
-36,Clefable,,17,sprites/home-centered/clefable.png
-38,Ninetales,,14,sprites/home-centered/ninetales.png
-38,Ninetales,Alolan,16,sprites/home-centered/ninetales-alola.png
-40,Wigglytuff,,2,sprites/home-centered/wigglytuff.png
+36,Clefable,"Original, Mega",18,sprites/home-centered/clefable.png
+38,Ninetales,,2,sprites/home-centered/ninetales.png
+38,Ninetales,Alolan,14,sprites/home-centered/ninetales-alola.png
+40,Wigglytuff,,16,sprites/home-centered/wigglytuff.png
 45,Vileplume,,6,sprites/home-centered/vileplume.png
 53,Persian,,1,sprites/home-centered/persian.png
 53,Persian,Alolan,2,sprites/home-centered/persian-alola.png
 59,Arcanine,,13,sprites/home-centered/arcanine.png
 59,Arcanine,Hisuian,15,sprites/home-centered/arcanine-hisui.png
-65,Alakazam,,11,sprites/home-centered/alakazam.png
+65,Alakazam,,10,sprites/home-centered/alakazam.png
 68,Machamp,,4,sprites/home-centered/machamp.png
-71,Victreebel,,7,sprites/home-centered/victreebel.png
-80,Slowbro,,12,sprites/home-centered/slowbro.png
+71,Victreebel,"Original, Mega",7,sprites/home-centered/victreebel.png
+80,Slowbro,"Original, Mega",13,sprites/home-centered/slowbro.png
 80,Slowbro,Galarian,10,sprites/home-centered/slowbro-galar.png
 83,Farfetch'd,,1,sprites/home-centered/farfetchd.png
-94,Gengar,,21,sprites/home-centered/gengar.png
-115,Kangaskhan,,17,sprites/home-centered/kangaskhan.png
-121,Starmie,,16,sprites/home-centered/starmie.png
+94,Gengar,"Original, Mega",20,sprites/home-centered/gengar.png
+115,Kangaskhan,"Original, Mega",16,sprites/home-centered/kangaskhan.png
+121,Starmie,"Original, Mega",15,sprites/home-centered/starmie.png
 122,Mr. Mime,,1,sprites/home-centered/mrmime.png
-127,Pinsir,,10,sprites/home-centered/pinsir.png
+127,Pinsir,"Original, Mega",10,sprites/home-centered/pinsir.png
 128,Tauros,,9,sprites/home-centered/tauros.png
-128,Tauros,Paldean (Aqua Breed),15,sprites/home-centered/tauros-paldeaaqua.png
+128,Tauros,Paldean (Aqua Breed),11,sprites/home-centered/tauros-paldeaaqua.png
 128,Tauros,Paldean (Blaze Breed),14,sprites/home-centered/tauros-paldeablaze.png
-128,Tauros,Paldean (Combat Breed),11,sprites/home-centered/tauros-paldeacombat.png
-130,Gyarados,,15,sprites/home-centered/gyarados.png
+128,Tauros,Paldean (Combat Breed),15,sprites/home-centered/tauros-paldeacombat.png
+130,Gyarados,"Original, Mega",16,sprites/home-centered/gyarados.png
 132,Ditto,,4,sprites/home-centered/ditto.png
 134,Vaporeon,,8,sprites/home-centered/vaporeon.png
 135,Jolteon,,6,sprites/home-centered/jolteon.png
 136,Flareon,,2,sprites/home-centered/flareon.png
-142,Aerodactyl,,18,sprites/home-centered/aerodactyl.png
+142,Aerodactyl,"Original, Mega",19,sprites/home-centered/aerodactyl.png
 143,Snorlax,,10,sprites/home-centered/snorlax.png
-149,Dragonite,,17,sprites/home-centered/dragonite.png
-154,Meganium,,17,sprites/home-centered/meganium.png
+149,Dragonite,"Original, Mega",18,sprites/home-centered/dragonite.png
+154,Meganium,"Original, Mega",16,sprites/home-centered/meganium.png
 157,Typhlosion,,8,sprites/home-centered/typhlosion.png
 157,Typhlosion,Hisuian,11,sprites/home-centered/typhlosion-hisui.png
-160,Feraligatr,,15,sprites/home-centered/feraligatr.png
+160,Feraligatr,"Original, Mega",14,sprites/home-centered/feraligatr.png
 168,Ariados,,4,sprites/home-centered/ariados.png
-181,Ampharos,,4,sprites/home-centered/ampharos.png
+181,Ampharos,"Original, Mega",4,sprites/home-centered/ampharos.png
 184,Azumarill,,11,sprites/home-centered/azumarill.png
 186,Politoed,,16,sprites/home-centered/politoed.png
 196,Espeon,,4,sprites/home-centered/espeon.png
@@ -53,67 +53,67 @@ dex,species,form,points,image_path
 199,Slowking,,13,sprites/home-centered/slowking.png
 199,Slowking,Galarian,12,sprites/home-centered/slowking-galar.png
 205,Forretress,,1,sprites/home-centered/forretress.png
-208,Steelix,,7,sprites/home-centered/steelix.png
+208,Steelix,"Original, Mega",6,sprites/home-centered/steelix.png
 211,Qwilfish,,3,sprites/home-centered/qwilfish.png
-212,Scizor,,14,sprites/home-centered/scizor.png
-214,Heracross,,12,sprites/home-centered/heracross.png
-227,Skarmory,,15,sprites/home-centered/skarmory.png
-229,Houndoom,,4,sprites/home-centered/houndoom.png
-248,Tyranitar,,19,sprites/home-centered/tyranitar.png
-254,Sceptile,,12,sprites/home-centered/sceptile.png
-257,Blaziken,,13,sprites/home-centered/blaziken.png
-260,Swampert,,21,sprites/home-centered/swampert.png
+212,Scizor,"Original, Mega",13,sprites/home-centered/scizor.png
+214,Heracross,"Original, Mega",11,sprites/home-centered/heracross.png
+227,Skarmory,"Original, Mega",14,sprites/home-centered/skarmory.png
+229,Houndoom,"Original, Mega",4,sprites/home-centered/houndoom.png
+248,Tyranitar,"Original, Mega",20,sprites/home-centered/tyranitar.png
+254,Sceptile,"Original, Mega",11,sprites/home-centered/sceptile.png
+257,Blaziken,"Original, Mega",12,sprites/home-centered/blaziken.png
+260,Swampert,"Original, Mega",20,sprites/home-centered/swampert.png
 279,Pelipper,,16,sprites/home-centered/pelipper.png
-282,Gardevoir,,17,sprites/home-centered/gardevoir.png
-302,Sableye,,16,sprites/home-centered/sableye.png
-303,Mawile,,21,sprites/home-centered/mawile.png
-306,Aggron,,9,sprites/home-centered/aggron.png
-308,Medicham,,12,sprites/home-centered/medicham.png
-310,Manectric,,14,sprites/home-centered/manectric.png
+282,Gardevoir,"Original, Mega",16,sprites/home-centered/gardevoir.png
+302,Sableye,"Original, Mega",17,sprites/home-centered/sableye.png
+303,Mawile,"Original, Mega",19,sprites/home-centered/mawile.png
+306,Aggron,"Original, Mega",15,sprites/home-centered/aggron.png
+308,Medicham,"Original, Mega",12,sprites/home-centered/medicham.png
+310,Manectric,"Original, Mega",14,sprites/home-centered/manectric.png
 317,Swalot,,2,sprites/home-centered/swalot.png
-319,Sharpedo,,10,sprites/home-centered/sharpedo.png
-323,Camerupt,,12,sprites/home-centered/camerupt.png
+319,Sharpedo,"Original, Mega",10,sprites/home-centered/sharpedo.png
+323,Camerupt,"Original, Mega",12,sprites/home-centered/camerupt.png
 324,Torkoal,,17,sprites/home-centered/torkoal.png
-334,Altaria,,11,sprites/home-centered/altaria.png
+334,Altaria,"Original, Mega",11,sprites/home-centered/altaria.png
 350,Milotic,,14,sprites/home-centered/milotic.png
 351,Castform,,1,sprites/home-centered/castform.png
-354,Banette,,4,sprites/home-centered/banette.png
-358,Chimecho,,5,sprites/home-centered/chimecho.png
-359,Absol,,17,sprites/home-centered/absol.png
-362,Glalie,,3,sprites/home-centered/glalie.png
-373,Salamence,,21,sprites/home-centered/salamence.png
-376,Metagross,,22,sprites/home-centered/metagross.png
+354,Banette,"Original, Mega",4,sprites/home-centered/banette.png
+358,Chimecho,"Original, Mega",10,sprites/home-centered/chimecho.png
+359,Absol,"Original, Mega, Mega Z",17,sprites/home-centered/absol.png
+362,Glalie,"Original, Mega",3,sprites/home-centered/glalie.png
+373,Salamence,"Original, Mega",21,sprites/home-centered/salamence.png
+376,Metagross,"Original, Mega",21,sprites/home-centered/metagross.png
 389,Torterra,,5,sprites/home-centered/torterra.png
 392,Infernape,,7,sprites/home-centered/infernape.png
 395,Empoleon,,11,sprites/home-centered/empoleon.png
-398,Staraptor,,17,sprites/home-centered/staraptor.png
+398,Staraptor,"Original, Mega",16,sprites/home-centered/staraptor.png
 405,Luxray,,2,sprites/home-centered/luxray.png
 407,Roserade,,8,sprites/home-centered/roserade.png
 409,Rampardos,,2,sprites/home-centered/rampardos.png
 411,Bastiodon,,2,sprites/home-centered/bastiodon.png
-428,Lopunny,,12,sprites/home-centered/lopunny.png
+428,Lopunny,"Original, Mega",11,sprites/home-centered/lopunny.png
 442,Spiritomb,,9,sprites/home-centered/spiritomb.png
-445,Garchomp,,21,sprites/home-centered/garchomp.png
-448,Lucario,,16,sprites/home-centered/lucario.png
+445,Garchomp,"Original, Mega, Mega Z",22,sprites/home-centered/garchomp.png
+448,Lucario,"Original, Mega, Mega Z",16,sprites/home-centered/lucario.png
 450,Hippowdon,,11,sprites/home-centered/hippowdon.png
 454,Toxicroak,,4,sprites/home-centered/toxicroak.png
-460,Abomasnow,,10,sprites/home-centered/abomasnow.png
+460,Abomasnow,"Original, Mega",11,sprites/home-centered/abomasnow.png
 461,Weavile,,12,sprites/home-centered/weavile.png
 464,Rhyperior,,9,sprites/home-centered/rhyperior.png
 470,Leafeon,,2,sprites/home-centered/leafeon.png
 471,Glaceon,,6,sprites/home-centered/glaceon.png
 472,Gliscor,,5,sprites/home-centered/gliscor.png
 473,Mamoswine,,12,sprites/home-centered/mamoswine.png
-475,Gallade,,14,sprites/home-centered/gallade.png
-478,Froslass,,20,sprites/home-centered/froslass.png
+475,Gallade,"Original, Mega",15,sprites/home-centered/gallade.png
+478,Froslass,"Original, Mega",19,sprites/home-centered/froslass.png
 479,Rotom,,6,sprites/home-centered/rotom.png
-479,Rotom,Fan,6,sprites/home-centered/rotom-fan.png
-479,Rotom,Frost,7,sprites/home-centered/rotom-frost.png
-479,Rotom,Heat,14,sprites/home-centered/rotom-heat.png
-479,Rotom,Mow,10,sprites/home-centered/rotom-mow.png
-479,Rotom,Wash,15,sprites/home-centered/rotom-wash.png
+479,Rotom,Fan,14,sprites/home-centered/rotom-fan.png
+479,Rotom,Frost,15,sprites/home-centered/rotom-frost.png
+479,Rotom,Heat,7,sprites/home-centered/rotom-heat.png
+479,Rotom,Mow,6,sprites/home-centered/rotom-mow.png
+479,Rotom,Wash,10,sprites/home-centered/rotom-wash.png
 497,Serperior,,6,sprites/home-centered/serperior.png
-500,Emboar,,7,sprites/home-centered/emboar.png
+500,Emboar,"Original, Mega",10,sprites/home-centered/emboar.png
 503,Samurott,,2,sprites/home-centered/samurott.png
 503,Samurott,Hisuian,11,sprites/home-centered/samurott-hisui.png
 505,Watchog,,1,sprites/home-centered/watchog.png
@@ -122,13 +122,13 @@ dex,species,form,points,image_path
 514,Simisear,,3,sprites/home-centered/simisear.png
 516,Simipour,,4,sprites/home-centered/simipour.png
 518,Musharna,,6,sprites/home-centered/musharna.png
-530,Excadrill,,17,sprites/home-centered/excadrill.png
-531,Audino,,4,sprites/home-centered/audino.png
+530,Excadrill,"Original, Mega",18,sprites/home-centered/excadrill.png
+531,Audino,,5,sprites/home-centered/audino.png
 534,Conkeldurr,,9,sprites/home-centered/conkeldurr.png
-545,Scolipede,,8,sprites/home-centered/scolipede.png
+545,Scolipede,"Original, Mega",8,sprites/home-centered/scolipede.png
 547,Whimsicott,,21,sprites/home-centered/whimsicott.png
 553,Krookodile,,13,sprites/home-centered/krookodile.png
-560,Scrafty,,16,sprites/home-centered/scrafty.png
+560,Scrafty,,15,sprites/home-centered/scrafty.png
 563,Cofagrigus,,10,sprites/home-centered/cofagrigus.png
 569,Garbodor,,1,sprites/home-centered/garbodor.png
 571,Zoroark,,9,sprites/home-centered/zoroark.png
@@ -136,49 +136,46 @@ dex,species,form,points,image_path
 579,Reuniclus,,10,sprites/home-centered/reuniclus.png
 584,Vanilluxe,,10,sprites/home-centered/vanilluxe.png
 587,Emolga,,1,sprites/home-centered/emolga.png
-604,Eelektross,,13,sprites/home-centered/eelektross.png
-609,Chandelure,,12,sprites/home-centered/chandelure.png
+604,Eelektross,"Original, Mega",12,sprites/home-centered/eelektross.png
+609,Chandelure,"Original, Mega",11,sprites/home-centered/chandelure.png
 614,Beartic,,7,sprites/home-centered/beartic.png
 618,Stunfisk,,1,sprites/home-centered/stunfisk.png
 618,Stunfisk,Galarian,1,sprites/home-centered/stunfisk-galar.png
-623,Golurk,,16,sprites/home-centered/golurk.png
+623,Golurk,"Original, Mega",15,sprites/home-centered/golurk.png
 635,Hydreigon,,16,sprites/home-centered/hydreigon.png
 637,Volcarona,,17,sprites/home-centered/volcarona.png
-652,Chesnaught,,8,sprites/home-centered/chesnaught.png
-655,Delphox,,21,sprites/home-centered/delphox.png
-658,Greninja,,16,sprites/home-centered/greninja.png
+652,Chesnaught,"Original, Mega",11,sprites/home-centered/chesnaught.png
+655,Delphox,"Original, Mega",19,sprites/home-centered/delphox.png
+658,Greninja,"Original, Mega",15,sprites/home-centered/greninja.png
 660,Diggersby,,8,sprites/home-centered/diggersby.png
 663,Talonflame,,18,sprites/home-centered/talonflame.png
 666,Vivillon,,15,sprites/home-centered/vivillon.png
-668,Pyroar,,15,sprites/home-centered/pyroar.png
-670,Floette,,22,sprites/home-centered/floette.png
+668,Pyroar,,14,sprites/home-centered/pyroar.png
+670,Floette,"Original, Mega",21,sprites/home-centered/floette.png
 671,Florges,,7,sprites/home-centered/florges.png
 673,Gogoat,,2,sprites/home-centered/gogoat.png
 675,Pangoro,,4,sprites/home-centered/pangoro.png
 676,Furfrou,,1,sprites/home-centered/furfrou.png
-678,Meowstic,Female,7,sprites/home-centered/meowstic-f.png
+678,Meowstic,Female,12,sprites/home-centered/meowstic-f.png
 678,Meowstic,Male,15,sprites/home-centered/meowstic.png
 681,Aegislash,,15,sprites/home-centered/aegislash.png
 683,Aromatisse,,4,sprites/home-centered/aromatisse.png
 685,Slurpuff,,4,sprites/home-centered/slurpuff.png
 687,Malamar,,2,sprites/home-centered/malamar.png
-689,Barbaracle,,8,sprites/home-centered/barbaracle.png
-691,Dragalge,,7,sprites/home-centered/dragalge.png
+689,Barbaracle,"Original, Mega",13,sprites/home-centered/barbaracle.png
+691,Dragalge,"Original, Mega",8,sprites/home-centered/dragalge.png
 693,Clawitzer,,3,sprites/home-centered/clawitzer.png
 695,Heliolisk,,6,sprites/home-centered/heliolisk.png
 697,Tyrantrum,,5,sprites/home-centered/tyrantrum.png
 699,Aurorus,,7,sprites/home-centered/aurorus.png
 700,Sylveon,,15,sprites/home-centered/sylveon.png
-701,Hawlucha,,10,sprites/home-centered/hawlucha.png
+701,Hawlucha,"Original, Mega",14,sprites/home-centered/hawlucha.png
 702,Dedenne,,1,sprites/home-centered/dedenne.png
 706,Goodra,,10,sprites/home-centered/goodra.png
 706,Goodra,Hisuian,12,sprites/home-centered/goodra-hisui.png
 707,Klefki,,15,sprites/home-centered/klefki.png
 709,Trevenant,,5,sprites/home-centered/trevenant.png
-711,Gourgeist,Jumbo,3,sprites/home-centered/gourgeist-super.png
-711,Gourgeist,Large,3,sprites/home-centered/gourgeist-large.png
-711,Gourgeist,Medium,3,sprites/home-centered/gourgeist.png
-711,Gourgeist,Small,3,sprites/home-centered/gourgeist-small.png
+711,Gourgeist,"Small, Average, Large, Jumbo",4,sprites/home-centered/gourgeist-super.png
 713,Avalugg,,3,sprites/home-centered/avalugg.png
 713,Avalugg,Hisuian,2,sprites/home-centered/avalugg-hisui.png
 715,Noivern,,9,sprites/home-centered/noivern.png
@@ -187,10 +184,10 @@ dex,species,form,points,image_path
 727,Incineroar,,18,sprites/home-centered/incineroar.png
 730,Primarina,,17,sprites/home-centered/primarina.png
 733,Toucannon,,3,sprites/home-centered/toucannon.png
-740,Crabominable,,9,sprites/home-centered/crabominable.png
-745,Lycanroc,Dusk,7,sprites/home-centered/lycanroc-dusk.png
-745,Lycanroc,Midday,5,sprites/home-centered/lycanroc.png
-745,Lycanroc,Midnight,4,sprites/home-centered/lycanroc-midnight.png
+740,Crabominable,"Original, Mega",13,sprites/home-centered/crabominable.png
+745,Lycanroc,Dusk,5,sprites/home-centered/lycanroc-dusk.png
+745,Lycanroc,Midday,4,sprites/home-centered/lycanroc.png
+745,Lycanroc,Midnight,7,sprites/home-centered/lycanroc-midnight.png
 748,Toxapex,,3,sprites/home-centered/toxapex.png
 750,Mudsdale,,7,sprites/home-centered/mudsdale.png
 752,Araquanid,,13,sprites/home-centered/araquanid.png
@@ -198,9 +195,9 @@ dex,species,form,points,image_path
 763,Tsareena,,12,sprites/home-centered/tsareena.png
 765,Oranguru,,12,sprites/home-centered/oranguru.png
 766,Passimian,,4,sprites/home-centered/passimian.png
-768,Golisopod,,17,sprites/home-centered/golisopod.png
+768,Golisopod,"Original, Mega",16,sprites/home-centered/golisopod.png
 778,Mimikyu,,14,sprites/home-centered/mimikyu.png
-780,Drampa,,15,sprites/home-centered/drampa.png
+780,Drampa,"Original, Mega",14,sprites/home-centered/drampa.png
 784,Kommo-o,,15,sprites/home-centered/kommoo.png
 812,Rillaboom,,16,sprites/home-centered/rillaboom.png
 815,Cinderace,,12,sprites/home-centered/cinderace.png
@@ -210,8 +207,7 @@ dex,species,form,points,image_path
 841,Flapple,,3,sprites/home-centered/flapple.png
 842,Appletun,,4,sprites/home-centered/appletun.png
 844,Sandaconda,,2,sprites/home-centered/sandaconda.png
-849,Toxtricity,Amped,5,sprites/home-centered/toxtricity.png
-849,Toxtricity,Low Key,5,sprites/home-centered/toxtricity-lowkey.png
+849,Toxtricity,"Amped, Low Key",5,sprites/home-centered/toxtricity.png
 853,Grapploct,,1,sprites/home-centered/grapploct.png
 855,Polteageist,,5,sprites/home-centered/polteageist.png
 858,Hatterene,,14,sprites/home-centered/hatterene.png
@@ -223,14 +219,14 @@ dex,species,form,points,image_path
 869,Alcremie,,5,sprites/home-centered/alcremie.png
 870,Falinks,,3,sprites/home-centered/falinks.png
 871,Pincurchin,,4,sprites/home-centered/pincurchin.png
-876,Indeedee,Female,9,sprites/home-centered/indeedee-f.png
-876,Indeedee,Male,18,sprites/home-centered/indeedee.png
+876,Indeedee,Female,18,sprites/home-centered/indeedee-f.png
+876,Indeedee,Male,12,sprites/home-centered/indeedee.png
 877,Morpeko,,2,sprites/home-centered/morpeko.png
 887,Dragapult,,17,sprites/home-centered/dragapult.png
 899,Wyrdeer,,7,sprites/home-centered/wyrdeer.png
 900,Kleavor,,11,sprites/home-centered/kleavor.png
-902,Basculegion,Female,18,sprites/home-centered/basculegion-f.png
-902,Basculegion,Male,17,sprites/home-centered/basculegion.png
+902,Basculegion,Female,17,sprites/home-centered/basculegion-f.png
+902,Basculegion,Male,18,sprites/home-centered/basculegion.png
 903,Sneasler,,20,sprites/home-centered/sneasler.png
 904,Overqwil,,11,sprites/home-centered/overqwil.png
 908,Meowscarada,,15,sprites/home-centered/meowscarada.png
@@ -239,25 +235,23 @@ dex,species,form,points,image_path
 923,Pawmot,,8,sprites/home-centered/pawmot.png
 925,Maushold,,17,sprites/home-centered/maushold.png
 930,Arboliva,,6,sprites/home-centered/arboliva.png
-931,Squawkabilly,Blue Plumage,3,sprites/home-centered/squawkabilly-blue.png
-931,Squawkabilly,Green Plumage,3,sprites/home-centered/squawkabilly.png
-931,Squawkabilly,White Plumage,3,sprites/home-centered/squawkabilly-white.png
-931,Squawkabilly,Yellow Plumage,3,sprites/home-centered/squawkabilly-yellow.png
+931,Squawkabilly,"Green, Blue, Yellow, White",4,sprites/home-centered/squawkabilly-blue.png
 934,Garganacl,,12,sprites/home-centered/garganacl.png
 936,Armarouge,,12,sprites/home-centered/armarouge.png
 937,Ceruledge,,11,sprites/home-centered/ceruledge.png
 939,Bellibolt,,6,sprites/home-centered/bellibolt.png
 943,Mabosstiff,,4,sprites/home-centered/mabosstiff.png
-952,Scovillain,,15,sprites/home-centered/scovillain.png
+952,Scovillain,,14,sprites/home-centered/scovillain.png
 956,Espathra,,6,sprites/home-centered/espathra.png
 959,Tinkaton,,12,sprites/home-centered/tinkaton.png
 964,Palafin,,15,sprites/home-centered/palafin.png
 968,Orthworm,,11,sprites/home-centered/orthworm.png
-970,Glimmora,,17,sprites/home-centered/glimmora.png
+970,Glimmora,,16,sprites/home-centered/glimmora.png
 972,Houndstone,,8,sprites/home-centered/houndstone.png
 979,Annihilape,,16,sprites/home-centered/annihilape.png
 981,Farigiraf,,18,sprites/home-centered/farigiraf.png
-998,Baxcalibur,,19,sprites/home-centered/baxcalibur.png
+983,Kingambit,,19,sprites/home-centered/kingambit.png
+998,Baxcalibur,"Original, Mega",18,sprites/home-centered/baxcalibur.png
 1000,Gholdengo,,19,sprites/home-centered/gholdengo.png
 1013,Sinistcha,,20,sprites/home-centered/sinistcha.png
 1018,Archaludon,,19,sprites/home-centered/archaludon.png
