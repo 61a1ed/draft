@@ -18,7 +18,11 @@ export const INITIAL_CATALOG_FILTERS: CatalogFilterState = {
   affordable: false,
 }
 
-export const MEGA_FILTER: SearchFilter = { kind: 'mega', value: 'mega', label: 'Has Mega Evolution' }
+export const MEGA_FILTER: SearchFilter = {
+  kind: 'mega',
+  value: 'mega',
+  label: 'Has Mega Evolution',
+}
 export const filterKey = (filter: SearchFilter) => `${filter.kind}:${filter.value}`
 
 export function matchesFilter(item: Draftable, filter: SearchFilter) {
@@ -65,7 +69,5 @@ export function buildAllFilters(catalog: Draftable[]): SearchFilter[] {
 export function matchesCatalogQuery(item: Draftable, query: string) {
   const trimmed = query.trim().toLowerCase()
   if (!trimmed) return true
-  return (
-    item.name.toLowerCase().includes(trimmed) || String(item.dex ?? '').includes(trimmed)
-  )
+  return item.name.toLowerCase().includes(trimmed) || String(item.dex ?? '').includes(trimmed)
 }

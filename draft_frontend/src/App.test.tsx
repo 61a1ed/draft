@@ -550,4 +550,19 @@ describe('league navigation and team presentation', () => {
       color: '#ffffff',
     })
   })
+
+  it('places Draft board between Draft room and Catalog & favorites in the navigation and renders the snake grid', async () => {
+    draft.snapshot = league('drafting')
+    await render()
+
+    const nav = renderer!.root.findByProps({ 'aria-label': 'Main navigation' })
+    const labels = nav.findAllByType('button').map((btn) => btn.props['aria-label'])
+    expect(labels.slice(0, 3)).toEqual(['Draft room', 'Draft board', 'Catalog & favorites'])
+
+    await navigate('Draft board')
+    expect(heading()).toBe('Draft board')
+    expect(
+      renderer!.root.findByProps({ 'aria-label': 'Draft picks by round and team' }),
+    ).toBeDefined()
+  })
 })

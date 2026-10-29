@@ -82,11 +82,8 @@ export function Catalog({
     else setLocalFilterState(updater)
   }
   const { search, filters, affordable } = activeFilterState
-  const setSearch = (next: string) =>
-    updateFilterState((current) => ({ ...current, search: next }))
-  const setFilters = (
-    updater: SearchFilter[] | ((current: SearchFilter[]) => SearchFilter[]),
-  ) =>
+  const setSearch = (next: string) => updateFilterState((current) => ({ ...current, search: next }))
+  const setFilters = (updater: SearchFilter[] | ((current: SearchFilter[]) => SearchFilter[])) =>
     updateFilterState((current) => ({
       ...current,
       filters: typeof updater === 'function' ? updater(current.filters) : updater,
@@ -440,42 +437,39 @@ export function Catalog({
             <span>In budget</span>
           </button>
         </div>
-            {(filters.length > 0 || affordable) && (
-              <div className="search-filter-chips" aria-label="Active search filters">
-                {filters.map((filter) => (
-                  <span className="search-filter-chip" key={filterKey(filter)}>
-                    {filter.label}
-                    <button
-                      aria-label={`Remove ${filter.label} filter`}
-                      onClick={() => removeFilter(filter)}
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                ))}
-                {affordable && (
-                  <span className="search-filter-chip">
-                    In budget
-                    <button
-                      aria-label="Remove In budget filter"
-                      onClick={() => setAffordable(false)}
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                )}
+        {(filters.length > 0 || affordable) && (
+          <div className="search-filter-chips" aria-label="Active search filters">
+            {filters.map((filter) => (
+              <span className="search-filter-chip" key={filterKey(filter)}>
+                {filter.label}
                 <button
-                  className="button clear-filters-button"
-                  onClick={() => {
-                    setSearch('')
-                    setFilters([])
-                    setAffordable(false)
-                  }}
+                  aria-label={`Remove ${filter.label} filter`}
+                  onClick={() => removeFilter(filter)}
                 >
-                  Clear filters
+                  <X size={12} />
                 </button>
-              </div>
+              </span>
+            ))}
+            {affordable && (
+              <span className="search-filter-chip">
+                In budget
+                <button aria-label="Remove In budget filter" onClick={() => setAffordable(false)}>
+                  <X size={12} />
+                </button>
+              </span>
             )}
+            <button
+              className="button clear-filters-button"
+              onClick={() => {
+                setSearch('')
+                setFilters([])
+                setAffordable(false)
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
       </div>
       <div className="pokemon-grid">
         {filtered.map((item) => {

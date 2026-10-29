@@ -56,11 +56,8 @@ export function BigBoard({
     else setLocalFilterState(updater)
   }
   const { search, filters, affordable } = activeFilterState
-  const setSearch = (next: string) =>
-    updateFilterState((current) => ({ ...current, search: next }))
-  const setFilters = (
-    updater: SearchFilter[] | ((current: SearchFilter[]) => SearchFilter[]),
-  ) =>
+  const setSearch = (next: string) => updateFilterState((current) => ({ ...current, search: next }))
+  const setFilters = (updater: SearchFilter[] | ((current: SearchFilter[]) => SearchFilter[])) =>
     updateFilterState((current) => ({
       ...current,
       filters: typeof updater === 'function' ? updater(current.filters) : updater,
@@ -315,10 +312,7 @@ export function BigBoard({
             {affordable && (
               <span className="search-filter-chip">
                 In budget
-                <button
-                  aria-label="Remove In budget filter"
-                  onClick={() => setAffordable(false)}
-                >
+                <button aria-label="Remove In budget filter" onClick={() => setAffordable(false)}>
                   <X size={12} />
                 </button>
               </span>
@@ -465,7 +459,11 @@ export function BigBoard({
                             </span>
                           )}
                           {taken && (
-                            <span className="big-board-taken-icon" aria-hidden="true" title="Drafted">
+                            <span
+                              className="big-board-taken-icon"
+                              aria-hidden="true"
+                              title="Drafted"
+                            >
                               <Check size={12} />
                             </span>
                           )}

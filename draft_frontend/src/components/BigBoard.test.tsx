@@ -160,7 +160,9 @@ afterEach(async () => {
 describe('BigBoard', () => {
   it('groups Pokémon by point cost descending, marks drafted items as taken, and opens details on click', async () => {
     await render()
-    const columns = renderer!.root.findAllByProps({ className: 'big-board-column  over-budget-tier' })
+    const columns = renderer!.root.findAllByProps({
+      className: 'big-board-column  over-budget-tier',
+    })
     expect(columns).toHaveLength(2) // 12pt and 6pt are over 5pt budget
     const tier12 = control('12 point tier')
     const tier6 = control('6 point tier')
@@ -211,7 +213,9 @@ describe('BigBoard', () => {
     // Equalizer minimap shows stacks for each tier and can jump to a tier
     const jump12 = control('Jump to 12 point tier, 1 of 2 remaining')
     expect(jump12).toBeDefined()
-    const pips12 = jump12.findAllByType('span').filter((s) => s.props.className?.includes('equalizer-pip'))
+    const pips12 = jump12
+      .findAllByType('span')
+      .filter((s) => s.props.className?.includes('equalizer-pip'))
     expect(pips12).toHaveLength(2)
     expect(pips12[0].props.className).not.toContain('taken')
     expect(pips12[1].props.className).toContain('taken')

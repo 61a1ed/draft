@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Settings2,
   ShieldCheck,
+  Table2,
   Target,
   Trophy,
   Users,
@@ -33,6 +34,7 @@ import { teamAvatarStyle, teamName } from './lib/teamPresentation'
 import { INITIAL_CATALOG_FILTERS, type CatalogFilterState } from './lib/catalogFilters'
 import { Catalog, PokemonImage } from './components/Catalog'
 import { BigBoard } from './components/BigBoard'
+import { DraftBoard } from './components/DraftBoard'
 import { Modal } from './components/Modal'
 import { PokemonDetails } from './components/PokemonDetails'
 import { LeagueSetup } from './components/LeagueSetup'
@@ -40,7 +42,8 @@ import { Tournament } from './components/Tournament'
 import { Availability } from './components/Availability'
 import { ThemeToggle } from './components/ThemeToggle'
 
-type View = 'draft' | 'catalog' | 'tournament' | 'availability' | 'teams' | 'activity' | 'settings'
+type View =
+  'draft' | 'board' | 'catalog' | 'tournament' | 'availability' | 'teams' | 'activity' | 'settings'
 
 type AvailabilityContext = {
   owner: string
@@ -51,6 +54,7 @@ type AvailabilityContext = {
 type SelectedPick = { item: Draftable; revision: number; teamId: number | null }
 const navItems = [
   { id: 'draft', label: 'Draft room', icon: LayoutGrid },
+  { id: 'board', label: 'Draft board', icon: Table2 },
   { id: 'catalog', label: 'Catalog & favorites', icon: Bookmark },
   { id: 'tournament', label: 'Tournament', icon: Trophy },
   { id: 'availability', label: 'Availability', icon: CalendarDays },
@@ -841,6 +845,15 @@ export default function App() {
                     </aside>
                   </div>
                 </>
+              )}
+              {view === 'board' && (
+                <DraftBoard
+                  snapshot={snapshot}
+                  catalog={catalog}
+                  userId={session!.user.id}
+                  onSelect={openPick}
+                  onOpenSettings={() => setView('settings')}
+                />
               )}
               {view === 'teams' && (
                 <div className="teams-grid">

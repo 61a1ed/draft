@@ -68,20 +68,16 @@ function MovePanel({ moves, idPrefix }: { moves: Move[]; idPrefix: number }) {
     }
     const sorted = (values: Set<string>) => [...values].sort((a, b) => a.localeCompare(b))
     return [
-      ...sorted(categories).map(
-        (value): MoveFilter => ({
-          kind: 'category',
-          value,
-          label: `${value} category`,
-        }),
-      ),
-      ...sorted(types).map(
-        (value): MoveFilter => ({
-          kind: 'type',
-          value,
-          label: `${value} type`,
-        }),
-      ),
+      ...sorted(categories).map((value): MoveFilter => ({
+        kind: 'category',
+        value,
+        label: `${value} category`,
+      })),
+      ...sorted(types).map((value): MoveFilter => ({
+        kind: 'type',
+        value,
+        label: `${value} type`,
+      })),
     ]
   }, [moves])
 
@@ -91,7 +87,8 @@ function MovePanel({ moves, idPrefix }: { moves: Move[]; idPrefix: number }) {
     const active = new Set(filters.map(moveFilterKey))
     return allFilters
       .filter(
-        (filter) => !active.has(moveFilterKey(filter)) && filter.label.toLowerCase().includes(query),
+        (filter) =>
+          !active.has(moveFilterKey(filter)) && filter.label.toLowerCase().includes(query),
       )
       .slice(0, 8)
   }, [allFilters, filters, search])
