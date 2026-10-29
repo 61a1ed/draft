@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   ArrowDown,
@@ -9,7 +9,6 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
-  Clock3,
   HelpCircle,
   History,
   LayoutGrid,
@@ -35,6 +34,7 @@ import { INITIAL_CATALOG_FILTERS, type CatalogFilterState } from './lib/catalogF
 import { Catalog, PokemonImage } from './components/Catalog'
 import { BigBoard } from './components/BigBoard'
 import { DraftBoard } from './components/DraftBoard'
+import { TurnBanner } from './components/TurnBanner'
 import { Modal } from './components/Modal'
 import { PokemonDetails } from './components/PokemonDetails'
 import { LeagueSetup } from './components/LeagueSetup'
@@ -70,42 +70,6 @@ function initials(name: string) {
     .map((word) => word[0])
     .join('')
     .toUpperCase()
-}
-
-function Countdown({ snapshot }: { snapshot: LeagueSnapshot }) {
-  const [now, setNow] = useState(Date.now())
-  const timing = useMemo(() => {
-    const receivedAt = Date.now()
-    return { receivedAt, offset: new Date(snapshot.server_now).getTime() - receivedAt }
-  }, [snapshot.server_now])
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  const seconds = snapshot.state.deadline
-    ? Math.max(
-        0,
-        Math.ceil(
-          (new Date(snapshot.state.deadline).getTime() -
-            Math.max(now, timing.receivedAt) -
-            timing.offset) /
-            1000,
-        ),
-      )
-    : null
-  return (
-    <div className="countdown">
-      <span>
-        <Clock3 size={14} />
-        {seconds === 0 ? 'Overtime' : 'Pick timer'}
-      </span>
-      <strong>
-        {seconds === null
-          ? '—:—'
-          : `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`}
-      </strong>
-    </div>
-  )
 }
 
 function TeamRoster({
@@ -335,13 +299,6 @@ export default function App() {
   const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
   const can = (kind: string) => snapshot?.actions.some((action) => action.kind === kind) ?? false
   const commissioner = snapshot?.league.commissioner_user_id === session?.user.id
-  const currentRound =
-    snapshot && snapshot.state.team_count
-      ? Math.min(
-          snapshot.league.roster_size,
-          Math.floor(snapshot.state.active_pick_count / snapshot.state.team_count) + 1,
-        )
-      : 1
   const selectedTaken =
     selected && snapshot?.rosters.some((pick) => pick.draftable_id === selected.item.id)
   const pickChanged =
@@ -683,70 +640,17 @@ export default function App() {
             <>
               {view === 'draft' && (
                 <>
-                  <section className="turn-banner">
-                    <div className="turn-copy">
-                      <span className="turn-label">
-                        <span className="pulse-dot" />
-                        {snapshot.state.status === 'setup'
-                          ? 'SETUP'
-                          : snapshot.state.status === 'completed'
-                            ? 'COMPLETED'
-                            : activeTeam?.manager_user_id === session?.user.id
-                              ? 'YOUR TURN'
-                              : 'CURRENT TURN'}
-                      </span>
-                      <h2>
-                        {snapshot.state.status === 'setup'
-                          ? 'Draft not started'
-                          : snapshot.state.status === 'completed'
-                            ? 'Draft complete'
-                            : activeTeam
-                              ? teamName(activeTeam)
-                              : 'Next team'}
-                      </h2>
-                      <p>
-                        {snapshot.state.status === 'setup' ? (
-                          'Complete team names, colors, and draft order in League settings before starting.'
-                        ) : snapshot.state.status === 'completed' ? (
-                          `${snapshot.state.active_pick_count} of ${snapshot.state.required_pick_count} picks completed.`
-                        ) : (
-                          <>
-                            Round {currentRound}
-                            <span>·</span>Pick {snapshot.state.next_pick_number} of{' '}
-                            {snapshot.state.required_pick_count}
-                          </>
-                        )}
-                      </p>
-                      {snapshot.state.status === 'completed' && (
-                        <button
-                          className="button banner-button"
-                          onClick={() => setView('tournament')}
-                        >
-                          Open tournament <ArrowRight size={15} />
-                        </button>
-                      )}
-                      {snapshot.state.status === 'setup' && (
-                        <button
-                          className="button banner-button"
-                          onClick={() =>
-                            can('start')
-                              ? setConfirmAction({ kind: 'start', revision: snapshot.revision })
-                              : setView('settings')
-                          }
-                        >
-                          {can('start') ? 'Start draft' : 'League settings'}
-                          <ArrowRight size={15} />
-                        </button>
-                      )}
-                    </div>
-                    <div className="banner-art" aria-hidden="true">
-                      <div className="pokeball-ring" />
-                    </div>
-                    {snapshot.state.status === 'drafting' && <Countdown snapshot={snapshot} />}
-                    {snapshot.state.status === 'completed' && (
-                      <Trophy className="complete-trophy" size={55} />
-                    )}
-                  </section>
+                  <TurnBanner
+                    snapshot={snapshot}
+                    catalog={catalog}
+                    userId={session!.user.id}
+                    onSelectPick={openPick}
+                    onOpenSettings={() => setView('settings')}
+                    onStartDraft={() =>
+                      setConfirmAction({ kind: 'start', revision: snapshot.revision })
+                    }
+                    onOpenTournament={() => setView('tournament')}
+                  />
                   <div className="stats-grid">
                     <div className="stat-card">
                       <span className="stat-icon lavender">
@@ -853,6 +757,10 @@ export default function App() {
                   userId={session!.user.id}
                   onSelect={openPick}
                   onOpenSettings={() => setView('settings')}
+                  onStartDraft={() =>
+                    setConfirmAction({ kind: 'start', revision: snapshot.revision })
+                  }
+                  onOpenTournament={() => setView('tournament')}
                 />
               )}
               {view === 'teams' && (

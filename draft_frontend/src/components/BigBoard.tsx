@@ -72,6 +72,7 @@ export function BigBoard({
   const topScrollRef = useRef<HTMLDivElement | null>(null)
   const boardScrollRef = useRef<HTMLDivElement | null>(null)
   const syncingScrollRef = useRef<'top' | 'board' | null>(null)
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const columnRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const [scrollTrackWidth, setScrollTrackWidth] = useState(0)
 
@@ -157,27 +158,40 @@ export function BigBoard({
     }
   }, [tiers.length])
 
-  const handleTopScroll = () => {
-    if (syncingScrollRef.current === 'board') {
-      syncingScrollRef.current = null
-      return
+  useEffect(() => {
+    return () => {
+      if (syncTimeoutRef.current !== null) clearTimeout(syncTimeoutRef.current)
     }
+  }, [])
+
+  const lockScrollSource = (source: 'top' | 'board') => {
+    syncingScrollRef.current = source
+    if (syncTimeoutRef.current !== null) {
+      clearTimeout(syncTimeoutRef.current)
+    }
+    syncTimeoutRef.current = setTimeout(() => {
+      syncingScrollRef.current = null
+      syncTimeoutRef.current = null
+    }, 150)
+  }
+
+  const handleTopScroll = () => {
+    if (syncingScrollRef.current === 'board') return
     const top = topScrollRef.current
     const board = boardScrollRef.current
     if (!top || !board) return
-    syncingScrollRef.current = 'top'
+    if (Math.abs(board.scrollLeft - top.scrollLeft) <= 1) return
+    lockScrollSource('top')
     board.scrollLeft = top.scrollLeft
   }
 
   const handleBoardScroll = () => {
-    if (syncingScrollRef.current === 'top') {
-      syncingScrollRef.current = null
-      return
-    }
+    if (syncingScrollRef.current === 'top') return
     const top = topScrollRef.current
     const board = boardScrollRef.current
     if (!top || !board) return
-    syncingScrollRef.current = 'board'
+    if (Math.abs(top.scrollLeft - board.scrollLeft) <= 1) return
+    lockScrollSource('board')
     top.scrollLeft = board.scrollLeft
   }
 
@@ -185,16 +199,33 @@ export function BigBoard({
     const board = boardScrollRef.current
     const top = topScrollRef.current
     const col = columnRefs.current.get(cost)
-    if (col && typeof col.scrollIntoView === 'function') {
-      col.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
+    if (!board) return
+
+    let rawTarget: number
+    if (
+      col &&
+      typeof col.getBoundingClientRect === 'function' &&
+      typeof board.getBoundingClientRect === 'function'
+    ) {
+      const boardRect = board.getBoundingClientRect()
+      const colRect = col.getBoundingClientRect()
+      const delta = colRect.left + colRect.width / 2 - (boardRect.left + boardRect.width / 2)
+      rawTarget = board.scrollLeft + delta
+    } else {
+      const colLeft = col?.offsetLeft ?? index * 196
+      const colWidth = col?.offsetWidth || 184
+      const boardWidth = board.clientWidth || 0
+      rawTarget = boardWidth > 0 ? colLeft - (boardWidth - colWidth) / 2 : colLeft
     }
-    if (board) {
-      const targetLeft = col?.offsetLeft ?? index * 196
-      if (typeof board.scrollTo === 'function') {
-        board.scrollTo({ left: targetLeft, behavior: 'smooth' })
-      } else {
-        board.scrollLeft = targetLeft
-      }
+
+    const maxScroll = Math.max(0, (board.scrollWidth || 0) - (board.clientWidth || 0))
+    const targetLeft = Math.max(0, maxScroll > 0 ? Math.min(rawTarget, maxScroll) : rawTarget)
+
+    lockScrollSource('board')
+    if (typeof board.scrollTo === 'function') {
+      board.scrollTo({ left: targetLeft, behavior: 'smooth' })
+    } else {
+      board.scrollLeft = targetLeft
       if (top) top.scrollLeft = targetLeft
     }
   }
