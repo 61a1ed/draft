@@ -300,6 +300,10 @@ export default function App() {
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
   const myTeam = snapshot?.teams.find((team) => team.manager_user_id === session?.user.id)
   const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
+  const selectedLeagueName =
+    draft.leagues.find((league) => league.id === draft.leagueId)?.name ??
+    snapshot?.league.name ??
+    'Choose league'
   const can = (kind: string) => snapshot?.actions.some((action) => action.kind === kind) ?? false
   const commissioner = snapshot?.league.commissioner_user_id === session?.user.id
   const pickingForOther = Boolean(
@@ -421,34 +425,35 @@ export default function App() {
           </span>
         </a>
         <div className="workspace-label">LEAGUE</div>
-        <div className="league-switch">
+        <label className="league-switch">
           <span className="league-icon">
             <Trophy size={18} />
           </span>
-          <label>
+          <span className="league-switch-copy">
             <span>Pokémon draft league</span>
-            <select
-              aria-label="Choose league"
-              value={draft.leagueId ?? ''}
-              disabled={workspaceBusy}
-              onChange={(event) => {
-                draft.selectLeague(Number(event.target.value))
-                setView('draft')
-              }}
-            >
-              {draft.leagues.length ? (
-                draft.leagues.map((league) => (
-                  <option key={league.id} value={league.id}>
-                    {league.name}
-                  </option>
-                ))
-              ) : (
-                <option value="">Choose league</option>
-              )}
-            </select>
-          </label>
+            <strong className="league-switch-value">{selectedLeagueName}</strong>
+          </span>
           <ChevronDown size={14} />
-        </div>
+          <select
+            aria-label="Choose league"
+            value={draft.leagueId ?? ''}
+            disabled={workspaceBusy}
+            onChange={(event) => {
+              draft.selectLeague(Number(event.target.value))
+              setView('draft')
+            }}
+          >
+            {draft.leagues.length ? (
+              draft.leagues.map((league) => (
+                <option key={league.id} value={league.id}>
+                  {league.name}
+                </option>
+              ))
+            ) : (
+              <option value="">Choose league</option>
+            )}
+          </select>
+        </label>
         <nav className="main-nav" aria-label="Main navigation">
           {navItems.map(({ id, label, icon: Icon }) => (
             <button

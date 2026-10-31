@@ -9,9 +9,9 @@ dex,species,form,points,image_path
 26,Raichu,"Original, Mega X, Mega Y",19,sprites/home-centered/raichu.png
 26,Raichu,Alolan,3,sprites/home-centered/raichu-alola.png
 36,Clefable,"Original, Mega",18,sprites/home-centered/clefable.png
-38,Ninetales,,2,sprites/home-centered/ninetales.png
-38,Ninetales,Alolan,14,sprites/home-centered/ninetales-alola.png
-40,Wigglytuff,,16,sprites/home-centered/wigglytuff.png
+38,Ninetales,,14,sprites/home-centered/ninetales.png
+38,Ninetales,Alolan,16,sprites/home-centered/ninetales-alola.png
+40,Wigglytuff,,2,sprites/home-centered/wigglytuff.png
 45,Vileplume,,6,sprites/home-centered/vileplume.png
 53,Persian,,1,sprites/home-centered/persian.png
 53,Persian,Alolan,2,sprites/home-centered/persian-alola.png
@@ -29,9 +29,9 @@ dex,species,form,points,image_path
 122,Mr. Mime,,1,sprites/home-centered/mrmime.png
 127,Pinsir,"Original, Mega",10,sprites/home-centered/pinsir.png
 128,Tauros,,9,sprites/home-centered/tauros.png
-128,Tauros,Paldean (Aqua Breed),11,sprites/home-centered/tauros-paldeaaqua.png
+128,Tauros,Paldean (Aqua Breed),15,sprites/home-centered/tauros-paldeaaqua.png
 128,Tauros,Paldean (Blaze Breed),14,sprites/home-centered/tauros-paldeablaze.png
-128,Tauros,Paldean (Combat Breed),15,sprites/home-centered/tauros-paldeacombat.png
+128,Tauros,Paldean (Combat Breed),11,sprites/home-centered/tauros-paldeacombat.png
 130,Gyarados,"Original, Mega",16,sprites/home-centered/gyarados.png
 132,Ditto,,4,sprites/home-centered/ditto.png
 134,Vaporeon,,8,sprites/home-centered/vaporeon.png
@@ -107,11 +107,11 @@ dex,species,form,points,image_path
 475,Gallade,"Original, Mega",15,sprites/home-centered/gallade.png
 478,Froslass,"Original, Mega",19,sprites/home-centered/froslass.png
 479,Rotom,,6,sprites/home-centered/rotom.png
-479,Rotom,Fan,14,sprites/home-centered/rotom-fan.png
-479,Rotom,Frost,15,sprites/home-centered/rotom-frost.png
-479,Rotom,Heat,7,sprites/home-centered/rotom-heat.png
-479,Rotom,Mow,6,sprites/home-centered/rotom-mow.png
-479,Rotom,Wash,10,sprites/home-centered/rotom-wash.png
+479,Rotom,Fan,6,sprites/home-centered/rotom-fan.png
+479,Rotom,Frost,7,sprites/home-centered/rotom-frost.png
+479,Rotom,Heat,14,sprites/home-centered/rotom-heat.png
+479,Rotom,Mow,10,sprites/home-centered/rotom-mow.png
+479,Rotom,Wash,15,sprites/home-centered/rotom-wash.png
 497,Serperior,,6,sprites/home-centered/serperior.png
 500,Emboar,"Original, Mega",10,sprites/home-centered/emboar.png
 503,Samurott,,2,sprites/home-centered/samurott.png

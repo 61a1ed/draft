@@ -182,6 +182,7 @@ select {
   margin-bottom: 15px;
 }
 .league-switch {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -190,6 +191,22 @@ select {
   border-radius: 9px;
   margin-bottom: 27px;
   background: light-dark(#fdfdff, #11111f);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.league-switch:hover {
+  border-color: light-dark(#d3cbe8, #3d3559);
+  background: light-dark(#f8f6fe, #171426);
+}
+.league-switch:focus-within {
+  outline: 2px solid #b6a6f5;
+  outline-offset: 1px;
+}
+.league-switch:has(select:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 .league-icon {
   background: light-dark(#f0ecfd, #1b1629);
@@ -201,27 +218,42 @@ select {
   place-items: center;
   flex-shrink: 0;
 }
-.league-switch label {
+.league-switch-copy {
   overflow: hidden;
   display: flex;
   flex-direction: column;
   flex: 1;
   gap: 3px;
 }
-.league-switch label > span {
+.league-switch-copy > span {
   font-size: 11px;
   color: light-dark(#9a97aa, #7e7b93);
 }
-.league-switch select {
-  background: none;
-  border: none;
+.league-switch-value {
+  font-family: inherit;
   font-size: 11px;
   font-weight: 750;
-  appearance: none;
-  width: 100%;
   color: light-dark(#3e3d53, #c2c1d1);
-  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+.league-switch select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 750;
+  color: light-dark(#3e3d53, #c2c1d1);
+  background: light-dark(#fdfdff, #11111f);
+}
+.league-switch select:disabled {
+  cursor: not-allowed;
 }
 .league-switch > svg {
   color: light-dark(#a6a3b4, #76728b);
@@ -2205,9 +2237,10 @@ main {
     width: 26px;
     height: 29px;
   }
-  .league-switch label > span {
+  .league-switch-copy > span {
     font-size: 11px;
   }
+  .league-switch-value,
   .league-switch select {
     font-size: 11px;
   }
@@ -3056,7 +3089,7 @@ main {
 .auth-footnote,
 .profile small,
 .club-note p,
-.league-switch label > span,
+.league-switch-copy > span,
 .workspace-label,
 .breadcrumb,
 .eyebrow,
@@ -3311,7 +3344,7 @@ main {
   .profile small {
     font-size: 8px;
   }
-  .league-switch label > span {
+  .league-switch-copy > span {
     font-size: 9px;
   }
 }

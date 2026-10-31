@@ -470,13 +470,19 @@ describe('league navigation and team presentation', () => {
 
   it('chooses the appropriate initial screen after selecting another league', async () => {
     await render()
+    const leagueSwitch = renderer!.root.findByProps({ className: 'league-switch' })
+    expect(leagueSwitch.type).toBe('label')
+    expect(text(leagueSwitch.findByProps({ className: 'league-switch-value' }))).toBe('League 7')
+
     await navigate('Teams & rosters')
     await selectLeague(league('drafting', 8))
     expect(heading()).toBe('Draft room')
+    expect(text(leagueSwitch.findByProps({ className: 'league-switch-value' }))).toBe('League 8')
 
     await navigate('Availability')
     await selectLeague(league('setup', 9))
     expect(heading()).toBe('League settings')
+    expect(text(leagueSwitch.findByProps({ className: 'league-switch-value' }))).toBe('League 9')
     expect(vi.mocked(LeagueSetup).mock.lastCall?.[0]).toMatchObject({
       snapshot: { league_id: 9 },
       userId: 11,
