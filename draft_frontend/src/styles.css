@@ -1242,6 +1242,39 @@ main {
   font-size: 11px;
   color: light-dark(#d5c9de, #6f5185);
 }
+.roster-defense-footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid light-dark(#f1e9f5, #3b2646);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.roster-defense-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.roster-defense-link {
+  flex: 1;
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 11px;
+}
+.roster-info-trigger {
+  flex-shrink: 0;
+  position: relative;
+  color: light-dark(#9a84b2, #8c70a8);
+}
+.roster-ability-note {
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: light-dark(#f7f2fc, #21172a);
+  border: 1px solid light-dark(#e6dbf2, #3d2a4f);
+  color: light-dark(#6c5385, #b9a4cf);
+}
 .order-panel {
   padding: 18px 16px;
 }

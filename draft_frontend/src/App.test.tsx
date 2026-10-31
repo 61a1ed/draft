@@ -724,4 +724,120 @@ describe('league navigation and team presentation', () => {
     expect(draft.draftAction).toHaveBeenCalledExactlyOnceWith('pick', 25, true)
     expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
   })
+
+  it('links the user’s team in the Draft room and Teams & rosters tabs to pkmn.help with types, first-slot ability, and an (i) ability note', async () => {
+    const snap = league('drafting')
+    snap.rosters = [
+      {
+        league_id: 7,
+        team_id: 1,
+        draftable_id: 16,
+        pick_id: 101,
+        pick_number: 1,
+        selected_by: 11,
+        selected_at: stamp,
+        point_cost: 10,
+      },
+      {
+        league_id: 7,
+        team_id: 1,
+        draftable_id: 479,
+        pick_id: 102,
+        pick_number: 4,
+        selected_by: 11,
+        selected_at: stamp,
+        point_cost: 14,
+      },
+      {
+        league_id: 7,
+        team_id: 2,
+        draftable_id: 25,
+        pick_id: 103,
+        pick_number: 2,
+        selected_by: 22,
+        selected_at: stamp,
+        point_cost: 12,
+      },
+    ]
+    draft = {
+      ...draft,
+      snapshot: snap,
+      catalog: [
+        ...draft.catalog,
+        {
+          id: 16,
+          name: 'Pidgeot',
+          point_cost: 10,
+          dex: 18,
+          species: 'Pidgeot',
+          form: '',
+          types: ['Normal', 'Flying'],
+          abilities: ['Prism Armor', 'Tangled Feet'],
+          hidden_ability: 'Big Pecks',
+          base_stats: null,
+          image_url: null,
+          megas: [],
+        },
+        {
+          id: 479,
+          name: 'Rotom-Wash',
+          point_cost: 14,
+          dex: 479,
+          species: 'Rotom',
+          form: 'Wash',
+          types: ['Electric', 'Water'],
+          abilities: ['Flash Fire'],
+          hidden_ability: null,
+          base_stats: null,
+          image_url: null,
+          megas: [],
+        },
+      ],
+    }
+    await render()
+
+    const expectedHref =
+      'https://www.pkmn.help/defense/team/?types=normal+flying&types=electric+water&abilities=prism_armor+flash_fire&format=simple'
+
+    // Draft room tab: Your team panel has the link and (i) note
+    expect(heading()).toBe('Draft room')
+    const draftRoomLinks = renderer!.root
+      .findAllByType('a')
+      .filter((node) => node.props.className?.includes('roster-defense-link'))
+    expect(draftRoomLinks).toHaveLength(1)
+    expect(draftRoomLinks[0].props.href).toBe(expectedHref)
+    expect(draftRoomLinks[0].props.target).toBe('_blank')
+
+    const infoBtn = renderer!.root.findByProps({
+      'aria-label': 'Remember: Some abilities change type effectiveness',
+    })
+    expect(renderer!.root.findAllByProps({ role: 'note' })).toHaveLength(0)
+    await act(async () => infoBtn.props.onClick())
+    const note = renderer!.root.findByProps({ role: 'note' })
+    expect(text(note)).toBe('Remember: Some abilities change type effectiveness')
+
+    // Teams & rosters tab: Only the user's team has the pkmn.help link, not other managers' teams
+    await navigate('Teams & rosters')
+    expect(heading()).toBe('Teams & rosters')
+    const rosters = renderer!.root
+      .findAllByType('section')
+      .filter((node) => node.props.className?.includes('roster-panel'))
+    expect(rosters).toHaveLength(2)
+
+    const myRosterLinks = rosters[0]
+      .findAllByType('a')
+      .filter((node) => node.props.className?.includes('roster-defense-link'))
+    expect(myRosterLinks).toHaveLength(1)
+    expect(myRosterLinks[0].props.href).toBe(expectedHref)
+
+    const otherRosterLinks = rosters[1]
+      .findAllByType('a')
+      .filter((node) => node.props.className?.includes('roster-defense-link'))
+    expect(otherRosterLinks).toHaveLength(0)
+    expect(
+      rosters[1].findAllByProps({
+        'aria-label': 'Remember: Some abilities change type effectiveness',
+      }),
+    ).toHaveLength(0)
+  })
 })

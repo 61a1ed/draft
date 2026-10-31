@@ -10,8 +10,10 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ExternalLink,
   HelpCircle,
   History,
+  Info,
   LayoutGrid,
   LogOut,
   Plus,
@@ -73,6 +75,26 @@ function initials(name: string) {
     .toUpperCase()
 }
 
+function toSnakeSlug(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+export function buildTeamDefenseUrl(items: Draftable[]): string | null {
+  const typedItems = items.filter((item) => item.types && item.types.length > 0)
+  if (typedItems.length === 0) return null
+  const typesParams = typedItems.map(
+    (item) => `types=${item.types!.map((t) => toSnakeSlug(t)).join('+')}`,
+  )
+  const abilitiesParam = `abilities=${typedItems
+    .map((item) => toSnakeSlug(item.abilities?.[0] || 'none') || 'none')
+    .join('+')}`
+  return `https://www.pkmn.help/defense/team/?${[...typesParams, abilitiesParam, 'format=simple'].join('&')}`
+}
+
 function TeamRoster({
   team,
   snapshot,
@@ -87,6 +109,12 @@ function TeamRoster({
   compact?: boolean
 }) {
   const picks = snapshot.rosters.filter((pick) => pick.team_id === team.id)
+  const isMyTeam = team.manager_user_id === userId
+  const pickedItems = picks
+    .map((pick) => catalog.find((entry) => entry.id === pick.draftable_id))
+    .filter((entry): entry is Draftable => Boolean(entry))
+  const defenseUrl = isMyTeam ? buildTeamDefenseUrl(pickedItems) : null
+  const [showAbilityNote, setShowAbilityNote] = useState(false)
   return (
     <section className={`card roster-panel ${compact ? 'compact' : ''}`}>
       <div className="roster-heading">
@@ -95,7 +123,7 @@ function TeamRoster({
         </span>
         <div>
           <span className="eyebrow">
-            {team.manager_user_id === userId ? 'YOUR TEAM' : `TEAM ${team.draft_position ?? '—'}`}
+            {isMyTeam ? 'YOUR TEAM' : `TEAM ${team.draft_position ?? '—'}`}
           </span>
           <h3>{teamName(team)}</h3>
         </div>
@@ -115,7 +143,7 @@ function TeamRoster({
         />
       </div>
       <div className="roster-subheading">
-        <h4>{team.manager_user_id === userId ? 'Your roster' : 'Team roster'}</h4>
+        <h4>{isMyTeam ? 'Your roster' : 'Team roster'}</h4>
         <span>
           {picks.length} / {snapshot.league.roster_size}
         </span>
@@ -154,6 +182,48 @@ function TeamRoster({
         <p className="muted">
           {snapshot.league.roster_size - (compact ? 6 : 50)} additional roster slots
         </p>
+      )}
+      {isMyTeam && (
+        <div className="roster-defense-footer">
+          <div className="roster-defense-actions">
+            {defenseUrl ? (
+              <a
+                className="button secondary full-width roster-defense-link"
+                href={defenseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Type defense chart
+                <ExternalLink size={14} />
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="button secondary full-width roster-defense-link"
+                disabled
+                title="Draft at least one Pokémon with type data to view team type defense"
+              >
+                Type defense chart
+                <ExternalLink size={14} />
+              </button>
+            )}
+            <button
+              type="button"
+              className="icon-button roster-info-trigger"
+              aria-label="Remember: Some abilities change type effectiveness"
+              aria-expanded={showAbilityNote}
+              title="Remember: Some abilities change type effectiveness"
+              onClick={() => setShowAbilityNote((prev) => !prev)}
+            >
+              <Info size={16} />
+            </button>
+          </div>
+          {showAbilityNote && (
+            <p className="roster-ability-note" role="note">
+              Remember: Some abilities change type effectiveness
+            </p>
+          )}
+        </div>
       )}
     </section>
   )
