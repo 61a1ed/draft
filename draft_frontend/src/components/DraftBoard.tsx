@@ -3,6 +3,7 @@ import { Users } from 'lucide-react'
 import type { Draftable, LeagueSnapshot, RosterPick } from '../lib/types'
 import { teamAvatarStyle, teamColor, teamName } from '../lib/teamPresentation'
 import { PokemonImage } from './Catalog'
+import { TypePills } from './PokemonParts'
 import { getTeamForOverallPick, TurnBanner } from './TurnBanner'
 
 export { getTeamForOverallPick }
@@ -281,9 +282,8 @@ export function DraftBoard({
                       if (rosterPick) {
                         const item = catalogById.get(rosterPick.draftable_id)
                         const pokeName = item?.name ?? `Pokémon #${rosterPick.draftable_id}`
-                        const pokeTypes = item?.types?.length
-                          ? item.types.join(' · ')
-                          : item?.form || 'Drafted'
+                        const hasTypes = Boolean(item?.types?.length)
+                        const fallbackSub = item?.form || 'Drafted'
                         return (
                           <td key={team.id} className={`pick-cell ${isYou ? 'is-user-col' : ''}`}>
                             <button
@@ -313,7 +313,11 @@ export function DraftBoard({
                                 </span>
                                 <div className="pick-poke-meta">
                                   <strong>{pokeName}</strong>
-                                  <span className="pick-poke-type">{pokeTypes}</span>
+                                  {hasTypes ? (
+                                    <TypePills types={item!.types!} small />
+                                  ) : (
+                                    <span className="pick-poke-type">{fallbackSub}</span>
+                                  )}
                                 </div>
                               </div>
                             </button>

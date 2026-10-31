@@ -799,8 +799,33 @@ describe('league navigation and team presentation', () => {
     const expectedHref =
       'https://www.pkmn.help/defense/team/?types=normal+flying&types=electric+water&abilities=prism_armor+flash_fire&format=simple'
 
-    // Draft room tab: Your team panel has the link and (i) note
+    // Draft room tab: Your team panel has the link, (i) note, and type pills for each Pokémon
     expect(heading()).toBe('Draft room')
+    const draftRoomRoster = renderer!.root
+      .findAllByType('section')
+      .find((node) => node.props.className?.includes('roster-panel'))!
+    expect(
+      draftRoomRoster.findAllByProps({ className: 'type-pill' }).map(text),
+    ).toEqual(['Normal', 'Flying', 'Electric', 'Water'])
+
+    // Clicking a Pokémon in the Draft room's "Your team" panel opens its details modal
+    const draftRoomSlots = draftRoomRoster
+      .findAllByType('button')
+      .filter((node) => node.props.className?.includes('roster-slot'))
+    expect(draftRoomSlots).toHaveLength(2)
+    await act(async () => draftRoomSlots[0].props.onClick())
+    const draftRoomDialog = renderer!.root.findByProps({
+      role: 'dialog',
+      'aria-label': 'Pick details',
+    })
+    expect(text(draftRoomDialog)).toContain('Pidgeot')
+    expect(text(draftRoomDialog)).toContain('This Pokémon has already been drafted.')
+    await act(async () =>
+      renderer!.root
+        .findAllByType('button')
+        .find((node) => text(node) === 'Pidgeot' || node.props.className?.includes('roster-slot'))
+    )
+
     const draftRoomLinks = renderer!.root
       .findAllByType('a')
       .filter((node) => node.props.className?.includes('roster-defense-link'))
@@ -823,6 +848,24 @@ describe('league navigation and team presentation', () => {
       .findAllByType('section')
       .filter((node) => node.props.className?.includes('roster-panel'))
     expect(rosters).toHaveLength(2)
+    expect(rosters[0].findAllByProps({ className: 'type-pill' }).map(text)).toEqual([
+      'Normal',
+      'Flying',
+      'Electric',
+      'Water',
+    ])
+
+    // Clicking a Pokémon on the Teams & rosters tab opens its details modal
+    const otherTeamSlots = rosters[1]
+      .findAllByType('button')
+      .filter((node) => node.props.className?.includes('roster-slot'))
+    expect(otherTeamSlots).toHaveLength(1)
+    await act(async () => otherTeamSlots[0].props.onClick())
+    const teamsDialog = renderer!.root.findByProps({
+      role: 'dialog',
+      'aria-label': 'Pick details',
+    })
+    expect(text(teamsDialog)).toContain('Pikachu')
 
     const myRosterLinks = rosters[0]
       .findAllByType('a')

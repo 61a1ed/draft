@@ -35,6 +35,7 @@ import type { Draftable, LeagueSnapshot, Session, Team } from './lib/types'
 import { teamAvatarStyle, teamName } from './lib/teamPresentation'
 import { INITIAL_CATALOG_FILTERS, type CatalogFilterState } from './lib/catalogFilters'
 import { Catalog, PokemonImage } from './components/Catalog'
+import { TypePills } from './components/PokemonParts'
 import { BigBoard } from './components/BigBoard'
 import { DraftBoard } from './components/DraftBoard'
 import { FloatingTurnTracker, TurnBanner } from './components/TurnBanner'
@@ -100,12 +101,14 @@ function TeamRoster({
   snapshot,
   catalog,
   userId,
+  onSelect,
   compact = false,
 }: {
   team: Team
   snapshot: LeagueSnapshot
   catalog: Draftable[]
   userId: number
+  onSelect: (item: Draftable) => void
   compact?: boolean
 }) {
   const picks = snapshot.rosters.filter((pick) => pick.team_id === team.id)
@@ -155,17 +158,28 @@ function TeamRoster({
             const pick = picks[index]
             const item = pick ? catalog.find((entry) => entry.id === pick.draftable_id) : null
             return pick ? (
-              <div className="roster-slot filled" key={pick.pick_id}>
+              <button
+                type="button"
+                className="roster-slot filled"
+                key={pick.pick_id}
+                disabled={!item}
+                onClick={() => {
+                  if (item) onSelect(item)
+                }}
+              >
                 {item ? <PokemonImage item={item} /> : <span className="slot-placeholder">?</span>}
                 <div>
                   <strong>{item?.name ?? `Pick ${pick.pick_number}`}</strong>
-                  <small>Pick #{pick.pick_number}</small>
+                  <div className="roster-slot-meta">
+                    <small>Pick #{pick.pick_number}</small>
+                    {item?.types && item.types.length > 0 && <TypePills types={item.types} small />}
+                  </div>
                 </div>
                 <span className="slot-cost">
                   {pick.point_cost}
                   <small>pts</small>
                 </span>
-              </div>
+              </button>
             ) : (
               <div className="roster-slot empty" key={`empty-${index}`}>
                 <span className="slot-placeholder">
@@ -787,6 +801,7 @@ export default function App() {
                           snapshot={snapshot}
                           catalog={catalog}
                           userId={session!.user.id}
+                          onSelect={openPick}
                           compact
                         />
                       )}
@@ -860,6 +875,7 @@ export default function App() {
                         snapshot={snapshot}
                         catalog={catalog}
                         userId={session!.user.id}
+                        onSelect={openPick}
                       />
                     ))
                   ) : (
