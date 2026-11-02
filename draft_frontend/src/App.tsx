@@ -777,6 +777,16 @@ export default function App() {
               filterState={filterState}
               onFilterStateChange={setFilterState}
             />
+          ) : view === 'draft' && !snapshot && draft.leagueId === null ? (
+            <BigBoard
+              key={session!.user.id}
+              catalog={catalog}
+              snapshot={null}
+              favorites={favorites}
+              onSelect={openPick}
+              filterState={filterState}
+              onFilterStateChange={setFilterState}
+            />
           ) : !snapshot ? (
             <div className="card empty-state">
               <Trophy size={34} />
@@ -785,6 +795,9 @@ export default function App() {
                 <div className="empty-state-actions">
                   <button className="button primary" onClick={() => setCreate(true)}>
                     <Plus size={16} /> Create league
+                  </button>
+                  <button className="button secondary" onClick={() => setView('draft')}>
+                    <LayoutGrid size={16} /> Browse Draft Pool
                   </button>
                   <button className="button secondary" onClick={() => setView('catalog')}>
                     <Bookmark size={16} /> Browse Pokedex & Favorites

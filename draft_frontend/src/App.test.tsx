@@ -303,9 +303,18 @@ describe('account catalog and favorites', () => {
     })
   })
 
-  it('opens the catalog without a league and passes the account favorites', async () => {
+  it('opens the catalog and draft pool without a league and passes the account favorites', async () => {
     draft = { ...draft, leagueId: null, leagues: [], snapshot: null }
     await render()
+
+    expect(heading()).toBe('Draft Pool')
+    expect(renderer!.root.findByProps({ 'data-testid': 'big-board' })).toBeDefined()
+    expect(vi.mocked(BigBoard).mock.lastCall?.[0]).toMatchObject({
+      catalog: draft.catalog,
+      snapshot: null,
+      favorites,
+    })
+
     await navigate('Pokedex & Favorites')
 
     expect(heading()).toBe('Pokedex & Favorites')
