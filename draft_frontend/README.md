@@ -12,7 +12,7 @@ uv run python scripts/dev.py --pg-bin 'C:\postgresql\bin'
 ```
 
 Each run creates a fresh database under `.dev-runs`, imports the Pokémon catalog,
-and seeds test users and six SQL scenarios. Ctrl+C stops all owned processes but
+and seeds test users and seven SQL scenarios. Ctrl+C stops all owned processes but
 keeps data and logs. Use the printed `--data-dir` command to resume a prior run.
 `--database-url-env NAME` connects to an existing prepared database without setup.
 Open **http://127.0.0.1:5173** and sign in; fresh local databases offer test accounts.

@@ -20,6 +20,9 @@ type SettingsProps = Pick<LeagueSetupProps, 'snapshot' | 'busy' | 'onMutation'>
 
 function LeagueSettings({ snapshot, busy, onMutation }: SettingsProps) {
   const [name, setName] = useState(snapshot.league.name)
+  const [minRosterSize, setMinRosterSize] = useState(
+    String(snapshot.league.min_roster_size ?? snapshot.league.roster_size),
+  )
   const [rosterSize, setRosterSize] = useState(String(snapshot.league.roster_size))
   const [pickSeconds, setPickSeconds] = useState(String(snapshot.league.pick_seconds))
   const save = (event: FormEvent<HTMLFormElement>) => {
@@ -32,6 +35,7 @@ function LeagueSettings({ snapshot, busy, onMutation }: SettingsProps) {
         p_name: name.trim(),
         p_roster_size: Number(rosterSize),
         p_pick_seconds: Number(pickSeconds),
+        p_min_roster_size: Number(minRosterSize),
       }),
     )
   }
@@ -50,11 +54,23 @@ function LeagueSettings({ snapshot, busy, onMutation }: SettingsProps) {
             />
           </label>
           <label className="field">
-            <span>Pokémon per team</span>
+            <span>Minimum Pokémon per team</span>
             <input
               type="number"
-              min="1"
-              max="2147483647"
+              min="6"
+              max="12"
+              step="1"
+              value={minRosterSize}
+              onChange={(event) => setMinRosterSize(event.target.value)}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Maximum Pokémon per team</span>
+            <input
+              type="number"
+              min={minRosterSize || '6'}
+              max="12"
               step="1"
               value={rosterSize}
               onChange={(event) => setRosterSize(event.target.value)}
@@ -423,7 +439,11 @@ export function LeagueSetup({
             </div>
             <div>
               <dt>Pokémon per team</dt>
-              <dd>{league.roster_size}</dd>
+              <dd>
+                {league.min_roster_size && league.min_roster_size !== league.roster_size
+                  ? `${league.min_roster_size}–${league.roster_size}`
+                  : league.roster_size}
+              </dd>
             </div>
             <div>
               <dt>Pick clock</dt>
@@ -492,7 +512,7 @@ export function LeagueSetup({
           </div>
           <p className="muted">Settings can be changed until the draft begins.</p>
           <LeagueSettings
-            key={`${league.id}:${league.name}:${league.roster_size}:${league.pick_seconds}`}
+            key={`${league.id}:${league.name}:${league.min_roster_size ?? league.roster_size}:${league.roster_size}:${league.pick_seconds}`}
             snapshot={snapshot}
             busy={busy}
             onMutation={onMutation}

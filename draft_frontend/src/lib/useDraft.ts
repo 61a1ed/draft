@@ -417,7 +417,12 @@ export function useDraft() {
     }
   }
 
-  const createLeague = async (name: string, size: number, seconds: number) => {
+  const createLeague = async (
+    name: string,
+    size: number,
+    seconds: number,
+    minSize?: number,
+  ) => {
     const token = generation.current
     const selection = selectionGeneration.current
     let created = false
@@ -426,6 +431,7 @@ export function useDraft() {
         p_name: name,
         p_roster_size: size,
         p_pick_seconds: seconds,
+        ...(minSize !== undefined ? { p_min_roster_size: minSize } : {}),
       })
       if (!ownsAccount() || generation.current !== token) return
       created = true

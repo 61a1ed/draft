@@ -133,12 +133,18 @@ function useTurnBannerState(snapshot: LeagueSnapshot, catalog: Draftable[], user
 
   const prevPickInfo = useMemo(() => {
     if (teamCount === 0) return null
-    const targetPick =
-      status === 'drafting' && activePickNumber !== null && activePickNumber > 1
-        ? activePickNumber - 1
-        : status === 'completed' && totalPicks > 1
-          ? totalPicks - 1
-          : null
+    let targetPick: number | null = null
+    if (status === 'drafting' && activePickNumber !== null && activePickNumber > 1) {
+      targetPick = activePickNumber - 1
+      for (let p = activePickNumber - 1; p >= 1; p--) {
+        if (pickByNumber.has(p)) {
+          targetPick = p
+          break
+        }
+      }
+    } else if (status === 'completed' && totalPicks > 1) {
+      targetPick = totalPicks - 1
+    }
     if (targetPick === null || targetPick < 1) return null
     const meta = getTeamForOverallPick(targetPick, orderedTeams)
     const rosterPick = pickByNumber.get(targetPick)
@@ -177,12 +183,18 @@ function useTurnBannerState(snapshot: LeagueSnapshot, catalog: Draftable[], user
 
   const nextPickInfo = useMemo(() => {
     if (teamCount === 0) return null
-    const targetPick =
-      status === 'drafting' && activePickNumber !== null
-        ? activePickNumber + 1
-        : status === 'setup' && totalPicks >= 2
-          ? 2
-          : null
+    let targetPick: number | null = null
+    if (status === 'drafting' && activePickNumber !== null) {
+      for (let p = activePickNumber + 1; p <= totalPicks; p++) {
+        const candidate = getTeamForOverallPick(p, orderedTeams)
+        if (!candidate.team?.roster_locked) {
+          targetPick = p
+          break
+        }
+      }
+    } else if (status === 'setup' && totalPicks >= 2) {
+      targetPick = 2
+    }
     if (targetPick === null || targetPick < 1 || targetPick > totalPicks) return null
     const meta = getTeamForOverallPick(targetPick, orderedTeams)
     return {
@@ -195,13 +207,15 @@ function useTurnBannerState(snapshot: LeagueSnapshot, catalog: Draftable[], user
 
   const userSubsequentPick = useMemo(() => {
     if (teamCount === 0 || status === 'completed') return null
-    const hasUserTeam = orderedTeams.some((team) => team.manager_user_id === userId)
+    const hasUserTeam = orderedTeams.some(
+      (team) => team.manager_user_id === userId && !team.roster_locked,
+    )
     if (!hasUserTeam) return null
 
     const searchFrom =
       status === 'drafting' && activePickNumber !== null
         ? nextPickInfo?.isYou
-          ? activePickNumber + 2
+          ? nextPickInfo.overallPick + 1
           : activePickNumber + 1
         : status === 'setup'
           ? 1
@@ -209,7 +223,7 @@ function useTurnBannerState(snapshot: LeagueSnapshot, catalog: Draftable[], user
 
     for (let p = searchFrom; p <= totalPicks; p++) {
       const info = getTeamForOverallPick(p, orderedTeams)
-      if (info.team?.manager_user_id === userId) {
+      if (info.team?.manager_user_id === userId && !info.team?.roster_locked) {
         const delta =
           status === 'drafting' && activePickNumber !== null ? p - activePickNumber : null
         return {
@@ -257,18 +271,22 @@ export function TurnBanner({
   snapshot,
   catalog,
   userId,
+  busy = false,
   onSelectPick,
   onStartDraft,
   onOpenSettings,
   onOpenTournament,
+  onSetRosterLock,
 }: {
   snapshot: LeagueSnapshot
   catalog: Draftable[]
   userId: number
+  busy?: boolean
   onSelectPick?: (item: Draftable) => void
   onStartDraft?: () => void
   onOpenSettings?: () => void
   onOpenTournament?: () => void
+  onSetRosterLock?: (teamId: number, locked: boolean) => void
 }) {
   const {
     seconds,
@@ -348,7 +366,13 @@ export function TurnBanner({
                   {(activeIsYou || isCommissionerProxyTurn) && activeTeam && (
                     <>
                       <span>·</span>
-                      <strong>{activeTeam.points_remaining} pts left</strong>
+                      <strong>
+                        {activeTeam.points_remaining} pts left
+                        {snapshot.state.max_spendable_points !== undefined &&
+                          snapshot.state.max_spendable_points !== null &&
+                          snapshot.state.max_spendable_points < activeTeam.points_remaining &&
+                          ` (${snapshot.state.max_spendable_points} max this pick)`}
+                      </strong>
                     </>
                   )}
                 </>
@@ -370,6 +394,16 @@ export function TurnBanner({
               <strong>{teamName(activeTeam)}</strong>, not your team.
             </span>
           </div>
+        )}
+        {status === 'drafting' && activeTeam?.can_lock_roster && onSetRosterLock && (
+          <button
+            type="button"
+            className="button secondary banner-button"
+            disabled={busy}
+            onClick={() => onSetRosterLock(activeTeam.id, true)}
+          >
+            Finish drafting
+          </button>
         )}
         {status === 'completed' && onOpenTournament && (
           <button className="button banner-button" onClick={onOpenTournament}>

@@ -61,6 +61,7 @@ class CreateLeague(Input):
     p_name: Name
     p_roster_size: ID
     p_pick_seconds: ID = 60
+    p_min_roster_size: ID | None = None
 
 
 class LeagueRevision(Input):
@@ -72,6 +73,7 @@ class UpdateLeague(LeagueRevision):
     p_name: Name
     p_roster_size: ID
     p_pick_seconds: ID
+    p_min_roster_size: ID | None = None
 
 
 class AddTeam(LeagueRevision):
@@ -93,6 +95,10 @@ class UpdateTeam(TeamRevision):
 class SetTeamMetadata(TeamRevision):
     p_name: Name
     p_color_rgb: ColorRGB
+
+
+class SetTeamRosterLock(TeamRevision):
+    p_locked: Annotated[bool, Field(strict=True)]
 
 
 class DraftOrder(LeagueRevision):
@@ -475,7 +481,7 @@ def create_app(settings: Settings | None = None):
         )
         if function in {
             "update_league", "update_team", "remove_team", "set_draft_order",
-            "set_team_metadata",
+            "set_team_metadata", "set_team_roster_lock",
             "rename_favorites_list", "delete_favorites_list", "add_favorites_entry",
             "remove_favorites_entry", "set_favorites_order",
             "publish_tournament", "set_round_suggested_date", "set_team_availability",
@@ -503,6 +509,10 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/rpc/set_team_metadata", tags=["SQL functions"])
     async def set_team_metadata(body: SetTeamMetadata, user: User):
         return await rpc(user, "set_team_metadata", body)
+
+    @app.post("/api/rpc/set_team_roster_lock", tags=["SQL functions"])
+    async def set_team_roster_lock(body: SetTeamRosterLock, user: User):
+        return await rpc(user, "set_team_roster_lock", body)
 
     @app.post("/api/rpc/remove_team", tags=["SQL functions"])
     async def remove_team(body: TeamRevision, user: User):

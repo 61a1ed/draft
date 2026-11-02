@@ -100,18 +100,23 @@ function TeamRoster({
   snapshot,
   catalog,
   userId,
+  busy = false,
   onSelect,
+  onSetRosterLock,
   compact = false,
 }: {
   team: Team
   snapshot: LeagueSnapshot
   catalog: Draftable[]
   userId: number
+  busy?: boolean
   onSelect: (item: Draftable) => void
+  onSetRosterLock?: (teamId: number, locked: boolean) => void
   compact?: boolean
 }) {
   const picks = snapshot.rosters.filter((pick) => pick.team_id === team.id)
   const isMyTeam = team.manager_user_id === userId
+  const minRosterSize = snapshot.league.min_roster_size ?? snapshot.league.roster_size
   const pickedItems = picks
     .map((pick) => catalog.find((entry) => entry.id === pick.draftable_id))
     .filter((entry): entry is Draftable => Boolean(entry))
@@ -148,8 +153,30 @@ function TeamRoster({
         <h4>{isMyTeam ? 'Your roster' : 'Team roster'}</h4>
         <span>
           {picks.length} / {snapshot.league.roster_size}
+          {minRosterSize < snapshot.league.roster_size ? ` (min ${minRosterSize})` : ''}
         </span>
       </div>
+      {team.roster_locked && <p className="muted">Finished drafting (roster locked)</p>}
+      {onSetRosterLock && team.can_lock_roster && (
+        <button
+          type="button"
+          className="button secondary full-width"
+          disabled={busy}
+          onClick={() => onSetRosterLock(team.id, true)}
+        >
+          Finish drafting
+        </button>
+      )}
+      {onSetRosterLock && team.can_unlock_roster && (
+        <button
+          type="button"
+          className="button secondary full-width"
+          disabled={busy}
+          onClick={() => onSetRosterLock(team.id, false)}
+        >
+          Unlock roster
+        </button>
+      )}
       <div className="roster-slots">
         {Array.from(
           { length: Math.min(snapshot.league.roster_size, compact ? 6 : 50) },
@@ -369,6 +396,10 @@ export default function App() {
     kind: 'start' | 'undo'
     revision: number
   } | null>(null)
+  const [confirmRosterLock, setConfirmRosterLock] = useState<{
+    teamId: number
+    revision: number
+  } | null>(null)
   const closeTestSignIn = useCallback(() => setTestSignIn(false), [])
   const [chargePoints, setChargePoints] = useState(true)
   const [filterState, setFilterState] = useState<CatalogFilterState>(INITIAL_CATALOG_FILTERS)
@@ -376,6 +407,7 @@ export default function App() {
     setSelected(null)
     setConfirmPick(false)
     setConfirmAction(null)
+    setConfirmRosterLock(null)
     setAvailabilityContext(null)
   }, [draft.leagueId, mode, session?.user.id])
   useEffect(() => {
@@ -403,12 +435,35 @@ export default function App() {
     selected &&
     (selected.revision !== snapshot?.revision || selected.teamId !== snapshot?.state.next_team_id)
   const cost = selected ? (chargePoints ? selected.item.point_cost : 0) : 0
+  const maxSpendable = snapshot?.state.max_spendable_points ?? activeTeam?.points_remaining
   const pickAllowed =
     !selectedTaken &&
     !pickChanged &&
     can('pick') &&
     activeTeam &&
-    cost <= activeTeam.points_remaining
+    cost <= activeTeam.points_remaining &&
+    (maxSpendable === undefined || maxSpendable === null || cost <= maxSpendable)
+  const setTeamRosterLock = (teamId: number, locked: boolean) => {
+    if (!snapshot) return
+    if (locked) {
+      setConfirmRosterLock({ teamId, revision: snapshot.revision })
+      return
+    }
+    void draft.mutate(() =>
+      api.setTeamRosterLock({
+        p_league: snapshot.league_id,
+        p_revision: snapshot.revision,
+        p_team: teamId,
+        p_locked: false,
+      }),
+    )
+  }
+  const lockTargetTeam =
+    confirmRosterLock && snapshot?.teams.find((team) => team.id === confirmRosterLock.teamId)
+  const lockTargetPicks =
+    lockTargetTeam && snapshot
+      ? snapshot.rosters.filter((pick) => pick.team_id === lockTargetTeam.id).length
+      : 0
   const openPick = (item: Draftable) => {
     setSelected({
       item,
@@ -745,12 +800,14 @@ export default function App() {
                     snapshot={snapshot}
                     catalog={catalog}
                     userId={session!.user.id}
+                    busy={workspaceBusy}
                     onSelectPick={openPick}
                     onOpenSettings={() => setView('settings')}
                     onStartDraft={() =>
                       setConfirmAction({ kind: 'start', revision: snapshot.revision })
                     }
                     onOpenTournament={() => setView('tournament')}
+                    onSetRosterLock={setTeamRosterLock}
                   />
                   <div className="stats-grid">
                     <div className="stat-card">
@@ -801,7 +858,9 @@ export default function App() {
                           snapshot={snapshot}
                           catalog={catalog}
                           userId={session!.user.id}
+                          busy={workspaceBusy}
                           onSelect={openPick}
+                          onSetRosterLock={setTeamRosterLock}
                           compact
                         />
                       )}
@@ -857,12 +916,14 @@ export default function App() {
                   snapshot={snapshot}
                   catalog={catalog}
                   userId={session!.user.id}
+                  busy={workspaceBusy}
                   onSelect={openPick}
                   onOpenSettings={() => setView('settings')}
                   onStartDraft={() =>
                     setConfirmAction({ kind: 'start', revision: snapshot.revision })
                   }
                   onOpenTournament={() => setView('tournament')}
+                  onSetRosterLock={setTeamRosterLock}
                 />
               )}
               {view === 'teams' && (
@@ -875,7 +936,9 @@ export default function App() {
                         snapshot={snapshot}
                         catalog={catalog}
                         userId={session!.user.id}
+                        busy={workspaceBusy}
                         onSelect={openPick}
+                        onSetRosterLock={setTeamRosterLock}
                       />
                     ))
                   ) : (
@@ -989,8 +1052,8 @@ export default function App() {
           error={draft.error}
           busy={draft.busy}
           onClose={() => setCreate(false)}
-          onSubmit={async (name, size, seconds) => {
-            if (await draft.createLeague(name, size, seconds)) {
+          onSubmit={async (name, size, seconds, minSize) => {
+            if (await draft.createLeague(name, size, seconds, minSize)) {
               setCreate(false)
               setView('settings')
             }
@@ -1066,6 +1129,14 @@ export default function App() {
           ) : activeTeam && cost > activeTeam.points_remaining ? (
             <p className="selection-notice">
               This pick exceeds the current team’s remaining budget.
+            </p>
+          ) : activeTeam &&
+            maxSpendable !== undefined &&
+            maxSpendable !== null &&
+            cost > maxSpendable ? (
+            <p className="selection-notice">
+              This pick would not leave enough points to reach the minimum roster size (
+              {snapshot.league.min_roster_size ?? snapshot.league.roster_size} Pokémon).
             </p>
           ) : null}
           {snapshot && (
@@ -1203,6 +1274,89 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {confirmRosterLock && snapshot && lockTargetTeam && (
+        <Modal title="Finish drafting?" onClose={() => setConfirmRosterLock(null)}>
+          {lockTargetTeam.points_remaining !== 0 ? (
+            <div className="commissioner-pick-warning" role="alert">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>
+                  {lockTargetTeam.points_remaining}{' '}
+                  {lockTargetTeam.points_remaining === 1 ? 'point' : 'points'} still remaining!
+                </strong>
+                <p>
+                  {lockTargetTeam.manager_user_id === session?.user.id
+                    ? 'You still have '
+                    : `${teamName(lockTargetTeam)} still has `}
+                  <strong>{lockTargetTeam.points_remaining} unspent points</strong>. Finishing
+                  drafting now will lock this roster and skip all remaining rounds unless the
+                  commissioner unlocks it.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className="modal-description">
+              Finishing drafting will lock {teamName(lockTargetTeam)}’s roster and skip all
+              remaining rounds unless the commissioner unlocks it.
+            </p>
+          )}
+          <div
+            className={`pick-summary ${lockTargetTeam.points_remaining !== 0 ? 'is-proxy-pick' : ''}`}
+          >
+            <span>
+              Team
+              <strong>{teamName(lockTargetTeam)}</strong>
+            </span>
+            <span>
+              Roster size
+              <strong>
+                {lockTargetPicks} / {snapshot.league.roster_size} Pokémon
+              </strong>
+            </span>
+            <span>
+              Points remaining
+              <strong>{lockTargetTeam.points_remaining} pts</strong>
+            </span>
+          </div>
+          {confirmRosterLock.revision !== snapshot.revision && (
+            <p className="selection-notice">
+              The draft changed. Close this window and review the latest state before continuing.
+            </p>
+          )}
+          <div className="modal-actions">
+            <button
+              className="button secondary"
+              disabled={draft.busy}
+              onClick={() => setConfirmRosterLock(null)}
+            >
+              <ArrowLeft size={15} />
+              Cancel
+            </button>
+            <button
+              className={`button ${lockTargetTeam.points_remaining !== 0 ? 'warning' : 'primary'}`}
+              disabled={
+                draft.busy ||
+                !lockTargetTeam.can_lock_roster ||
+                confirmRosterLock.revision !== snapshot.revision
+              }
+              onClick={async () => {
+                const succeeded = await draft.mutate(() =>
+                  api.setTeamRosterLock({
+                    p_league: snapshot.league_id,
+                    p_revision: snapshot.revision,
+                    p_team: lockTargetTeam.id,
+                    p_locked: true,
+                  }),
+                )
+                if (succeeded) setConfirmRosterLock(null)
+              }}
+            >
+              {draft.busy ? 'Locking roster…' : 'Finish drafting'}
+              <ArrowRight size={15} />
+            </button>
+          </div>
+        </Modal>
+      )}
       {confirmAction && snapshot && (
         <Modal
           title={confirmAction.kind === 'start' ? 'Start draft?' : 'Undo last pick?'}
@@ -1255,7 +1409,7 @@ function CreateLeague({
   busy: boolean
   error: string
   onClose: () => void
-  onSubmit: (name: string, size: number, seconds: number) => Promise<void>
+  onSubmit: (name: string, size: number, seconds: number, minSize?: number) => Promise<void>
 }) {
   return (
     <Modal title="Create league" onClose={onClose}>
@@ -1273,6 +1427,7 @@ function CreateLeague({
             String(data.get('name')).trim(),
             Number(data.get('roster')),
             Number(data.get('seconds')),
+            Number(data.get('min_roster')),
           )
         }}
       >
@@ -1288,8 +1443,12 @@ function CreateLeague({
         </label>
         <div className="form-grid">
           <label className="field">
-            Pokémon per team
-            <input name="roster" type="number" defaultValue={6} required min={1} max={100} />
+            Minimum Pokémon per team
+            <input name="min_roster" type="number" defaultValue={6} required min={6} max={12} />
+          </label>
+          <label className="field">
+            Maximum Pokémon per team
+            <input name="roster" type="number" defaultValue={10} required min={6} max={12} />
           </label>
           <label className="field">
             Seconds per pick

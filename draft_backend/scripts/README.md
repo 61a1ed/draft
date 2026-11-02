@@ -14,7 +14,7 @@ uv run python scripts/dev.py --pg-bin 'C:\postgresql\bin'
 
 Each invocation creates a fresh database under `.dev-runs/<unique-run>/database`,
 installs the schema, imports the Pokémon catalog/images, and seeds Alice, Bob,
-Carol and six SQL scenarios. Put PostgreSQL binaries on PATH or pass `--pg-bin`.
+Carol and seven SQL scenarios. Put PostgreSQL binaries on PATH or pass `--pg-bin`.
 Open **http://127.0.0.1:5173**, sign in with a test account, and select a scenario.
 
 ```powershell
@@ -73,6 +73,7 @@ uv run python scripts/scenarios.py --root .dev-runs/<run>/database apply --file 
 | `live` | Four active picks, reversed second round; Bob picks next |
 | `budget` | Bob has zero points; switch to Alice to waive a pick's price |
 | `undo` | Undone history and a replacement; active rosters and spending exclude undo |
+| `bounds` | Min 8, max 12 roster; each team has 7 picks (one pick away from the minimum) |
 | `completed` | Finished two-round draft; Alice can undo to reopen it |
 
 The files contain ordinary SQL inserts/updates, with no Python fixture model and

@@ -137,7 +137,7 @@ def test_draft_workflow_and_database_enforced_access(client, test_database):
     assert len(catalog) >= 4
     assert all(
         set(row) == {"id", "name", "point_cost", "dex", "species", "form", "types",
-                     "abilities", "hidden_ability", "base_stats", "image_url", "megas"}
+                     "abilities", "hidden_ability", "base_stats", "image_url", "megas", "moves"}
         and isinstance(row["megas"], list)
         for row in catalog
     )
@@ -470,3 +470,173 @@ def test_only_commissioner_can_make_free_picks(client, test_database):
     state = snapshot(client, league)
     assert state["history"][0]["point_cost"] == 0
     assert all(t["points_spent"] == 0 for t in state["teams"])
+
+
+def test_roster_bounds_formula_two_budget_protection_and_lock_unlock(client, test_database):
+    alice = login(client, "alice")
+    bob = next(u for u in client.get("/api/users").json() if u["display_name"] == "Bob")
+    catalog = sorted(client.get("/api/draftables").json(), key=lambda d: (d["point_cost"], d["id"]))
+
+    # Validate 6..12 roster bounds when p_min_roster_size is supplied.
+    for min_size, max_size in ((5, 8), (6, 13), (9, 8)):
+        assert (
+            rpc(
+                client,
+                "create_league",
+                expected=400,
+                p_name="Invalid bounds",
+                p_roster_size=max_size,
+                p_min_roster_size=min_size,
+            )["detail"]
+            == "invalid_roster_bounds"
+        )
+
+    league = rpc(
+        client,
+        "create_league",
+        p_name="Variable Roster " + uuid4().hex,
+        p_roster_size=8,
+        p_pick_seconds=60,
+        p_min_roster_size=6,
+    )
+    # Alice gets 20 points: the 5 cheapest draftables cost 0+1+2+3+4 = 10, so on Pick 1
+    # Alice's max spendable is 20 - 10 = 10 (meaning an 11-point pick is blocked by Formula 2!).
+    team_a = rpc(
+        client,
+        "add_team",
+        p_league=league,
+        p_revision=0,
+        p_name="Alice",
+        p_manager=alice["id"],
+        p_point_budget=20,
+    )
+    team_b = rpc(
+        client,
+        "add_team",
+        p_league=league,
+        p_revision=1,
+        p_name="Bob",
+        p_manager=bob["id"],
+        p_point_budget=500,
+    )
+    rpc(client, "set_draft_order", p_league=league, p_revision=2, p_teams=[team_a, team_b])
+    complete_fixture_colors(test_database, league)
+    rpc(client, "draft_action", p_league=league, p_revision=3, p_kind="start")
+
+    state = snapshot(client, league)
+    assert state["league"]["min_roster_size"] == 6
+    assert state["league"]["roster_size"] == 8
+    assert state["state"]["max_spendable_points"] == 10
+
+    cost_11 = next(d for d in catalog if d["point_cost"] == 11)
+    # 11 <= 20 (within total budget), but leaves 9 < 10 needed for remaining 5 minimum slots.
+    assert (
+        rpc(
+            client,
+            "draft_action",
+            expected=409,
+            p_league=league,
+            p_revision=4,
+            p_kind="pick",
+            p_draftable=cost_11["id"],
+        )["detail"]
+        == "min_roster_budget_exceeded"
+    )
+
+    # Have both teams draft 6 Pokémon (12 picks total, rounds 1..6).
+    # Alice takes the 6 cheapest (0,1,2,3,4,5 = 15 pts); Bob takes higher-cost ones (20..25).
+    alice_pool = [d["id"] for d in catalog[:6]]
+    bob_pool = [d["id"] for d in catalog[20:28]]
+    rev = 4
+    for round_idx in range(6):
+        order = (team_a, team_b) if round_idx % 2 == 0 else (team_b, team_a)
+        for team_id in order:
+            pick_id = alice_pool.pop(0) if team_id == team_a else bob_pool.pop(0)
+            rpc(
+                client,
+                "draft_action",
+                p_league=league,
+                p_revision=rev,
+                p_kind="pick",
+                p_draftable=pick_id,
+            )
+            rev += 1
+
+    # After 6 rounds, both teams have reached min_roster_size (6).
+    # Now it is Round 7, Pick 13 (Alice's turn). Alice locks her roster at 6 Pokémon!
+    state = snapshot(client, league)
+    assert state["state"]["next_team_id"] == team_a
+    alice_team = next(t for t in state["teams"] if t["id"] == team_a)
+    assert alice_team["pick_count"] == 6
+    assert alice_team["can_lock_roster"] is True
+
+    rpc(
+        client,
+        "set_team_roster_lock",
+        p_league=league,
+        p_revision=rev,
+        p_team=team_a,
+        p_locked=True,
+    )
+    rev += 1
+
+    # Alice's Round 7 turn (#13) is skipped; next_pick_number jumps to #14 (Bob's Round 7 turn).
+    state = snapshot(client, league)
+    assert state["state"]["next_pick_number"] == 14
+    assert state["state"]["next_team_id"] == team_b
+
+    # Non-commissioner cannot unlock Alice's roster, but Commissioner (Alice) can.
+    login(client, "bob")
+    assert (
+        rpc(
+            client,
+            "set_team_roster_lock",
+            expected=409,
+            p_league=league,
+            p_revision=rev,
+            p_team=team_a,
+            p_locked=False,
+        )["detail"]
+        == "action_not_permitted"
+    )
+    login(client, "alice")
+    rpc(
+        client,
+        "set_team_roster_lock",
+        p_league=league,
+        p_revision=rev,
+        p_team=team_a,
+        p_locked=False,
+    )
+    rev += 1
+    assert snapshot(client, league)["state"]["next_pick_number"] == 13
+
+    # Re-lock Alice so she stays at the minimum (6) while Bob drafts up to the maximum (8).
+    rpc(
+        client,
+        "set_team_roster_lock",
+        p_league=league,
+        p_revision=rev,
+        p_team=team_a,
+        p_locked=True,
+    )
+    rev += 1
+
+    # Bob picks his 7th (#14) and 8th (#15) Pokémon; #16 belongs to locked Alice so draft completes!
+    login(client, "bob")
+    for pick_id in bob_pool:
+        rpc(
+            client,
+            "draft_action",
+            p_league=league,
+            p_revision=rev,
+            p_kind="pick",
+            p_draftable=pick_id,
+        )
+        rev += 1
+
+    final_state = snapshot(client, league)
+    assert final_state["state"]["status"] == "completed"
+    counts = {t["id"]: t["pick_count"] for t in final_state["teams"]}
+    assert counts == {team_a: 6, team_b: 8}
+

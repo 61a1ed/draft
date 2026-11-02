@@ -24,6 +24,7 @@ SCENARIOS = {
     "live": "Four picks into a snake draft; Bob picks next.",
     "budget": "Bob has zero points; Alice can waive the cost of a paid entry.",
     "undo": "An undone pick and its replacement; Carol picks next.",
+    "bounds": "Min 8, max 12 roster; each team has 7 picks so far.",
     "completed": "A finished two-round draft; Alice can undo the final pick.",
 }
 

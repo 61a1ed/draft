@@ -72,18 +72,22 @@ export function DraftBoard({
   snapshot,
   catalog,
   userId,
+  busy = false,
   onSelect,
   onOpenSettings,
   onStartDraft,
   onOpenTournament,
+  onSetRosterLock,
 }: {
   snapshot: LeagueSnapshot
   catalog: Draftable[]
   userId: number
+  busy?: boolean
   onSelect: (item: Draftable) => void
   onOpenSettings?: () => void
   onStartDraft?: () => void
   onOpenTournament?: () => void
+  onSetRosterLock?: (teamId: number, locked: boolean) => void
 }) {
   const seconds = useTurnSeconds(snapshot)
   const formattedTime = formatTimer(seconds)
@@ -148,6 +152,14 @@ export function DraftBoard({
   }
 
   const activeTeam = activeMeta?.team
+  const onDeckPickNumber = useMemo(() => {
+    if (status !== 'drafting' || activePickNumber === null) return null
+    for (let p = activePickNumber + 1; p <= totalPicks; p++) {
+      const candidate = getTeamForOverallPick(p, orderedTeams)
+      if (!candidate.team?.roster_locked) return p
+    }
+    return null
+  }, [activePickNumber, orderedTeams, status, totalPicks])
 
   return (
     <div className="draft-board-view">
@@ -155,10 +167,12 @@ export function DraftBoard({
         snapshot={snapshot}
         catalog={catalog}
         userId={userId}
+        busy={busy}
         onSelectPick={onSelect}
         onOpenSettings={onOpenSettings}
         onStartDraft={onStartDraft}
         onOpenTournament={onOpenTournament}
+        onSetRosterLock={onSetRosterLock}
       />
 
       <section className="board-card" aria-label="Snake Draft Board Grid">
@@ -356,8 +370,8 @@ export function DraftBoard({
 
                       if (
                         status === 'drafting' &&
-                        activePickNumber !== null &&
-                        overallPick === activePickNumber + 1
+                        onDeckPickNumber !== null &&
+                        overallPick === onDeckPickNumber
                       ) {
                         return (
                           <td key={team.id} className={`pick-cell ${isYou ? 'is-user-col' : ''}`}>
@@ -388,11 +402,13 @@ export function DraftBoard({
                           ? overallPick - activePickNumber
                           : null
 
+                      const isLockedSlot = Boolean(team.roster_locked)
+
                       return (
                         <td key={team.id} className={`pick-cell ${isYou ? 'is-user-col' : ''}`}>
                           <div
                             className="pick-slot empty"
-                            aria-label={`Pick ${coord}, #${overallPick} overall, ${teamName(team)}`}
+                            aria-label={`Pick ${coord}, #${overallPick} overall, ${teamName(team)}${isLockedSlot ? ', roster locked' : ''}`}
                           >
                             <div className="pick-slot-top">
                               <span className="pick-coord">
@@ -401,7 +417,9 @@ export function DraftBoard({
                               <span className="snake-flow-arrow">{flowArrow}</span>
                             </div>
                             <div className="empty-center">
-                              {isYou ? (
+                              {isLockedSlot ? (
+                                <span className="empty-slot-hint">Finished drafting</span>
+                              ) : isYou ? (
                                 <span className="your-turn-pill">
                                   {turnsAway !== null && turnsAway > 0
                                     ? `★ Your pick · in ${turnsAway}`

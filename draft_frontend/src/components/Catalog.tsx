@@ -109,7 +109,7 @@ export function Catalog({
     [snapshot?.rosters],
   )
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
-  const remaining = activeTeam?.points_remaining
+  const remaining = snapshot?.state.max_spendable_points ?? activeTeam?.points_remaining
   const allFilters = useMemo(() => buildAllFilters(catalog), [catalog])
   const suggestions = useMemo(() => {
     const query = search.trim().toLowerCase()

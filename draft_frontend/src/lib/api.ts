@@ -10,6 +10,7 @@ import type {
   Session,
   SetDraftOrderInput,
   SetTeamMetadataInput,
+  SetTeamRosterLockInput,
   TeamRevision,
   UpdateLeagueInput,
   UpdateTeamInput,
@@ -48,6 +49,10 @@ const errorMessages: Record<string, string> = {
   stale_revision: 'The data changed while you were working. Review the latest state and try again.',
   action_not_permitted: 'This action is not available to you in the current state.',
   point_budget_exceeded: 'This Pokémon costs more than the team’s remaining points.',
+  min_roster_budget_exceeded:
+    'This pick would not leave enough points to reach the minimum roster size.',
+  invalid_roster_bounds:
+    'Minimum roster size must be at least 6, maximum at most 12, and minimum cannot exceed maximum.',
   already_exists_or_claimed: 'That Pokémon is already picked, or that manager is already assigned.',
   league_not_found: 'This league is unavailable or you no longer have access.',
   team_not_found: 'That team no longer exists. Refresh the league and try again.',
@@ -239,6 +244,8 @@ export const api = {
   addTeam: (input: AddTeamInput) => rpc<number>('add_team', input),
   updateTeam: (input: UpdateTeamInput) => rpc<null>('update_team', input),
   setTeamMetadata: (input: SetTeamMetadataInput) => rpc<null>('set_team_metadata', input),
+  setTeamRosterLock: (input: SetTeamRosterLockInput) =>
+    rpc<null>('set_team_roster_lock', input),
   removeTeam: (input: TeamRevision) => rpc<null>('remove_team', input),
   setDraftOrder: (input: SetDraftOrderInput) => rpc<null>('set_draft_order', input),
   draftAction: (input: DraftActionInput) => rpc<number | null>('draft_action', input),

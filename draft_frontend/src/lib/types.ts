@@ -64,6 +64,7 @@ export interface League {
   name: string
   commissioner_user_id: number
   roster_size: number
+  min_roster_size?: number
   pick_seconds: number
   revision: number
   created_at: string
@@ -78,6 +79,7 @@ export interface DraftState {
   revision: number
   status: DraftStatus
   roster_size: number
+  min_roster_size?: number
   team_count: number
   active_pick_count: number
   required_pick_count: number
@@ -86,6 +88,7 @@ export interface DraftState {
   next_team_id: number | null
   last_pick_id: number | null
   deadline: string | null
+  max_spendable_points?: number | null
 }
 
 export interface Team {
@@ -102,6 +105,10 @@ export interface Team {
   point_budget: number
   points_spent: number
   points_remaining: number
+  roster_locked?: boolean
+  pick_count?: number
+  can_lock_roster?: boolean
+  can_unlock_roster?: boolean
 }
 
 export interface RosterPick {
@@ -161,12 +168,14 @@ export interface CreateLeagueInput {
   p_name: string
   p_roster_size: number
   p_pick_seconds?: number
+  p_min_roster_size?: number
 }
 
 export interface UpdateLeagueInput extends LeagueRevision {
   p_name: string
   p_roster_size: number
   p_pick_seconds: number
+  p_min_roster_size?: number
 }
 
 export interface AddTeamInput extends LeagueRevision {
@@ -188,6 +197,10 @@ export interface UpdateTeamInput extends TeamRevision {
 export interface SetTeamMetadataInput extends TeamRevision {
   p_name: string
   p_color_rgb: number
+}
+
+export interface SetTeamRosterLockInput extends TeamRevision {
+  p_locked: boolean
 }
 
 export interface SetDraftOrderInput extends LeagueRevision {

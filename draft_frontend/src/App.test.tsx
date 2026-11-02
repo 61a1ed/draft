@@ -891,4 +891,58 @@ describe('league navigation and team presentation', () => {
       }),
     ).toHaveLength(0)
   })
+
+  it('asks for confirmation before finishing drafting and highlights non-zero remaining points', async () => {
+    const setLock = vi.spyOn(api, 'setTeamRosterLock').mockResolvedValue({ result: null })
+    draft.mutate = vi.fn(async (operation) => {
+      await operation()
+      return true
+    })
+    const snap = league('drafting')
+    snap.teams[0].can_lock_roster = true
+    snap.teams[0].points_remaining = 14
+    draft.snapshot = snap
+    await render()
+
+    const finishBtn = renderer!.root
+      .findAllByType('button')
+      .find((btn) => text(btn) === 'Finish drafting')!
+    await act(async () => finishBtn.props.onClick())
+    expect(setLock).not.toHaveBeenCalled()
+
+    const dialog = renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Finish drafting?' })
+    expect(text(dialog)).toContain('14 points still remaining!')
+    expect(text(dialog)).toContain('You still have 14 unspent points.')
+    expect(text(dialog)).toContain('14 pts')
+    expect(dialog.findAllByProps({ role: 'alert' })).toHaveLength(1)
+
+    const confirmBtn = dialog
+      .findAllByType('button')
+      .find((btn) => text(btn) === 'Finish drafting')!
+    expect(confirmBtn.props.className).toContain('warning')
+
+    await act(async () => confirmBtn.props.onClick())
+    expect(setLock).toHaveBeenCalledExactlyOnceWith({
+      p_league: 7,
+      p_revision: 5,
+      p_team: 1,
+      p_locked: true,
+    })
+    expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
+
+    // When remaining points is 0, no warning highlight is shown
+    snap.teams[0].points_remaining = 0
+    await render()
+    await act(async () => finishBtn.props.onClick())
+    const zeroDialog = renderer!.root.findByProps({
+      role: 'dialog',
+      'aria-label': 'Finish drafting?',
+    })
+    expect(zeroDialog.findAllByProps({ role: 'alert' })).toHaveLength(0)
+    expect(text(zeroDialog)).toContain('0 pts')
+    const zeroConfirmBtn = zeroDialog
+      .findAllByType('button')
+      .find((btn) => text(btn) === 'Finish drafting')!
+    expect(zeroConfirmBtn.props.className).toContain('primary')
+  })
 })
