@@ -954,4 +954,51 @@ describe('league navigation and team presentation', () => {
       .find((btn) => text(btn) === 'Finish drafting')!
     expect(zeroConfirmBtn.props.className).toContain('primary')
   })
+
+  it('opens the TeamSummaryModal when clicking a team in Draft Pool, Draft board, or Teams tab', async () => {
+    const snap = league('drafting')
+    snap.rosters = [
+      {
+        league_id: 7,
+        team_id: 2,
+        draftable_id: 25,
+        pick_id: 201,
+        pick_number: 1,
+        selected_by: 22,
+        selected_at: stamp,
+        point_cost: 12,
+      },
+    ]
+    draft = { ...draft, snapshot: snap }
+    await render()
+
+    // Draft Pool: Your team section has a visible "Summary" button
+    const yourTeamSummaryBtn = renderer!.root
+      .findAllByType('button')
+      .find((btn) => text(btn) === 'Summary')!
+    expect(yourTeamSummaryBtn).toBeDefined()
+    await act(async () => yourTeamSummaryBtn.props.onClick())
+    expect(
+      renderer!.root.findByProps({
+        role: 'dialog',
+        'aria-label': 'Team #1 — Team Summary',
+      }),
+    ).toBeDefined()
+
+    // Navigate to Teams tab and click Blackbirds' "Summary" button
+    await navigate('Teams')
+    const teamSummaryBtns = renderer!.root
+      .findAllByType('button')
+      .filter((btn) => text(btn) === 'Summary')
+    expect(teamSummaryBtns).toHaveLength(2)
+    await act(async () => teamSummaryBtns[1].props.onClick())
+
+    const summaryDialog = renderer!.root.findByProps({
+      role: 'dialog',
+      'aria-label': 'Blackbirds — Team Summary',
+    })
+    expect(text(summaryDialog)).toContain('Blackbirds')
+    expect(text(summaryDialog)).toContain('Pikachu')
+    expect(text(summaryDialog)).toContain('Showdown Pokepaste')
+  })
 })

@@ -19,9 +19,9 @@ else:
 
 SCENARIO_DIR = PROJECT / "sql" / "scenarios"
 SCENARIOS = {
-    "setup": "Three teams; draft order still needs configuring.",
-    "ready": "Three ordered teams; ready for Alice to start.",
-    "live": "Four picks into a snake draft; Bob picks next.",
+    "setup": "Four teams; draft order still needs configuring.",
+    "ready": "Four ordered teams (8-12 roster, 100 pts); ready for Alice to start.",
+    "live": "Five picks into a snake draft; Carol picks next.",
     "budget": "Bob has zero points; Alice can waive the cost of a paid entry.",
     "undo": "An undone pick and its replacement; Carol picks next.",
     "bounds": "Min 8, max 12 roster; each team has 7 picks so far.",

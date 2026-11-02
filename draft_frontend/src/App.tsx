@@ -41,6 +41,7 @@ import { DraftBoard } from './components/DraftBoard'
 import { FloatingTurnTracker, TurnBanner } from './components/TurnBanner'
 import { Modal } from './components/Modal'
 import { PokemonDetails } from './components/PokemonDetails'
+import { TeamSummaryModal } from './components/TeamSummaryModal'
 import { LeagueSetup } from './components/LeagueSetup'
 import { Tournament } from './components/Tournament'
 import { Availability } from './components/Availability'
@@ -102,6 +103,7 @@ function TeamRoster({
   userId,
   busy = false,
   onSelect,
+  onSelectTeam,
   onSetRosterLock,
   compact = false,
 }: {
@@ -111,6 +113,7 @@ function TeamRoster({
   userId: number
   busy?: boolean
   onSelect: (item: Draftable) => void
+  onSelectTeam?: (team: Team) => void
   onSetRosterLock?: (teamId: number, locked: boolean) => void
   compact?: boolean
 }) {
@@ -128,12 +131,22 @@ function TeamRoster({
         <span className="team-avatar" style={teamAvatarStyle(team.color_rgb)}>
           {initials(teamName(team))}
         </span>
-        <div>
+        <div className="roster-heading-copy">
           <span className="eyebrow">
             {isMyTeam ? 'YOUR TEAM' : `TEAM ${team.draft_position ?? '—'}`}
           </span>
           <h3>{teamName(team)}</h3>
         </div>
+        {onSelectTeam && (
+          <button
+            type="button"
+            className="button secondary roster-summary-button"
+            aria-label={`View ${teamName(team)} team summary`}
+            onClick={() => onSelectTeam(team)}
+          >
+            Summary
+          </button>
+        )}
       </div>
       <div className="budget-heading">
         <span>Points remaining</span>
@@ -314,6 +327,7 @@ function TestSignIn({
             <option value="alice">Alice</option>
             <option value="bob">Bob</option>
             <option value="carol">Carol</option>
+            <option value="eve">Eve</option>
             <option value="dave">Dave (no leagues)</option>
           </select>
         </label>
@@ -391,6 +405,7 @@ export default function App() {
   const [create, setCreate] = useState(false)
   const [help, setHelp] = useState(false)
   const [selected, setSelected] = useState<SelectedPick | null>(null)
+  const [summaryTeamId, setSummaryTeamId] = useState<number | null>(null)
   const [confirmPick, setConfirmPick] = useState(false)
   const [confirmAction, setConfirmAction] = useState<{
     kind: 'start' | 'undo'
@@ -405,6 +420,7 @@ export default function App() {
   const [filterState, setFilterState] = useState<CatalogFilterState>(INITIAL_CATALOG_FILTERS)
   useEffect(() => {
     setSelected(null)
+    setSummaryTeamId(null)
     setConfirmPick(false)
     setConfirmAction(null)
     setConfirmRosterLock(null)
@@ -416,6 +432,10 @@ export default function App() {
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
   const myTeam = snapshot?.teams.find((team) => team.manager_user_id === session?.user.id)
   const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
+  const summaryTeam =
+    summaryTeamId !== null
+      ? (snapshot?.teams.find((team) => team.id === summaryTeamId) ?? null)
+      : null
   const selectedLeagueName =
     draft.leagues.find((league) => league.id === draft.leagueId)?.name ??
     snapshot?.league.name ??
@@ -873,6 +893,7 @@ export default function App() {
                           userId={session!.user.id}
                           busy={workspaceBusy}
                           onSelect={openPick}
+                          onSelectTeam={(team) => setSummaryTeamId(team.id)}
                           onSetRosterLock={setTeamRosterLock}
                           compact
                         />
@@ -884,8 +905,18 @@ export default function App() {
                         </div>
                         {snapshot.teams.map((team, index) => (
                           <div
-                            className={`order-row ${team.id === activeTeam?.id ? 'current' : ''}`}
+                            className={`order-row clickable-team ${team.id === activeTeam?.id ? 'current' : ''}`}
                             key={team.id}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`View ${teamName(team)} team summary`}
+                            onClick={() => setSummaryTeamId(team.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                setSummaryTeamId(team.id)
+                              }
+                            }}
                           >
                             <span className="order-number">
                               {String(team.draft_position ?? index + 1).padStart(2, '0')}
@@ -931,6 +962,7 @@ export default function App() {
                   userId={session!.user.id}
                   busy={workspaceBusy}
                   onSelect={openPick}
+                  onSelectTeam={(team) => setSummaryTeamId(team.id)}
                   onOpenSettings={() => setView('settings')}
                   onStartDraft={() =>
                     setConfirmAction({ kind: 'start', revision: snapshot.revision })
@@ -951,6 +983,7 @@ export default function App() {
                         userId={session!.user.id}
                         busy={workspaceBusy}
                         onSelect={openPick}
+                        onSelectTeam={(selectedTeam) => setSummaryTeamId(selectedTeam.id)}
                         onSetRosterLock={setTeamRosterLock}
                       />
                     ))
@@ -1032,6 +1065,16 @@ export default function App() {
             />
           )}
       </div>
+      {summaryTeam && snapshot && (
+        <TeamSummaryModal
+          team={summaryTeam}
+          snapshot={snapshot}
+          catalog={catalog}
+          users={draft.users}
+          userId={session?.user.id}
+          onClose={() => setSummaryTeamId(null)}
+        />
+      )}
       {help && (
         <Modal title="Draft rules" onClose={() => setHelp(false)}>
           <div className="guide">

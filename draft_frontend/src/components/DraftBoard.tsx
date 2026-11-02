@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Users } from 'lucide-react'
-import type { Draftable, LeagueSnapshot, RosterPick } from '../lib/types'
+import type { Draftable, LeagueSnapshot, RosterPick, Team } from '../lib/types'
 import { teamAvatarStyle, teamColor, teamName } from '../lib/teamPresentation'
 import { PokemonImage } from './Catalog'
 import { TypePills } from './PokemonParts'
@@ -74,6 +74,7 @@ export function DraftBoard({
   userId,
   busy = false,
   onSelect,
+  onSelectTeam,
   onOpenSettings,
   onStartDraft,
   onOpenTournament,
@@ -84,6 +85,7 @@ export function DraftBoard({
   userId: number
   busy?: boolean
   onSelect: (item: Draftable) => void
+  onSelectTeam?: (team: Team) => void
   onOpenSettings?: () => void
   onStartDraft?: () => void
   onOpenTournament?: () => void
@@ -231,7 +233,19 @@ export function DraftBoard({
                         className="team-color-bar"
                         style={{ background: colorHex ?? 'var(--purple)' }}
                       />
-                      <div className="team-header-top">
+                      <div
+                        className={`team-header-top ${onSelectTeam ? 'clickable-team' : ''}`}
+                        role={onSelectTeam ? 'button' : undefined}
+                        tabIndex={onSelectTeam ? 0 : undefined}
+                        aria-label={onSelectTeam ? `View ${teamName(team)} team summary` : undefined}
+                        onClick={() => onSelectTeam?.(team)}
+                        onKeyDown={(event) => {
+                          if (onSelectTeam && (event.key === 'Enter' || event.key === ' ')) {
+                            event.preventDefault()
+                            onSelectTeam(team)
+                          }
+                        }}
+                      >
                         <span className="team-mini-avatar" style={teamAvatarStyle(team.color_rgb)}>
                           {initials(teamName(team))}
                         </span>

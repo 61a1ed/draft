@@ -4,11 +4,11 @@
 DO $$
 BEGIN
     IF (SELECT count(*) FROM dl.app_user
-        WHERE issuer = 'urn:draft:test' AND subject IN ('alice', 'bob', 'carol')) <> 3 THEN
-        RAISE EXCEPTION 'Scenario fixtures require alice, bob, and carol test users';
+        WHERE issuer = 'urn:draft:test' AND subject IN ('alice', 'bob', 'carol', 'eve')) <> 4 THEN
+        RAISE EXCEPTION 'Scenario fixtures require alice, bob, carol, and eve test users';
     END IF;
-    IF (SELECT count(*) FROM dl.draftable) < 9 THEN
-        RAISE EXCEPTION 'Scenario fixtures require at least nine catalog entries';
+    IF (SELECT count(*) FROM dl.draftable) < 12 THEN
+        RAISE EXCEPTION 'Scenario fixtures require at least twelve catalog entries';
     END IF;
 END $$;
 
@@ -38,7 +38,8 @@ SELECT f.league_id, v.name, u.id, NULL, v.budget, 0
 FROM (VALUES
     ('alice', 'Alice - Ember', 1, 100),
     ('bob', 'Bob - Tide', 2, 100),
-    ('carol', 'Carol - Grove', 3, 100)
+    ('carol', 'Carol - Grove', 3, 100),
+    ('eve', 'Eve - Zephyr', 4, 100)
 ) AS v(subject, name, position, budget)
 JOIN dl.app_user u ON u.issuer = 'urn:draft:test' AND u.subject = v.subject
 CROSS JOIN dl_test.scenario f WHERE f.slug = 'setup';
