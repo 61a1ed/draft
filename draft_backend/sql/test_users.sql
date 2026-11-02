@@ -11,4 +11,7 @@ GRANT USAGE ON SCHEMA dl_test TO dl_gateway;
 GRANT SELECT ON dl_test.marker TO dl_gateway;
 
 INSERT INTO dl.app_user (issuer, subject, display_name) VALUES
-    ('urn:draft:test', 'alice', 'Alice'), ('urn:draft:test', 'bob', 'Bob'), ('urn:draft:test', 'carol', 'Carol');
+    ('urn:draft:test', 'alice', 'Alice'),
+    ('urn:draft:test', 'bob', 'Bob'),
+    ('urn:draft:test', 'carol', 'Carol'),
+    ('urn:draft:test', 'dave', 'Dave');

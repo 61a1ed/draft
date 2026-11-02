@@ -169,7 +169,7 @@ Favorites reads, writes, and draft notification streams require a session:
 | `GET /api/favorites-lists` | Signed-in account's list headers ordered by ID; optional `owner_user_id` filter can only narrow results |
 | `GET /api/favorites-lists/{id}` | Owner-only list header and ordered `{draftable_id, ordinal}` entries; sign-in required |
 | `GET /images/{hash}` / `HEAD /images/{hash}` | Public PNG image; no session required |
-| `GET /api/leagues` | Array of all leagues |
+| `GET /api/leagues` | Array of leagues where the signed-in user is the commissioner or a team manager |
 | `GET /api/leagues/{id}` | One `dl.league_snapshot` row; actions personalized to the signed-in user |
 | `GET /api/leagues/{id}/tournament` | Tournament, schedule, current evidence, official results, records, and withdrawals |
 | `GET /api/matches/{id}` | Match context and complete report/decision history |

@@ -145,10 +145,11 @@ def test_draft_workflow_and_database_enforced_access(client, test_database):
 
     league_id, team_a, team_b = configure_league(client, alice, bob, carol, test_database)
 
-    # A removed manager can still read all data, but cannot mutate it.
+    # A removed manager can still read public snapshots, but the league is absent
+    # from their league list and they cannot mutate it.
     login(client, "carol")
     assert snapshot(client, league_id)["actions"] == []
-    assert any(row["id"] == league_id for row in client.get("/api/leagues").json())
+    assert all(row["id"] != league_id for row in client.get("/api/leagues").json())
     rpc(
         client,
         "draft_action",
@@ -157,6 +158,9 @@ def test_draft_workflow_and_database_enforced_access(client, test_database):
         p_revision=7,
         p_kind="start",
     )
+
+    login(client, "bob")
+    assert any(row["id"] == league_id for row in client.get("/api/leagues").json())
 
     login(client, "alice")
     rpc(client, "draft_action", p_league=league_id, p_revision=7, p_kind="start")

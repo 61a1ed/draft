@@ -417,7 +417,16 @@ def create_app(settings: Settings | None = None):
 
     @app.get("/api/leagues", tags=["reads"])
     async def leagues(user: Reader):
-        return await app.state.db.read(user, "SELECT * FROM dl.league ORDER BY id")
+        return await app.state.db.read(
+            user,
+            "SELECT * FROM dl.league l "
+            "WHERE l.commissioner_user_id = dl.user_id() "
+            "OR EXISTS ("
+            "SELECT 1 FROM dl.team t "
+            "WHERE t.league_id = l.id AND t.manager_user_id = dl.user_id()"
+            ") "
+            "ORDER BY l.id",
+        )
 
     async def snapshot(user, league_id):
         rows = await app.state.db.read(

@@ -287,6 +287,7 @@ function TestSignIn({
             <option value="alice">Alice</option>
             <option value="bob">Bob</option>
             <option value="carol">Carol</option>
+            <option value="dave">Dave (no leagues)</option>
           </select>
         </label>
         <button className="button secondary full-width" disabled={busy}>
