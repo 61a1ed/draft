@@ -763,7 +763,7 @@ export function FloatingTurnTracker({
               className="floating-tracker-cta"
               onClick={onGoToDraft}
             >
-              {activeIsYou ? 'Pick Now' : 'Draft Room'}
+              {activeIsYou ? 'Pick Now' : 'Draft Pool'}
               <ArrowRight size={13} />
             </button>
           </div>

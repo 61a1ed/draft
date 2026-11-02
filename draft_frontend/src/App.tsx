@@ -47,7 +47,7 @@ import { Availability } from './components/Availability'
 import { ThemeToggle } from './components/ThemeToggle'
 
 type View =
-  'draft' | 'board' | 'catalog' | 'tournament' | 'availability' | 'teams' | 'activity' | 'settings'
+  'draft' | 'board' | 'catalog' | 'tournament' | 'availability' | 'teams' | 'settings'
 
 type AvailabilityContext = {
   owner: string
@@ -57,13 +57,12 @@ type AvailabilityContext = {
 }
 type SelectedPick = { item: Draftable; revision: number; teamId: number | null }
 const navItems = [
-  { id: 'draft', label: 'Draft room', icon: LayoutGrid },
+  { id: 'draft', label: 'Draft Pool', icon: LayoutGrid },
   { id: 'board', label: 'Draft board', icon: Table2 },
-  { id: 'catalog', label: 'Catalog & favorites', icon: Bookmark },
+  { id: 'catalog', label: 'Pokedex & Favorites', icon: Bookmark },
+  { id: 'teams', label: 'Teams', icon: Users },
   { id: 'tournament', label: 'Tournament', icon: Trophy },
   { id: 'availability', label: 'Availability', icon: CalendarDays },
-  { id: 'teams', label: 'Teams & rosters', icon: Users },
-  { id: 'activity', label: 'Draft activity', icon: History },
   { id: 'settings', label: 'League settings', icon: Settings2 },
 ] as const
 
@@ -732,7 +731,7 @@ export default function App() {
                     <Plus size={16} /> Create league
                   </button>
                   <button className="button secondary" onClick={() => setView('catalog')}>
-                    <Bookmark size={16} /> Browse catalog & favorites
+                    <Bookmark size={16} /> Browse Pokedex & Favorites
                   </button>
                 </div>
               )}
@@ -889,59 +888,6 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              )}
-              {view === 'activity' && (
-                <section className="card activity-panel">
-                  <div className="panel-title">
-                    <h2>Draft history</h2>
-                    <span className="count-pill">{snapshot.history.length} selections</span>
-                  </div>
-                  {snapshot.history.length ? (
-                    snapshot.history.map((pick) => {
-                      const item = catalog.find((entry) => entry.id === pick.draftable_id)
-                      const round = Math.floor((pick.pick_number - 1) / snapshot.teams.length)
-                      const slot =
-                        round % 2 === 0
-                          ? ((pick.pick_number - 1) % snapshot.teams.length) + 1
-                          : snapshot.teams.length - ((pick.pick_number - 1) % snapshot.teams.length)
-                      const team = snapshot.teams.find((entry) => entry.draft_position === slot)
-                      return (
-                        <div
-                          className={`activity-row ${pick.undone_at ? 'undone' : ''}`}
-                          key={pick.id}
-                        >
-                          <span className="activity-number">
-                            {String(pick.pick_number).padStart(2, '0')}
-                          </span>
-                          {item && <PokemonImage item={item} />}
-                          <div className="activity-detail">
-                            <strong>{item?.name ?? `Pokémon ${pick.draftable_id}`}</strong>
-                            <span>
-                              {team ? teamName(team) : 'Team'}
-                              <span>·</span>Round {round + 1}
-                            </span>
-                          </div>
-                          {pick.undone_at && <span className="mini-pill">Undone</span>}
-                          <strong className="activity-price">
-                            {pick.point_cost}
-                            <small> pts</small>
-                          </strong>
-                          <time dateTime={pick.selected_at}>
-                            {new Date(pick.selected_at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </time>
-                        </div>
-                      )
-                    })
-                  ) : (
-                    <div className="empty-state">
-                      <History size={30} />
-                      <h3>No picks yet</h3>
-                    </div>
-                  )}
-                </section>
               )}
               {view === 'tournament' && (
                 <Tournament

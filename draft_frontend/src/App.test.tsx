@@ -224,11 +224,11 @@ describe('account catalog and favorites', () => {
     const createList = vi.spyOn(api, 'createFavoritesList').mockResolvedValue({ result: 32 })
     const addEntry = vi.spyOn(api, 'addFavoritesEntry').mockResolvedValue({ result: null })
     await render()
-    await navigate('Catalog & favorites')
+    await navigate('Pokedex & Favorites')
 
     expect(localStorage.getItem).toHaveBeenCalledExactlyOnceWith('draft-club:watchlist:live:11')
     expect(vi.mocked(Catalog).mock.lastCall?.[0].legacyWatchlist).toEqual([25, 4])
-    await navigate('Draft room')
+    await navigate('Draft Pool')
     expect(vi.mocked(Catalog).mock.lastCall?.[0].legacyWatchlist).toEqual([25, 4])
     expect(localStorage.setItem).not.toHaveBeenCalled()
     expect(localStorage.removeItem).not.toHaveBeenCalled()
@@ -248,7 +248,7 @@ describe('account catalog and favorites', () => {
     })
     draft = { ...draft, leagueId: null, leagues: [], snapshot: null }
     await render()
-    await navigate('Catalog & favorites')
+    await navigate('Pokedex & Favorites')
     expect(vi.mocked(Catalog).mock.lastCall?.[0].legacyWatchlist).toEqual([25])
 
     vi.mocked(Catalog).mockClear()
@@ -284,7 +284,7 @@ describe('account catalog and favorites', () => {
     async (saved) => {
       vi.mocked(localStorage.getItem).mockReturnValue(saved)
       await render()
-      await navigate('Catalog & favorites')
+      await navigate('Pokedex & Favorites')
       expect(vi.mocked(Catalog).mock.lastCall?.[0].legacyWatchlist).toEqual([])
       expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
       expect(localStorage.setItem).not.toHaveBeenCalled()
@@ -296,7 +296,7 @@ describe('account catalog and favorites', () => {
       throw new Error('Storage access blocked')
     })
     await render()
-    await navigate('Catalog & favorites')
+    await navigate('Pokedex & Favorites')
     expect(vi.mocked(Catalog).mock.lastCall?.[0]).toMatchObject({
       legacyWatchlist: [],
       favorites,
@@ -306,9 +306,9 @@ describe('account catalog and favorites', () => {
   it('opens the catalog without a league and passes the account favorites', async () => {
     draft = { ...draft, leagueId: null, leagues: [], snapshot: null }
     await render()
-    await navigate('Catalog & favorites')
+    await navigate('Pokedex & Favorites')
 
-    expect(heading()).toBe('Catalog & favorites')
+    expect(heading()).toBe('Pokedex & Favorites')
     expect(renderer!.root.findByProps({ 'data-testid': 'catalog' })).toBeDefined()
     expect(vi.mocked(Catalog).mock.lastCall?.[0]).toMatchObject({
       catalog: draft.catalog,
@@ -323,7 +323,7 @@ describe('account catalog and favorites', () => {
 
   it('shares the selected favorites controller and filter state between the draft room and catalog', async () => {
     await render()
-    await navigate('Draft room')
+    await navigate('Draft Pool')
     expect(vi.mocked(BigBoard).mock.lastCall?.[0].favorites).toBe(favorites)
     expect(vi.mocked(BigBoard).mock.lastCall?.[0].filterState).toEqual({
       search: '',
@@ -338,7 +338,7 @@ describe('account catalog and favorites', () => {
         affordable: true,
       })
     })
-    await navigate('Catalog & favorites')
+    await navigate('Pokedex & Favorites')
     expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
     expect(vi.mocked(Catalog).mock.lastCall?.[0].snapshot).toBe(draft.snapshot)
     expect(vi.mocked(Catalog).mock.lastCall?.[0].filterState).toEqual({
@@ -389,7 +389,7 @@ describe('account catalog and favorites', () => {
         return true
       })
       await render()
-      await navigate('Catalog & favorites')
+      await navigate('Pokedex & Favorites')
       await act(async () => vi.mocked(Catalog).mock.lastCall?.[0].onSelect(draft.catalog[0]))
 
       const dialog = renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Pokémon details' })
@@ -415,7 +415,7 @@ describe('account catalog and favorites', () => {
 describe('league navigation and team presentation', () => {
   it('returns to setup after signing back into the same account and league', async () => {
     await render()
-    await navigate('Draft room')
+    await navigate('Draft Pool')
     const connected = draft
     draft = { ...draft, mode: 'disconnected', session: null, snapshot: null }
     await render()
@@ -448,7 +448,7 @@ describe('league navigation and team presentation', () => {
       draft.snapshot = league(status)
       await render()
 
-      expect(heading()).toBe('Draft room')
+      expect(heading()).toBe('Draft Pool')
       expect(renderer!.root.findByProps({ 'data-testid': 'big-board' })).toBeDefined()
       expect(LeagueSetup).not.toHaveBeenCalled()
     },
@@ -456,16 +456,16 @@ describe('league navigation and team presentation', () => {
 
   it('preserves manual navigation through live updates, including draft start', async () => {
     await render()
-    await navigate('Teams & rosters')
-    expect(heading()).toBe('Teams & rosters')
+    await navigate('Teams')
+    expect(heading()).toBe('Teams')
 
     draft.snapshot = { ...league(), revision: 6, server_now: '2026-10-21T12:01:00Z' }
     await render()
-    expect(heading()).toBe('Teams & rosters')
+    expect(heading()).toBe('Teams')
 
     draft.snapshot = { ...league('drafting'), revision: 7 }
     await render()
-    expect(heading()).toBe('Teams & rosters')
+    expect(heading()).toBe('Teams')
   })
 
   it('chooses the appropriate initial screen after selecting another league', async () => {
@@ -474,9 +474,9 @@ describe('league navigation and team presentation', () => {
     expect(leagueSwitch.type).toBe('label')
     expect(text(leagueSwitch.findByProps({ className: 'league-switch-value' }))).toBe('League 7')
 
-    await navigate('Teams & rosters')
+    await navigate('Teams')
     await selectLeague(league('drafting', 8))
-    expect(heading()).toBe('Draft room')
+    expect(heading()).toBe('Draft Pool')
     expect(text(leagueSwitch.findByProps({ className: 'league-switch-value' }))).toBe('League 8')
 
     await navigate('Availability')
@@ -522,14 +522,14 @@ describe('league navigation and team presentation', () => {
       await act(async () => start.props.onClick())
 
       expect(draft.draftAction).toHaveBeenCalledExactlyOnceWith('start')
-      expect(heading()).toBe(succeeded ? 'Draft room' : 'League settings')
+      expect(heading()).toBe(succeeded ? 'Draft Pool' : 'League settings')
       expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
     },
   )
 
   it('renders an unnamed, uncolored team safely without metadata controls in the draft room', async () => {
     await render()
-    await navigate('Draft room')
+    await navigate('Draft Pool')
     const main = renderer!.root.findByType('main')
     const roster = main
       .findAllByType('section')
@@ -545,7 +545,7 @@ describe('league navigation and team presentation', () => {
     )
     expect(main.findAllByProps({ 'data-testid': 'league-setup' })).toHaveLength(0)
 
-    await navigate('Teams & rosters')
+    await navigate('Teams')
     const rosters = renderer!.root
       .findAllByType('section')
       .filter((node) => node.props.className?.includes('roster-panel'))
@@ -557,13 +557,21 @@ describe('league navigation and team presentation', () => {
     })
   })
 
-  it('places Draft board between Draft room and Catalog & favorites in the navigation and renders the snake grid', async () => {
+  it('places Draft board between Draft Pool and Pokedex & Favorites in the navigation and renders the snake grid', async () => {
     draft.snapshot = league('drafting')
     await render()
 
     const nav = renderer!.root.findByProps({ 'aria-label': 'Main navigation' })
     const labels = nav.findAllByType('button').map((btn) => btn.props['aria-label'])
-    expect(labels.slice(0, 3)).toEqual(['Draft room', 'Draft board', 'Catalog & favorites'])
+    expect(labels).toEqual([
+      'Draft Pool',
+      'Draft board',
+      'Pokedex & Favorites',
+      'Teams',
+      'Tournament',
+      'Availability',
+      'League settings',
+    ])
 
     await navigate('Draft board')
     expect(heading()).toBe('Draft board')
@@ -572,12 +580,12 @@ describe('league navigation and team presentation', () => {
     ).toBeDefined()
   })
 
-  it('shows the floating corner draft tracker on non-draft views during an active draft and hides it in Draft room and Draft board', async () => {
+  it('shows the floating corner draft tracker on non-draft views during an active draft and hides it in Draft Pool and Draft board', async () => {
     draft.snapshot = league('drafting')
     await render()
 
-    // In Draft room: full TurnBanner is shown, floating tracker is hidden
-    expect(heading()).toBe('Draft room')
+    // In Draft Pool: full TurnBanner is shown, floating tracker is hidden
+    expect(heading()).toBe('Draft Pool')
     expect(
       renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
     ).toHaveLength(0)
@@ -588,8 +596,8 @@ describe('league navigation and team presentation', () => {
       renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
     ).toHaveLength(0)
 
-    // In Catalog & favorites: floating tracker appears with YOUR TURN state, minimize toggle, and Pick Now CTA
-    await navigate('Catalog & favorites')
+    // In Pokedex & Favorites: floating tracker appears with YOUR TURN state, minimize toggle, and Pick Now CTA
+    await navigate('Pokedex & Favorites')
     const tracker = renderer!.root.findByProps({ 'aria-label': 'Floating live draft tracker' })
     expect(tracker.props.className).toContain('is-your-turn')
     expect(text(tracker)).toContain('YOUR TURN')
@@ -609,12 +617,12 @@ describe('league navigation and team presentation', () => {
     await act(async () => expBtn.props.onClick())
     expect(tracker.props.className).not.toContain('is-minimized')
 
-    // Clicking "Pick Now" returns to the Draft room
+    // Clicking "Pick Now" returns to the Draft Pool
     const cta = tracker
       .findAllByType('button')
       .find((btn) => text(btn).includes('Pick Now'))!
     await act(async () => cta.props.onClick())
-    expect(heading()).toBe('Draft room')
+    expect(heading()).toBe('Draft Pool')
     expect(
       renderer!.root.findAllByProps({ 'aria-label': 'Floating live draft tracker' }),
     ).toHaveLength(0)
@@ -725,7 +733,7 @@ describe('league navigation and team presentation', () => {
     expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
   })
 
-  it('links the user’s team in the Draft room and Teams & rosters tabs to pkmn.help with types, first-slot ability, and an (i) ability note', async () => {
+  it('links the user’s team in the Draft Pool and Teams tabs to pkmn.help with types, first-slot ability, and an (i) ability note', async () => {
     const snap = league('drafting')
     snap.rosters = [
       {
@@ -799,8 +807,8 @@ describe('league navigation and team presentation', () => {
     const expectedHref =
       'https://www.pkmn.help/defense/team/?types=normal+flying&types=electric+water&abilities=prism_armor+flash_fire&format=simple'
 
-    // Draft room tab: Your team panel has the link, (i) note, and type pills for each Pokémon
-    expect(heading()).toBe('Draft room')
+    // Draft Pool tab: Your team panel has the link, (i) note, and type pills for each Pokémon
+    expect(heading()).toBe('Draft Pool')
     const draftRoomRoster = renderer!.root
       .findAllByType('section')
       .find((node) => node.props.className?.includes('roster-panel'))!
@@ -808,7 +816,7 @@ describe('league navigation and team presentation', () => {
       draftRoomRoster.findAllByProps({ className: 'type-pill' }).map(text),
     ).toEqual(['Normal', 'Flying', 'Electric', 'Water'])
 
-    // Clicking a Pokémon in the Draft room's "Your team" panel opens its details modal
+    // Clicking a Pokémon in the Draft Pool's "Your team" panel opens its details modal
     const draftRoomSlots = draftRoomRoster
       .findAllByType('button')
       .filter((node) => node.props.className?.includes('roster-slot'))
@@ -841,9 +849,9 @@ describe('league navigation and team presentation', () => {
     const note = renderer!.root.findByProps({ role: 'note' })
     expect(text(note)).toBe('Remember: Some abilities change type effectiveness')
 
-    // Teams & rosters tab: Only the user's team has the pkmn.help link, not other managers' teams
-    await navigate('Teams & rosters')
-    expect(heading()).toBe('Teams & rosters')
+    // Teams tab: Only the user's team has the pkmn.help link, not other managers' teams
+    await navigate('Teams')
+    expect(heading()).toBe('Teams')
     const rosters = renderer!.root
       .findAllByType('section')
       .filter((node) => node.props.className?.includes('roster-panel'))
@@ -855,7 +863,7 @@ describe('league navigation and team presentation', () => {
       'Water',
     ])
 
-    // Clicking a Pokémon on the Teams & rosters tab opens its details modal
+    // Clicking a Pokémon on the Teams tab opens its details modal
     const otherTeamSlots = rosters[1]
       .findAllByType('button')
       .filter((node) => node.props.className?.includes('roster-slot'))
