@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   AlertTriangle,
   BookOpen,
   Bookmark,
@@ -23,6 +24,7 @@ import {
   ShieldCheck,
   Table2,
   Target,
+  Trash2,
   Trophy,
   Users,
   WifiOff,
@@ -96,6 +98,12 @@ export function buildTeamDefenseUrl(items: Draftable[]): string | null {
   return `https://www.pkmn.help/defense/team/?${[...typesParams, abilitiesParam, 'format=simple'].join('&')}`
 }
 
+export interface DraftPlanSlotEntry {
+  draftableId: number
+  item: Draftable
+  takenByOther: boolean
+}
+
 function TeamRoster({
   team,
   snapshot,
@@ -106,6 +114,13 @@ function TeamRoster({
   onSelectTeam,
   onSetRosterLock,
   compact = false,
+  planEntries = [],
+  planBusy = false,
+  replacingDraftableId = null,
+  onStartReplace,
+  onCancelReplace,
+  onRemovePlan,
+  onMovePlan,
 }: {
   team: Team
   snapshot: LeagueSnapshot
@@ -116,6 +131,13 @@ function TeamRoster({
   onSelectTeam?: (team: Team) => void
   onSetRosterLock?: (teamId: number, locked: boolean) => void
   compact?: boolean
+  planEntries?: DraftPlanSlotEntry[]
+  planBusy?: boolean
+  replacingDraftableId?: number | null
+  onStartReplace?: (draftableId: number) => void
+  onCancelReplace?: () => void
+  onRemovePlan?: (draftableId: number) => void
+  onMovePlan?: (draftableId: number, direction: -1 | 1) => void
 }) {
   const picks = snapshot.rosters.filter((pick) => pick.team_id === team.id)
   const isMyTeam = team.manager_user_id === userId
@@ -123,8 +145,22 @@ function TeamRoster({
   const pickedItems = picks
     .map((pick) => catalog.find((entry) => entry.id === pick.draftable_id))
     .filter((entry): entry is Draftable => Boolean(entry))
-  const defenseUrl = isMyTeam ? buildTeamDefenseUrl(pickedItems) : null
+  const openSlotsCount = Math.max(0, snapshot.league.roster_size - picks.length)
+  const visiblePlanEntries = isMyTeam ? planEntries.slice(0, openSlotsCount) : []
+  const activePlannedItems = visiblePlanEntries
+    .filter((entry) => !entry.takenByOther)
+    .map((entry) => entry.item)
+  const plannedCost = activePlannedItems.reduce((sum, item) => sum + item.point_cost, 0)
+  const projectedRemaining = team.points_remaining - plannedCost
+  const hasPlan = isMyTeam && visiblePlanEntries.length > 0
+  const defenseUrl = isMyTeam
+    ? buildTeamDefenseUrl([...pickedItems, ...activePlannedItems])
+    : null
   const [showAbilityNote, setShowAbilityNote] = useState(false)
+  const replacingItem =
+    replacingDraftableId !== null
+      ? visiblePlanEntries.find((entry) => entry.draftableId === replacingDraftableId)?.item
+      : null
   return (
     <section className={`card roster-panel ${compact ? 'compact' : ''}`}>
       <div className="roster-heading">
@@ -155,12 +191,58 @@ function TeamRoster({
           <small> / {team.point_budget}</small>
         </strong>
       </div>
-      <div className="budget-track">
+      {hasPlan && (
+        <div
+          className={`plan-budget-summary ${projectedRemaining < 0 ? 'over-budget' : ''}`}
+          aria-label="Draft plan budget summary"
+        >
+          <span>
+            Planned ({activePlannedItems.length}): <strong>{plannedCost} pts</strong>
+          </span>
+          <span>
+            {projectedRemaining >= 0 ? (
+              <>
+                After plan: <strong>{projectedRemaining} pts left</strong>
+              </>
+            ) : (
+              <>
+                Over budget: <strong>{Math.abs(projectedRemaining)} pts over</strong>
+              </>
+            )}
+          </span>
+        </div>
+      )}
+      <div className={`budget-track ${hasPlan ? 'has-plan' : ''} ${projectedRemaining < 0 ? 'over-budget' : ''}`}>
         <span
+          className="budget-fill-remaining"
           style={{
-            width: `${team.point_budget > 0 ? Math.max(0, (team.points_remaining / team.point_budget) * 100) : 0}%`,
+            width: `${
+              team.point_budget > 0
+                ? Math.max(
+                    0,
+                    ((hasPlan ? Math.max(0, projectedRemaining) : team.points_remaining) /
+                      team.point_budget) *
+                      100,
+                  )
+                : 0
+            }%`,
           }}
         />
+        {hasPlan && plannedCost > 0 && (
+          <span
+            className={`budget-fill-planned ${projectedRemaining < 0 ? 'over-budget' : ''}`}
+            style={{
+              width: `${
+                team.point_budget > 0
+                  ? Math.min(
+                      (team.points_remaining / team.point_budget) * 100,
+                      (plannedCost / team.point_budget) * 100,
+                    )
+                  : 0
+              }%`,
+            }}
+          />
+        )}
       </div>
       <div className="roster-subheading">
         <h4>{isMyTeam ? 'Your roster' : 'Team roster'}</h4>
@@ -169,6 +251,24 @@ function TeamRoster({
           {minRosterSize < snapshot.league.roster_size ? ` (min ${minRosterSize})` : ''}
         </span>
       </div>
+      {replacingItem && (
+        <div className="plan-replace-banner" role="status">
+          <span>
+            Replacing <strong>{replacingItem.name}</strong> ({replacingItem.point_cost} pts) — pick
+            a replacement on the board
+          </span>
+          {onCancelReplace && (
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Cancel replacing ${replacingItem.name}`}
+              onClick={onCancelReplace}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
       {team.roster_locked && <p className="muted">Finished drafting (roster locked)</p>}
       {onSetRosterLock && team.can_lock_roster && (
         <button
@@ -191,12 +291,11 @@ function TeamRoster({
         </button>
       )}
       <div className="roster-slots">
-        {Array.from(
-          { length: Math.min(snapshot.league.roster_size, compact ? 6 : 50) },
-          (_, index) => {
-            const pick = picks[index]
-            const item = pick ? catalog.find((entry) => entry.id === pick.draftable_id) : null
-            return pick ? (
+        {Array.from({ length: snapshot.league.roster_size }, (_, index) => {
+          const pick = picks[index]
+          const item = pick ? catalog.find((entry) => entry.id === pick.draftable_id) : null
+          if (pick) {
+            return (
               <button
                 type="button"
                 className="roster-slot filled"
@@ -219,23 +318,120 @@ function TeamRoster({
                   <small>pts</small>
                 </span>
               </button>
-            ) : (
-              <div className="roster-slot empty" key={`empty-${index}`}>
-                <span className="slot-placeholder">
-                  <Plus size={17} />
+            )
+          }
+          const planIndex = index - picks.length
+          const planned =
+            planIndex >= 0 && planIndex < visiblePlanEntries.length
+              ? visiblePlanEntries[planIndex]
+              : null
+          if (planned) {
+            const isReplacing = replacingDraftableId === planned.draftableId
+            return (
+              <div
+                className={`roster-slot planned ${planned.takenByOther ? 'taken' : ''} ${isReplacing ? 'replacing' : ''}`}
+                key={`planned-${planned.draftableId}`}
+                aria-label={`Planned slot ${index + 1}: ${planned.item.name}`}
+              >
+                <button
+                  type="button"
+                  className="planned-slot-main"
+                  onClick={() => onSelect(planned.item)}
+                >
+                  <PokemonImage item={planned.item} />
+                  <div>
+                    <strong>{planned.item.name}</strong>
+                    <div className="roster-slot-meta">
+                      <span
+                        className={`plan-badge ${planned.takenByOther ? 'taken' : isReplacing ? 'replacing' : ''}`}
+                      >
+                        {planned.takenByOther
+                          ? 'Taken!'
+                          : isReplacing
+                            ? 'Replacing…'
+                            : 'Planned'}
+                      </span>
+                      {planned.item.types && planned.item.types.length > 0 && (
+                        <TypePills types={planned.item.types} small />
+                      )}
+                    </div>
+                  </div>
+                </button>
+                <div className="planned-slot-actions">
+                  {onMovePlan && (
+                    <>
+                      <button
+                        type="button"
+                        className="icon-button planned-action-btn"
+                        aria-label={`Move ${planned.item.name} up in plan`}
+                        title="Move up"
+                        disabled={planBusy || planIndex === 0}
+                        onClick={() => onMovePlan(planned.draftableId, -1)}
+                      >
+                        <ArrowUp size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button planned-action-btn"
+                        aria-label={`Move ${planned.item.name} down in plan`}
+                        title="Move down"
+                        disabled={planBusy || planIndex >= visiblePlanEntries.length - 1}
+                        onClick={() => onMovePlan(planned.draftableId, 1)}
+                      >
+                        <ArrowDown size={13} />
+                      </button>
+                    </>
+                  )}
+                  {onStartReplace && (
+                    <button
+                      type="button"
+                      className={`icon-button planned-action-btn ${isReplacing ? 'active' : ''}`}
+                      aria-label={
+                        isReplacing
+                          ? `Cancel replacing ${planned.item.name}`
+                          : `Replace ${planned.item.name} in plan`
+                      }
+                      title={isReplacing ? 'Cancel replace' : 'Replace in plan'}
+                      disabled={planBusy}
+                      onClick={() =>
+                        isReplacing
+                          ? onCancelReplace?.()
+                          : onStartReplace(planned.draftableId)
+                      }
+                    >
+                      <RefreshCw size={13} />
+                    </button>
+                  )}
+                  {onRemovePlan && (
+                    <button
+                      type="button"
+                      className="icon-button planned-action-btn remove"
+                      aria-label={`Remove ${planned.item.name} from plan`}
+                      title="Remove from plan"
+                      disabled={planBusy}
+                      onClick={() => onRemovePlan(planned.draftableId)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+                <span className="slot-cost">
+                  {planned.item.point_cost}
+                  <small>pts</small>
                 </span>
-                <span>Open slot</span>
-                <small>{String(index + 1).padStart(2, '0')}</small>
               </div>
             )
-          },
-        )}
+          }
+          return (
+            <div className="roster-slot empty" key={`empty-${index}`}>
+              <span className="slot-placeholder">
+                <Plus size={17} />
+              </span>
+              <span>Open slot</span>
+            </div>
+          )
+        })}
       </div>
-      {snapshot.league.roster_size > (compact ? 6 : 50) && (
-        <p className="muted">
-          {snapshot.league.roster_size - (compact ? 6 : 50)} additional roster slots
-        </p>
-      )}
       {isMyTeam && (
         <div className="roster-defense-footer">
           <div className="roster-defense-actions">
@@ -344,6 +540,7 @@ export default function App() {
   const { snapshot, session, catalog, mode } = draft
   const favorites = useFavorites({
     userId: mode === 'live' ? (session?.user.id ?? null) : null,
+    ...(draft.leagueId !== null ? { leagueId: draft.leagueId } : {}),
     mutate: draft.mutate,
   })
   const workspaceBusy = draft.busy || favorites.busy
@@ -418,6 +615,7 @@ export default function App() {
   const closeTestSignIn = useCallback(() => setTestSignIn(false), [])
   const [chargePoints, setChargePoints] = useState(true)
   const [filterState, setFilterState] = useState<CatalogFilterState>(INITIAL_CATALOG_FILTERS)
+  const [replacingDraftableId, setReplacingDraftableId] = useState<number | null>(null)
   useEffect(() => {
     setSelected(null)
     setSummaryTeamId(null)
@@ -425,6 +623,7 @@ export default function App() {
     setConfirmAction(null)
     setConfirmRosterLock(null)
     setAvailabilityContext(null)
+    setReplacingDraftableId(null)
   }, [draft.leagueId, mode, session?.user.id])
   useEffect(() => {
     setFilterState(INITIAL_CATALOG_FILTERS)
@@ -432,6 +631,175 @@ export default function App() {
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
   const myTeam = snapshot?.teams.find((team) => team.manager_user_id === session?.user.id)
   const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
+  const myDraftedIds = useMemo(
+    () =>
+      new Set(
+        snapshot && myTeam
+          ? snapshot.rosters
+              .filter((pick) => pick.team_id === myTeam.id)
+              .map((pick) => pick.draftable_id)
+          : [],
+      ),
+    [snapshot, myTeam],
+  )
+  const otherDraftedIds = useMemo(
+    () =>
+      new Set(
+        snapshot
+          ? snapshot.rosters
+              .filter((pick) => !myTeam || pick.team_id !== myTeam.id)
+              .map((pick) => pick.draftable_id)
+          : [],
+      ),
+    [snapshot, myTeam],
+  )
+  const planEntries = useMemo<DraftPlanSlotEntry[]>(() => {
+    const entries = favorites.planState?.entries ?? []
+    const result: DraftPlanSlotEntry[] = []
+    for (const entry of entries) {
+      if (myDraftedIds.has(entry.draftable_id)) continue
+      const item = catalog.find((candidate) => candidate.id === entry.draftable_id)
+      if (!item) continue
+      result.push({
+        draftableId: entry.draftable_id,
+        item,
+        takenByOther: otherDraftedIds.has(entry.draftable_id),
+      })
+    }
+    return result
+  }, [favorites.planState?.entries, myDraftedIds, otherDraftedIds, catalog])
+  const myOpenSlots =
+    snapshot && myTeam ? Math.max(0, snapshot.league.roster_size - myDraftedIds.size) : 0
+  const visiblePlanEntries = useMemo(
+    () => planEntries.slice(0, myOpenSlots),
+    [planEntries, myOpenSlots],
+  )
+  const plannedIds = useMemo(
+    () => new Set(visiblePlanEntries.map((entry) => entry.draftableId)),
+    [visiblePlanEntries],
+  )
+  const effectiveReplacingId =
+    replacingDraftableId !== null &&
+    visiblePlanEntries.some((entry) => entry.draftableId === replacingDraftableId)
+      ? replacingDraftableId
+      : null
+  const replacingItem =
+    effectiveReplacingId !== null
+      ? (visiblePlanEntries.find((entry) => entry.draftableId === effectiveReplacingId)?.item ??
+        null)
+      : null
+  const canAddMorePlans = visiblePlanEntries.length < myOpenSlots
+  const planLocked =
+    workspaceBusy ||
+    Boolean(favorites.planLoading) ||
+    !!favorites.readError ||
+    !myTeam
+  const handleAddOrSwapPlan = (draftableId: number) => {
+    if (planLocked) return
+    if (effectiveReplacingId !== null) {
+      if (effectiveReplacingId === draftableId) {
+        setReplacingDraftableId(null)
+        return
+      }
+      const targetToReplace = effectiveReplacingId
+      void favorites
+        .runPlan(async (plan) => {
+          const allIds = plan.entries.map((entry) => entry.draftable_id)
+          if (allIds.includes(draftableId)) {
+            const nextOrder = allIds
+              .filter((id) => id !== draftableId)
+              .map((id) => (id === targetToReplace ? draftableId : id))
+            await api.removeFavoritesEntry({
+              p_list: plan.id,
+              p_revision: plan.revision,
+              p_draftable: targetToReplace,
+            })
+            return await api.setFavoritesOrder({
+              p_list: plan.id,
+              p_revision: plan.revision + 1,
+              p_draftables: nextOrder,
+            })
+          }
+          const idx = allIds.indexOf(targetToReplace)
+          await api.addFavoritesEntry({
+            p_list: plan.id,
+            p_revision: plan.revision,
+            p_draftable: draftableId,
+          })
+          await api.removeFavoritesEntry({
+            p_list: plan.id,
+            p_revision: plan.revision + 1,
+            p_draftable: targetToReplace,
+          })
+          const nextOrder = [...allIds]
+          if (idx >= 0) nextOrder[idx] = draftableId
+          else nextOrder.push(draftableId)
+          return await api.setFavoritesOrder({
+            p_list: plan.id,
+            p_revision: plan.revision + 2,
+            p_draftables: nextOrder,
+          })
+        })
+        .then((succeeded) => {
+          if (succeeded) setReplacingDraftableId(null)
+        })
+      return
+    }
+    if (plannedIds.has(draftableId)) {
+      void favorites.runPlan((plan) =>
+        api.removeFavoritesEntry({
+          p_list: plan.id,
+          p_revision: plan.revision,
+          p_draftable: draftableId,
+        }),
+      )
+      return
+    }
+    if (visiblePlanEntries.length >= myOpenSlots) return
+    void favorites.runPlan(async (plan) => {
+      if (plan.entries.some((entry) => entry.draftable_id === draftableId)) return null
+      return await api.addFavoritesEntry({
+        p_list: plan.id,
+        p_revision: plan.revision,
+        p_draftable: draftableId,
+      })
+    })
+  }
+  const handleRemovePlan = (draftableId: number) => {
+    if (planLocked) return
+    if (effectiveReplacingId === draftableId) setReplacingDraftableId(null)
+    void favorites.runPlan((plan) =>
+      api.removeFavoritesEntry({
+        p_list: plan.id,
+        p_revision: plan.revision,
+        p_draftable: draftableId,
+      }),
+    )
+  }
+  const handleMovePlan = (draftableId: number, direction: -1 | 1) => {
+    if (planLocked) return
+    void favorites.runPlan((plan) => {
+      const allIds = plan.entries.map((entry) => entry.draftable_id)
+      const visibleIds = visiblePlanEntries.map((entry) => entry.draftableId)
+      const vIdx = visibleIds.indexOf(draftableId)
+      const targetVIdx = vIdx + direction
+      if (vIdx < 0 || targetVIdx < 0 || targetVIdx >= visibleIds.length) {
+        return Promise.resolve(null)
+      }
+      const idA = visibleIds[vIdx]
+      const idB = visibleIds[targetVIdx]
+      const idxA = allIds.indexOf(idA)
+      const idxB = allIds.indexOf(idB)
+      if (idxA < 0 || idxB < 0) return Promise.resolve(null)
+      const nextOrder = [...allIds]
+      ;[nextOrder[idxA], nextOrder[idxB]] = [nextOrder[idxB], nextOrder[idxA]]
+      return api.setFavoritesOrder({
+        p_list: plan.id,
+        p_revision: plan.revision,
+        p_draftables: nextOrder,
+      })
+    })
+  }
   const summaryTeam =
     summaryTeamId !== null
       ? (snapshot?.teams.find((team) => team.id === summaryTeamId) ?? null)
@@ -886,6 +1254,12 @@ export default function App() {
                       onSelect={openPick}
                       filterState={filterState}
                       onFilterStateChange={setFilterState}
+                      plannedIds={plannedIds}
+                      canAddMorePlans={canAddMorePlans}
+                      planBusy={planLocked}
+                      replacingItem={replacingItem}
+                      onTogglePlan={myTeam ? handleAddOrSwapPlan : undefined}
+                      onCancelReplace={() => setReplacingDraftableId(null)}
                     />
                     <aside className="draft-aside">
                       {rosterTeam && (
@@ -899,6 +1273,13 @@ export default function App() {
                           onSelectTeam={(team) => setSummaryTeamId(team.id)}
                           onSetRosterLock={setTeamRosterLock}
                           compact
+                          planEntries={planEntries}
+                          planBusy={planLocked}
+                          replacingDraftableId={effectiveReplacingId}
+                          onStartReplace={(draftableId) => setReplacingDraftableId(draftableId)}
+                          onCancelReplace={() => setReplacingDraftableId(null)}
+                          onRemovePlan={handleRemovePlan}
+                          onMovePlan={handleMovePlan}
                         />
                       )}
                       <section className="card order-panel">
@@ -988,6 +1369,13 @@ export default function App() {
                         onSelect={openPick}
                         onSelectTeam={(selectedTeam) => setSummaryTeamId(selectedTeam.id)}
                         onSetRosterLock={setTeamRosterLock}
+                        planEntries={planEntries}
+                        planBusy={planLocked}
+                        replacingDraftableId={effectiveReplacingId}
+                        onStartReplace={(draftableId) => setReplacingDraftableId(draftableId)}
+                        onCancelReplace={() => setReplacingDraftableId(null)}
+                        onRemovePlan={handleRemovePlan}
+                        onMovePlan={handleMovePlan}
                       />
                     ))
                   ) : (
@@ -1218,6 +1606,40 @@ export default function App() {
                   ? `Draft ${selected.item.species || selected.item.name} for ${teamName(activeTeam)}`
                   : `Draft ${selected.item.species || selected.item.name}`}
               <ArrowRight size={17} />
+            </button>
+          )}
+          {snapshot && myTeam && !myDraftedIds.has(selected.item.id) && (
+            <button
+              type="button"
+              className="button secondary full-width"
+              disabled={
+                planLocked ||
+                (!replacingItem &&
+                  !plannedIds.has(selected.item.id) &&
+                  (selectedTaken || !canAddMorePlans))
+              }
+              onClick={() => {
+                handleAddOrSwapPlan(selected.item.id)
+              }}
+            >
+              {replacingItem && replacingItem.id !== selected.item.id ? (
+                <>
+                  <RefreshCw size={15} />
+                  Replace {replacingItem.name} in draft plan
+                </>
+              ) : plannedIds.has(selected.item.id) ? (
+                <>
+                  <Trash2 size={15} />
+                  Remove from draft plan
+                </>
+              ) : !canAddMorePlans ? (
+                'All open roster slots are planned'
+              ) : (
+                <>
+                  <Plus size={15} />
+                  Add to draft plan ({selected.item.point_cost} pts)
+                </>
+              )}
             </button>
           )}
           <button

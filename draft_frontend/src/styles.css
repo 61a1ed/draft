@@ -7336,5 +7336,225 @@ main {
   margin-bottom: 0;
 }
 
+/* ---------- Draft Plan (Ghost Roster Slots & BigBoard Quick Actions) ---------- */
+.plan-budget-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: light-dark(#6c5b80, #b5a3c9);
+  margin-bottom: 8px;
+}
+
+.plan-budget-summary strong {
+  font-weight: 750;
+  color: light-dark(#563cc4, #c4b5fd);
+}
+
+.plan-budget-summary.over-budget,
+.plan-budget-summary.over-budget strong {
+  color: light-dark(#c53030, #fc8181);
+}
+
+.budget-track.has-plan {
+  display: flex;
+  align-items: stretch;
+}
+
+.budget-track.has-plan > .budget-fill-remaining {
+  border-radius: 4px 0 0 4px;
+}
+
+.budget-track.has-plan > .budget-fill-planned {
+  display: block;
+  height: 100%;
+  background: repeating-linear-gradient(
+    -45deg,
+    light-dark(#9f7aea, #7c3aed),
+    light-dark(#9f7aea, #7c3aed) 4px,
+    light-dark(#d6bcfa, #4c1d95) 4px,
+    light-dark(#d6bcfa, #4c1d95) 8px
+  );
+  border-radius: 0 4px 4px 0;
+  transition: width 0.3s;
+}
+
+.budget-track.has-plan.over-budget > .budget-fill-planned {
+  background: repeating-linear-gradient(
+    -45deg,
+    light-dark(#e53e3e, #f56565),
+    light-dark(#e53e3e, #f56565) 4px,
+    light-dark(#feb2b2, #742a2a) 4px,
+    light-dark(#feb2b2, #742a2a) 8px
+  );
+}
+
+.plan-replace-banner,
+.big-board-replace-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  background: light-dark(#f3eefb, #261d3a);
+  border: 1px solid light-dark(#c4b5fd, #6d28d9);
+  color: light-dark(#44337a, #e9d8fd);
+}
+
+.big-board-replace-banner {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+.roster-slot.planned {
+  padding: 6px 8px;
+  border: 1px dashed light-dark(#b794f4, #6b46c1);
+  background: light-dark(#faf5ff, #1f1630);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.roster-slot.planned.replacing {
+  border-style: solid;
+  border-color: light-dark(#6b46c1, #9f7aea);
+  box-shadow: 0 0 0 2px rgba(159, 122, 234, 0.25);
+}
+
+.roster-slot.planned.taken {
+  border-color: light-dark(#fc8181, #e53e3e);
+  background: light-dark(#fff5f5, #2a151b);
+}
+
+.planned-slot-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.planned-slot-main > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: light-dark(#e9d8fd, #322659);
+  color: light-dark(#553c9a, #d6bcfa);
+}
+
+.plan-badge.replacing {
+  background: light-dark(#6b46c1, #805ad5);
+  color: #ffffff;
+}
+
+.plan-badge.taken {
+  background: light-dark(#fed7d7, #742a2a);
+  color: light-dark(#9b2c2c, #feb2b2);
+}
+
+.planned-slot-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.planned-action-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+}
+
+.planned-action-btn.active {
+  background: light-dark(#6b46c1, #805ad5);
+  color: #ffffff;
+}
+
+.planned-action-btn.remove:hover:not(:disabled) {
+  color: light-dark(#c53030, #fc8181);
+}
+
+.big-board-item-row {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+}
+
+.big-board-item-row > .big-board-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.big-board-item.planned:not(.taken) {
+  border-style: dashed;
+  border-color: light-dark(#9f7aea, #7c3aed);
+  background: light-dark(#f8f4fe, #221933);
+}
+
+.big-board-plan-btn {
+  width: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  border: 1px solid light-dark(#ebe5f5, #2a2138);
+  background: light-dark(#faf8fc, #1b1624);
+  color: light-dark(#6b46c1, #b794f4);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.big-board-plan-btn:hover:not(:disabled) {
+  background: light-dark(#ede9fe, #2d2147);
+  border-color: light-dark(#b794f4, #6b46c1);
+}
+
+.big-board-plan-btn.active {
+  background: light-dark(#6b46c1, #7c3aed);
+  border-color: light-dark(#553c9a, #6d28d9);
+  color: #ffffff;
+}
+
+.big-board-plan-btn.swap {
+  border-color: light-dark(#d69e2e, #ecc94b);
+  color: light-dark(#b7791f, #f6e05e);
+}
+
+.big-board-plan-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+
 
 

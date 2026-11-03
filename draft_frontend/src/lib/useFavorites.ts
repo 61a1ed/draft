@@ -6,7 +6,18 @@ import { QUERY_POLL_INTERVAL, queryKeys } from './queryClient'
 
 export interface UseFavoritesOptions {
   userId: number | null
+  leagueId?: number | null
   mutate: (operation: () => Promise<unknown>) => Promise<boolean>
+}
+
+export const DRAFT_PLAN_LIST_PREFIX = '__draft_plan_league_'
+
+export function draftPlanListName(leagueId: number): string {
+  return `${DRAFT_PLAN_LIST_PREFIX}${leagueId}`
+}
+
+export function isDraftPlanListName(name: string): boolean {
+  return name.startsWith(DRAFT_PLAN_LIST_PREFIX)
 }
 
 interface FavoritesOwner {
@@ -15,11 +26,14 @@ interface FavoritesOwner {
   busy: boolean
   selectedId: number | null
   preferredId: number | null
+  planListId: number | null
+  preferredPlanId: number | null
   canWrite: boolean
+  canWritePlan: boolean
 }
 
-/** Favorites belong to the account; league selection never participates in their lifecycle. */
-export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
+/** Favorites belong to the account; league selection only selects the per-league draft plan list. */
+export function useFavorites({ userId, leagueId = null, mutate }: UseFavoritesOptions) {
   const client = useQueryClient()
   const owner = useMemo<FavoritesOwner | null>(
     () =>
@@ -31,7 +45,10 @@ export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
             busy: false,
             selectedId: null,
             preferredId: null,
+            planListId: null,
+            preferredPlanId: null,
             canWrite: false,
+            canWritePlan: false,
           },
     [userId],
   )
@@ -129,7 +146,19 @@ export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
     })
 
   const listsQuery = useQuery(listOptions(userId))
-  const lists = userId === null ? [] : (listsQuery.data ?? [])
+  const allLists = userId === null ? [] : (listsQuery.data ?? [])
+  const lists = useMemo(
+    () => allLists.filter((list) => !isDraftPlanListName(list.name)),
+    [allLists],
+  )
+  const planListName = leagueId !== null && leagueId !== undefined ? draftPlanListName(leagueId) : null
+  const planListHeader = useMemo(
+    () =>
+      planListName !== null ? (allLists.find((list) => list.name === planListName) ?? null) : null,
+    [allLists, planListName],
+  )
+  const planListId = planListHeader?.id ?? null
+  if (owner) owner.planListId = planListId
   const requestedId = selection?.owner === owner ? selection.id : null
   const selectedId = lists.some((list) => list.id === requestedId)
     ? requestedId
@@ -138,6 +167,10 @@ export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
   const snapshotQuery = useQuery(snapshotOptions(userId, selectedId))
   const state = userId === null || selectedId === null ? null : (snapshotQuery.data ?? null)
   const headerRevision = lists.find((list) => list.id === selectedId)?.revision
+
+  const planSnapshotQuery = useQuery(snapshotOptions(userId, planListId))
+  const planState = userId === null || planListId === null ? null : (planSnapshotQuery.data ?? null)
+  const planHeaderRevision = planListHeader?.revision
 
   useEffect(() => {
     if (!owner || selectedId === null || headerRevision === undefined) return
@@ -151,6 +184,19 @@ export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
       )
     }
   }, [client, owner, selectedId, headerRevision])
+
+  useEffect(() => {
+    if (!owner || planListId === null || planHeaderRevision === undefined) return
+    const cached = client.getQueryData<FavoritesListSnapshot | null>(
+      queryKeys.favoritesList(owner.userId, planListId),
+    )
+    if (cached && cached.revision < planHeaderRevision) {
+      void client.invalidateQueries(
+        { queryKey: queryKeys.favoritesList(owner.userId, planListId) },
+        { cancelRefetch: false },
+      )
+    }
+  }, [client, owner, planListId, planHeaderRevision])
 
   // Reads after a write are ordered so the detail is checked against the latest header revision.
   const refreshReads = async (captured: FavoritesOwner) => {
@@ -168,13 +214,22 @@ export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
       queryKey: [...queryKeys.favorites(captured.userId), 'list'],
       refetchType: 'none',
     })
-    const headers =
+    const allHeaders =
       client.getQueryData<FavoritesList[]>(queryKeys.favoritesLists(captured.userId)) ?? []
+    const headers = allHeaders.filter((list) => !isDraftPlanListName(list.name))
     const requested = captured.preferredId ?? captured.selectedId
     const id = headers.some((list) => list.id === requested) ? requested : (headers[0]?.id ?? null)
     if (id !== null && isCurrent(captured)) {
       // fetchQuery shares the same query and in-flight request as the selected useQuery observer.
       await client.fetchQuery(snapshotOptions(captured.userId, id)).catch(() => undefined)
+    }
+    const requestedPlanId = captured.preferredPlanId ?? captured.planListId
+    const activePlanId =
+      requestedPlanId !== null && allHeaders.some((list) => list.id === requestedPlanId)
+        ? requestedPlanId
+        : null
+    if (activePlanId !== null && isCurrent(captured)) {
+      await client.fetchQuery(snapshotOptions(captured.userId, activePlanId)).catch(() => undefined)
     }
   }
   const mutation = useMutation({
@@ -219,18 +274,33 @@ export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
     listsQuery.error ??
     listsQuery.failureReason ??
     snapshotQuery.error ??
-    snapshotQuery.failureReason
+    snapshotQuery.failureReason ??
+    planSnapshotQuery.error ??
+    planSnapshotQuery.failureReason
   const readError = userId === null || !readCause ? '' : errorMessage(readCause)
   const writeError = failure?.owner === owner ? failure.message : ''
   const behind = headerRevision !== undefined && (state?.revision ?? -1) < headerRevision
+  const planBehind =
+    planHeaderRevision !== undefined && (planState?.revision ?? -1) < planHeaderRevision
   const loading =
     userId !== null &&
     (listsQuery.isPending ||
       listsQuery.isFetching ||
       (selectedId !== null &&
         (snapshotQuery.isPending || snapshotQuery.isFetching || (behind && !readError))))
+  const planLoading =
+    userId !== null &&
+    (listsQuery.isPending ||
+      listsQuery.isFetching ||
+      (planListId !== null &&
+        (planSnapshotQuery.isPending ||
+          planSnapshotQuery.isFetching ||
+          (planBehind && !readError))))
   const busy = owner !== null && mutation.isPending && mutation.variables?.captured === owner
-  if (owner) owner.canWrite = !loading && !readError
+  if (owner) {
+    owner.canWrite = !loading && !readError
+    owner.canWritePlan = !planLoading && !readError
+  }
 
   const clearError = () => {
     if (isCurrent(owner)) setFailure({ owner, message: '' })
@@ -257,6 +327,45 @@ export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
       owner.busy = false
     }
   }
+  const runPlan = async (
+    operation: (currentPlan: FavoritesListSnapshot) => Promise<unknown>,
+  ): Promise<boolean> => {
+    if (
+      !isCurrent(owner) ||
+      planListName === null ||
+      owner.busy ||
+      !owner.canWritePlan ||
+      client.isFetching({ queryKey: queryKeys.favorites(owner.userId) }) > 0 ||
+      owner.planListId !== planListId
+    )
+      return false
+    owner.busy = true
+    setFailure({ owner, message: '' })
+    try {
+      return await mutation.mutateAsync({
+        captured: owner,
+        operation: async () => {
+          let activePlan = planState
+          if (!activePlan) {
+            const created = await api.createFavoritesList({ p_name: planListName })
+            if (isCurrent(owner)) {
+              owner.preferredPlanId = created.result
+            }
+            activePlan = {
+              id: created.result,
+              owner_user_id: owner.userId,
+              name: planListName,
+              revision: 0,
+              entries: [],
+            }
+          }
+          return await operation(activePlan)
+        },
+      })
+    } finally {
+      owner.busy = false
+    }
+  }
   const create = (name: string) =>
     run(async () => {
       const created = await api.createFavoritesList({ p_name: name })
@@ -271,7 +380,9 @@ export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
     lists,
     selectedId,
     state,
+    planState,
     loading,
+    planLoading,
     busy,
     error: writeError || readError,
     readError,
@@ -286,6 +397,7 @@ export function useFavorites({ userId, mutate }: UseFavoritesOptions) {
     refresh,
     clearError,
     run,
+    runPlan,
     create,
   }
 }

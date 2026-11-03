@@ -196,7 +196,9 @@ beforeEach(() => {
     lists: [list],
     selectedId: list.id,
     state: { ...list, entries: [] },
+    planState: null,
     loading: false,
+    planLoading: false,
     busy: false,
     error: '',
     readError: '',
@@ -205,6 +207,7 @@ beforeEach(() => {
     refresh: vi.fn(async () => {}),
     clearError: vi.fn(),
     run: vi.fn(async () => true),
+    runPlan: vi.fn(async () => true),
     create: vi.fn(async () => true),
   }
   vi.mocked(useFavorites).mockImplementation(() => favorites)
@@ -1000,5 +1003,132 @@ describe('league navigation and team presentation', () => {
     expect(text(summaryDialog)).toContain('Blackbirds')
     expect(text(summaryDialog)).toContain('Pikachu')
     expect(text(summaryDialog)).toContain('Export Team')
+  })
+
+  it('always renders all roster slots (even >6 in compact mode) and supports planning, budget tracking, reordering, replacing, and removing planned picks', async () => {
+    const addEntry = vi.spyOn(api, 'addFavoritesEntry').mockResolvedValue({ result: null })
+    const removeEntry = vi.spyOn(api, 'removeFavoritesEntry').mockResolvedValue({ result: null })
+    const setOrder = vi.spyOn(api, 'setFavoritesOrder').mockResolvedValue({ result: null })
+
+    const snap = league('drafting')
+    snap.league.roster_size = 8
+    snap.state.roster_size = 8
+    snap.teams[0].point_budget = 25
+    snap.teams[0].points_remaining = 25
+
+    draft = {
+      ...draft,
+      snapshot: snap,
+      catalog: [
+        ...draft.catalog, // id 25 Pikachu (12 pts)
+        {
+          id: 1,
+          name: 'Bulbasaur',
+          point_cost: 6,
+          dex: 1,
+          species: 'Bulbasaur',
+          form: '',
+          types: ['Grass'],
+          abilities: ['Overgrow'],
+          hidden_ability: null,
+          base_stats: null,
+          image_url: null,
+          megas: [],
+        },
+        {
+          id: 4,
+          name: 'Charmander',
+          point_cost: 10,
+          dex: 4,
+          species: 'Charmander',
+          form: '',
+          types: ['Fire'],
+          abilities: ['Blaze'],
+          hidden_ability: null,
+          base_stats: null,
+          image_url: null,
+          megas: [],
+        },
+      ],
+    }
+
+    favorites.planState = {
+      id: 99,
+      owner_user_id: 11,
+      name: '__draft_plan_league_7',
+      revision: 3,
+      entries: [
+        { draftable_id: 25, ordinal: 1 }, // Pikachu (12 pts)
+        { draftable_id: 1, ordinal: 2 }, // Bulbasaur (6 pts)
+      ],
+    }
+    vi.mocked(favorites.runPlan).mockImplementation(async (op) => {
+      await op(favorites.planState!)
+      return true
+    })
+
+    await render()
+
+    const roster = renderer!.root
+      .findAllByType('section')
+      .find((node) => node.props.className?.includes('roster-panel'))!
+
+    // All 8 slots are shown (2 planned + 6 empty) with no "additional roster slots" truncation
+    expect(text(roster)).not.toContain('additional roster slots')
+    const plannedSlot1 = roster.findByProps({ 'aria-label': 'Planned slot 1: Pikachu' })
+    const plannedSlot2 = roster.findByProps({ 'aria-label': 'Planned slot 2: Bulbasaur' })
+    expect(plannedSlot1).toBeDefined()
+    expect(plannedSlot2).toBeDefined()
+    expect(
+      roster.findAllByType('div').filter((d) => d.props.className === 'roster-slot empty'),
+    ).toHaveLength(6)
+
+    // Budget summary shows 18 pts planned and 7 pts left after plan
+    const budgetSummary = roster.findByProps({ 'aria-label': 'Draft plan budget summary' })
+    expect(text(budgetSummary)).toContain('Planned (2): 18 pts')
+    expect(text(budgetSummary)).toContain('After plan: 7 pts left')
+
+    // Reordering: Move Bulbasaur up in plan
+    const moveUpBtn = roster.findByProps({ 'aria-label': 'Move Bulbasaur up in plan' })
+    await act(async () => moveUpBtn.props.onClick())
+    expect(setOrder).toHaveBeenCalledWith({
+      p_list: 99,
+      p_revision: 3,
+      p_draftables: [1, 25],
+    })
+
+    // Replacing: Click "Replace Pikachu in plan", then swap with Charmander via BigBoard
+    const replaceBtn = roster.findByProps({ 'aria-label': 'Replace Pikachu in plan' })
+    await act(async () => replaceBtn.props.onClick())
+    expect(text(roster)).toContain('Replacing Pikachu (12 pts)')
+
+    const bigBoardProps = vi.mocked(BigBoard).mock.lastCall![0]
+    expect(bigBoardProps.replacingItem?.name).toBe('Pikachu')
+    await act(async () => bigBoardProps.onTogglePlan?.(4))
+
+    expect(addEntry).toHaveBeenCalledWith({
+      p_list: 99,
+      p_revision: 3,
+      p_draftable: 4,
+    })
+    expect(removeEntry).toHaveBeenCalledWith({
+      p_list: 99,
+      p_revision: 4,
+      p_draftable: 25,
+    })
+    expect(setOrder).toHaveBeenLastCalledWith({
+      p_list: 99,
+      p_revision: 5,
+      p_draftables: [4, 1],
+    })
+
+    // Removing a planned pick
+    const removeBulbasaurBtn = roster.findByProps({ 'aria-label': 'Remove Bulbasaur from plan' })
+    await act(async () => removeBulbasaurBtn.props.onClick())
+    expect(removeEntry).toHaveBeenLastCalledWith({
+      p_list: 99,
+      p_revision: 3,
+      p_draftable: 1,
+    })
   })
 })

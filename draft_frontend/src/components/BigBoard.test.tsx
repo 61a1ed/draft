@@ -282,4 +282,33 @@ describe('BigBoard', () => {
     await act(async () => expandBtn.props.onClick())
     expect(renderer!.root.findAllByProps({ 'aria-label': 'Jump to point tier' })).toHaveLength(1)
   })
+
+  it('renders quick plan and swap buttons on available Pokémon for the signed-in manager', async () => {
+    const onTogglePlan = vi.fn()
+    const onCancelReplace = vi.fn()
+    props.userId = 11
+    props.plannedIds = new Set([1]) // Bulbasaur is already planned
+    props.canAddMorePlans = true
+    props.onTogglePlan = onTogglePlan
+    props.onCancelReplace = onCancelReplace
+    await render()
+
+    const addCharmander = control('Add Charmander to plan')
+    const removeBulbasaur = control('Remove Bulbasaur from plan')
+    expect(addCharmander).toBeDefined()
+    expect(removeBulbasaur).toBeDefined()
+    // Pikachu is already drafted so it should not have a plan button
+    expect(renderer!.root.findAllByProps({ 'aria-label': 'Add Pikachu to plan' })).toHaveLength(0)
+
+    await act(async () => addCharmander.props.onClick())
+    expect(onTogglePlan).toHaveBeenCalledWith(4)
+
+    // When replacingItem is set, shows the replace banner and swap buttons
+    props.replacingItem = catalog[0] // Replacing Bulbasaur
+    await render()
+    expect(text(renderer!.root.findByProps({ role: 'status' }))).toContain('Replacing Bulbasaur')
+    const swapCharmander = control('Replace Bulbasaur with Charmander in plan')
+    await act(async () => swapCharmander.props.onClick())
+    expect(onTogglePlan).toHaveBeenLastCalledWith(4)
+  })
 })

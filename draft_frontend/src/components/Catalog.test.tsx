@@ -177,7 +177,9 @@ beforeEach(() => {
       lists: [savedList(), { id: 9, owner_user_id: 11, name: 'Late picks', revision: 0 }],
       selectedId: 7,
       state: savedList(),
+      planState: null,
       loading: false,
+      planLoading: false,
       error: '',
       readError: '',
       writeError: '',
@@ -189,6 +191,7 @@ beforeEach(() => {
         await operation()
         return true
       }),
+      runPlan: vi.fn(async () => true),
       create: vi.fn(async () => true),
     },
   }

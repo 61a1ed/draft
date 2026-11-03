@@ -5,6 +5,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Plus,
+  RefreshCw,
   Search,
   SlidersHorizontal,
   X,
@@ -37,6 +39,12 @@ export function BigBoard({
   onSelect,
   filterState,
   onFilterStateChange,
+  plannedIds,
+  canAddMorePlans = true,
+  planBusy = false,
+  replacingItem = null,
+  onTogglePlan,
+  onCancelReplace,
 }: {
   catalog: Draftable[]
   snapshot: LeagueSnapshot | null
@@ -47,6 +55,12 @@ export function BigBoard({
   onFilterStateChange?: (
     updater: CatalogFilterState | ((current: CatalogFilterState) => CatalogFilterState),
   ) => void
+  plannedIds?: Set<number>
+  canAddMorePlans?: boolean
+  planBusy?: boolean
+  replacingItem?: Draftable | null
+  onTogglePlan?: (draftableId: number) => void
+  onCancelReplace?: () => void
 }) {
   const [localFilterState, setLocalFilterState] =
     useState<CatalogFilterState>(INITIAL_CATALOG_FILTERS)
@@ -371,6 +385,24 @@ export function BigBoard({
             </button>
           </div>
         )}
+        {replacingItem && (
+          <div className="big-board-replace-banner" role="status">
+            <RefreshCw size={14} />
+            <span>
+              Replacing <strong>{replacingItem.name}</strong> ({replacingItem.point_cost} pts) in
+              your plan — click the swap button on any Pokémon to replace it
+            </span>
+            {onCancelReplace && (
+              <button
+                type="button"
+                className="button secondary small-button"
+                onClick={onCancelReplace}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
       </div>
       {tiers.length > 0 ? (
         <>
@@ -484,32 +516,82 @@ export function BigBoard({
                       const taken = drafted.has(item.id)
                       const overBudget = remaining !== undefined && item.point_cost > remaining
                       const isSaved = saved.has(item.id)
+                      const isPlanned = plannedIds?.has(item.id) ?? false
+                      const isReplaceTarget = replacingItem?.id === item.id
+                      const showPlanAction = Boolean(onTogglePlan && myTeam && !taken)
+                      const disablePlanAction =
+                        planBusy || (!replacingItem && !isPlanned && !canAddMorePlans)
                       return (
-                        <button
+                        <div
                           key={item.id}
-                          className={`big-board-item ${taken ? 'taken' : ''} ${isSaved ? 'saved' : ''}`}
-                          onClick={() => onSelect(item)}
-                          aria-label={`View ${item.name}, ${item.point_cost} points${taken ? ', already drafted' : overBudget ? ', over budget' : ''}`}
+                          className={`big-board-item-row ${taken ? 'taken' : ''} ${isSaved ? 'saved' : ''} ${isPlanned ? 'planned' : ''}`}
                         >
-                          <span className="big-board-sprite">
-                            <PokemonImage item={item} />
-                          </span>
-                          <span className="big-board-name">{item.name}</span>
-                          {isSaved && !taken && (
-                            <span className="big-board-fav" aria-hidden="true" title="In favorites">
-                              <Bookmark size={12} fill="currentColor" />
+                          <button
+                            type="button"
+                            className={`big-board-item ${taken ? 'taken' : ''} ${isSaved ? 'saved' : ''} ${isPlanned ? 'planned' : ''}`}
+                            onClick={() => onSelect(item)}
+                            aria-label={`View ${item.name}, ${item.point_cost} points${taken ? ', already drafted' : overBudget ? ', over budget' : ''}`}
+                          >
+                            <span className="big-board-sprite">
+                              <PokemonImage item={item} />
                             </span>
-                          )}
-                          {taken && (
-                            <span
-                              className="big-board-taken-icon"
-                              aria-hidden="true"
-                              title="Drafted"
+                            <span className="big-board-name">{item.name}</span>
+                            {isSaved && !taken && (
+                              <span
+                                className="big-board-fav"
+                                aria-hidden="true"
+                                title="In favorites"
+                              >
+                                <Bookmark size={12} fill="currentColor" />
+                              </span>
+                            )}
+                            {taken && (
+                              <span
+                                className="big-board-taken-icon"
+                                aria-hidden="true"
+                                title="Drafted"
+                              >
+                                <Check size={12} />
+                              </span>
+                            )}
+                          </button>
+                          {showPlanAction && (
+                            <button
+                              type="button"
+                              className={`big-board-plan-btn ${isPlanned ? 'active' : ''} ${replacingItem && !isReplaceTarget ? 'swap' : ''}`}
+                              disabled={disablePlanAction}
+                              aria-label={
+                                replacingItem
+                                  ? isReplaceTarget
+                                    ? `Cancel replacing ${item.name}`
+                                    : `Replace ${replacingItem.name} with ${item.name} in plan`
+                                  : isPlanned
+                                    ? `Remove ${item.name} from plan`
+                                    : `Add ${item.name} to plan`
+                              }
+                              title={
+                                replacingItem
+                                  ? isReplaceTarget
+                                    ? 'Cancel replace'
+                                    : `Swap with ${replacingItem.name}`
+                                  : isPlanned
+                                    ? 'Planned (click to remove)'
+                                    : canAddMorePlans
+                                      ? 'Add to draft plan'
+                                      : 'All open roster slots are planned'
+                              }
+                              onClick={() => onTogglePlan?.(item.id)}
                             >
-                              <Check size={12} />
-                            </span>
+                              {replacingItem && !isReplaceTarget ? (
+                                <RefreshCw size={12} />
+                              ) : isPlanned ? (
+                                <Check size={12} />
+                              ) : (
+                                <Plus size={12} />
+                              )}
+                            </button>
                           )}
-                        </button>
+                        </div>
                       )
                     })}
                   </div>

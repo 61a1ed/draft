@@ -476,4 +476,72 @@ describe('favorites mutations', () => {
     expect(await pending).toBe(false)
     expect(operation).not.toHaveBeenCalled()
   })
+
+  it('hides per-league draft plan lists from regular favorites and auto-creates a plan list on first write', async () => {
+    const planListHeader: FavoritesList = {
+      id: 15,
+      owner_user_id: 11,
+      name: '__draft_plan_league_20',
+      revision: 2,
+    }
+    const planSnap: FavoritesListSnapshot = {
+      ...planListHeader,
+      entries: [{ draftable_id: 25, ordinal: 1 }],
+    }
+    vi.mocked(api.favoritesLists).mockResolvedValueOnce([planListHeader, list(7, 11, 0)])
+    vi.mocked(api.favoritesList).mockImplementation(async (id) =>
+      id === 15 ? planSnap : snapshot(id, 11),
+    )
+    props.leagueId = 20
+    await mount()
+
+    // Regular lists exclude the hidden __draft_plan_league_20 list
+    expect(current.lists.map((l) => l.id)).toEqual([7])
+    expect(current.selectedId).toBe(7)
+    expect(current.planState).toEqual(planSnap)
+
+    // Switching to a league without a plan list yet starts with planState = null and auto-creates on runPlan
+    vi.mocked(api.createFavoritesList).mockResolvedValueOnce({ result: 19 })
+    const createdPlanHeader: FavoritesList = {
+      id: 19,
+      owner_user_id: 11,
+      name: '__draft_plan_league_30',
+      revision: 1,
+    }
+    const createdPlanSnap: FavoritesListSnapshot = {
+      ...createdPlanHeader,
+      entries: [{ draftable_id: 4, ordinal: 1 }],
+    }
+    await update({ leagueId: 30 })
+    expect(current.planState).toBeNull()
+
+    vi.mocked(api.favoritesLists).mockResolvedValueOnce([
+      planListHeader,
+      list(7, 11, 0),
+      createdPlanHeader,
+    ])
+    vi.mocked(api.favoritesList).mockImplementation(async (id) =>
+      id === 19 ? createdPlanSnap : id === 15 ? planSnap : snapshot(id, 11),
+    )
+
+    let receivedPlan: FavoritesListSnapshot | null = null
+    await act(async () => {
+      const ok = await current.runPlan(async (plan) => {
+        receivedPlan = plan
+        return null
+      })
+      expect(ok).toBe(true)
+    })
+
+    expect(api.createFavoritesList).toHaveBeenCalledWith({ p_name: '__draft_plan_league_30' })
+    expect(receivedPlan).toEqual({
+      id: 19,
+      owner_user_id: 11,
+      name: '__draft_plan_league_30',
+      revision: 0,
+      entries: [],
+    })
+    expect(current.planState).toEqual(createdPlanSnap)
+    expect(current.lists.map((l) => l.id)).toEqual([7])
+  })
 })
