@@ -17,7 +17,7 @@ dex,species,form,points,image_path
 53,Persian,Alolan,2,sprites/home-centered/persian-alola.png
 59,Arcanine,,13,sprites/home-centered/arcanine.png
 59,Arcanine,Hisuian,15,sprites/home-centered/arcanine-hisui.png
-65,Alakazam,,10,sprites/home-centered/alakazam.png
+65,Alakazam,"Original, Mega",10,sprites/home-centered/alakazam.png
 68,Machamp,,4,sprites/home-centered/machamp.png
 71,Victreebel,"Original, Mega",7,sprites/home-centered/victreebel.png
 80,Slowbro,"Original, Mega",13,sprites/home-centered/slowbro.png
@@ -123,12 +123,12 @@ dex,species,form,points,image_path
 516,Simipour,,4,sprites/home-centered/simipour.png
 518,Musharna,,6,sprites/home-centered/musharna.png
 530,Excadrill,"Original, Mega",18,sprites/home-centered/excadrill.png
-531,Audino,,5,sprites/home-centered/audino.png
+531,Audino,"Original, Mega",5,sprites/home-centered/audino.png
 534,Conkeldurr,,9,sprites/home-centered/conkeldurr.png
 545,Scolipede,"Original, Mega",8,sprites/home-centered/scolipede.png
 547,Whimsicott,,21,sprites/home-centered/whimsicott.png
 553,Krookodile,,13,sprites/home-centered/krookodile.png
-560,Scrafty,,15,sprites/home-centered/scrafty.png
+560,Scrafty,"Original, Mega",15,sprites/home-centered/scrafty.png
 563,Cofagrigus,,10,sprites/home-centered/cofagrigus.png
 569,Garbodor,,1,sprites/home-centered/garbodor.png
 571,Zoroark,,9,sprites/home-centered/zoroark.png
@@ -150,7 +150,7 @@ dex,species,form,points,image_path
 660,Diggersby,,8,sprites/home-centered/diggersby.png
 663,Talonflame,,18,sprites/home-centered/talonflame.png
 666,Vivillon,,15,sprites/home-centered/vivillon.png
-668,Pyroar,,14,sprites/home-centered/pyroar.png
+668,Pyroar,"Original, Mega",14,sprites/home-centered/pyroar.png
 670,Floette,"Original, Mega",21,sprites/home-centered/floette.png
 671,Florges,,7,sprites/home-centered/florges.png
 673,Gogoat,,2,sprites/home-centered/gogoat.png
@@ -161,7 +161,7 @@ dex,species,form,points,image_path
 681,Aegislash,,15,sprites/home-centered/aegislash.png
 683,Aromatisse,,4,sprites/home-centered/aromatisse.png
 685,Slurpuff,,4,sprites/home-centered/slurpuff.png
-687,Malamar,,2,sprites/home-centered/malamar.png
+687,Malamar,"Original, Mega",2,sprites/home-centered/malamar.png
 689,Barbaracle,"Original, Mega",13,sprites/home-centered/barbaracle.png
 691,Dragalge,"Original, Mega",8,sprites/home-centered/dragalge.png
 693,Clawitzer,,3,sprites/home-centered/clawitzer.png
@@ -217,7 +217,7 @@ dex,species,form,points,image_path
 866,Mr. Rime,,2,sprites/home-centered/mrrime.png
 867,Runerigus,,8,sprites/home-centered/runerigus.png
 869,Alcremie,,5,sprites/home-centered/alcremie.png
-870,Falinks,,3,sprites/home-centered/falinks.png
+870,Falinks,"Original, Mega",3,sprites/home-centered/falinks.png
 871,Pincurchin,,4,sprites/home-centered/pincurchin.png
 876,Indeedee,Female,18,sprites/home-centered/indeedee-f.png
 876,Indeedee,Male,12,sprites/home-centered/indeedee.png
@@ -246,7 +246,7 @@ dex,species,form,points,image_path
 959,Tinkaton,,12,sprites/home-centered/tinkaton.png
 964,Palafin,,15,sprites/home-centered/palafin.png
 968,Orthworm,,11,sprites/home-centered/orthworm.png
-970,Glimmora,,16,sprites/home-centered/glimmora.png
+970,Glimmora,"Original, Mega",16,sprites/home-centered/glimmora.png
 972,Houndstone,,8,sprites/home-centered/houndstone.png
 979,Annihilape,,16,sprites/home-centered/annihilape.png
 981,Farigiraf,,18,sprites/home-centered/farigiraf.png
