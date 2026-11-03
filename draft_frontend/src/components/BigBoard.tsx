@@ -32,6 +32,7 @@ function tierStatusClass(availableCount: number, totalCount: number) {
 export function BigBoard({
   catalog,
   snapshot,
+  userId,
   favorites,
   onSelect,
   filterState,
@@ -39,6 +40,7 @@ export function BigBoard({
 }: {
   catalog: Draftable[]
   snapshot: LeagueSnapshot | null
+  userId?: number
   favorites?: FavoritesController
   onSelect: (item: Draftable) => void
   filterState?: CatalogFilterState
@@ -85,7 +87,12 @@ export function BigBoard({
     [favorites?.state?.entries],
   )
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
-  const remaining = snapshot?.state.max_spendable_points ?? activeTeam?.points_remaining
+  const myTeam =
+    userId !== undefined
+      ? snapshot?.teams.find((team) => team.manager_user_id === userId)
+      : undefined
+  const budgetTeam = myTeam ?? activeTeam
+  const remaining = budgetTeam?.points_remaining
 
   const allFilters = useMemo(() => buildAllFilters(catalog), [catalog])
   const suggestions = useMemo(() => {
@@ -316,9 +323,13 @@ export function BigBoard({
           </div>
           <button
             className={`filter-button ${affordable ? 'active' : ''}`}
-            title="Show picks within the current team's budget"
+            title={
+              myTeam
+                ? 'Show picks within your budget'
+                : "Show picks within the current team's budget"
+            }
             aria-pressed={affordable}
-            disabled={!activeTeam}
+            disabled={!budgetTeam}
             onClick={() => {
               setAffordable(!affordable)
             }}

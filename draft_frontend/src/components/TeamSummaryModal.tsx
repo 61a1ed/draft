@@ -200,9 +200,6 @@ export function TeamSummaryModal({
               <h4>
                 Drafted Party ({picks.length}/{snapshot.league.roster_size})
               </h4>
-              <span className="team-export-counter">
-                Showdown export: <strong>{exportedItems.length} / {MAX_SHOWDOWN_EXPORT}</strong>
-              </span>
             </div>
 
             <div className="team-party-grid" role="list" aria-label="Team roster slots">
@@ -289,9 +286,7 @@ export function TeamSummaryModal({
 
             <div className="team-summary-export-bar">
               <div className="team-summary-export-meta">
-                <span>
-                  <strong>Showdown Pokepaste</strong> (max {MAX_SHOWDOWN_EXPORT} Pokémon)
-                </span>
+                <span>(max {MAX_SHOWDOWN_EXPORT} Pokémon)</span>
                 {picks.length > 0 && (
                   <button
                     type="button"
@@ -303,7 +298,7 @@ export function TeamSummaryModal({
                 )}
               </div>
               {showPreview && (
-                <pre className="team-summary-paste-preview" aria-label="Showdown Pokepaste preview">
+                <pre className="team-summary-paste-preview" aria-label="Team export preview">
                   {pokepasteText || 'No Pokémon selected for export.'}
                 </pre>
               )}
@@ -316,12 +311,12 @@ export function TeamSummaryModal({
                 {copied ? (
                   <>
                     <Check size={16} />
-                    Copied Showdown Pokepaste!
+                    Copied!
                   </>
                 ) : (
                   <>
                     <ClipboardCopy size={16} />
-                    Copy Showdown Pokepaste ({exportedItems.length})
+                    Export Team
                   </>
                 )}
               </button>

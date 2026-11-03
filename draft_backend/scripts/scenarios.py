@@ -26,6 +26,7 @@ SCENARIOS = {
     "undo": "An undone pick and its replacement; Carol picks next.",
     "bounds": "Min 8, max 12 roster; each team has 7 picks so far.",
     "completed": "A finished two-round draft; Alice can undo the final pick.",
+    "rosters": "Completed 8-12 roster draft with full 8, 9, 10, and 12-Pokémon teams.",
 }
 
 

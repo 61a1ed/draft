@@ -5037,6 +5037,24 @@ main {
   border-radius: 4px;
   background: light-dark(#9b7cc7, #8a68b8);
 }
+.stat-bar span.stat-tier-1 {
+  background: light-dark(#e04848, #f05a5a);
+}
+.stat-bar span.stat-tier-2 {
+  background: light-dark(#ef7a1a, #f98b32);
+}
+.stat-bar span.stat-tier-3 {
+  background: light-dark(#e0b422, #f5cc3b);
+}
+.stat-bar span.stat-tier-4 {
+  background: light-dark(#76c422, #9be02e);
+}
+.stat-bar span.stat-tier-5 {
+  background: light-dark(#1fa958, #2dd46f);
+}
+.stat-bar span.stat-tier-6 {
+  background: light-dark(#0ea5a0, #22d3cc);
+}
 .stat-change {
   font-size: 11px;
   font-weight: 700;

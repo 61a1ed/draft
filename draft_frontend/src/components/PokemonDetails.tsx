@@ -17,6 +17,15 @@ const MAX_STAT = 255
 const total = (stats: BaseStats) => STATS.reduce((sum, [key]) => sum + stats[key], 0)
 const signed = (value: number) => (value > 0 ? `+${value}` : String(value))
 
+export function statTierClass(value: number): string {
+  if (value < 30) return 'stat-tier-1'
+  if (value < 60) return 'stat-tier-2'
+  if (value < 90) return 'stat-tier-3'
+  if (value < 120) return 'stat-tier-4'
+  if (value < 150) return 'stat-tier-5'
+  return 'stat-tier-6'
+}
+
 function StatTable({ stats, base }: { stats: BaseStats; base: BaseStats | null }) {
   const change = (value: number, baseValue: number) =>
     base && value !== baseValue ? (
@@ -32,7 +41,10 @@ function StatTable({ stats, base }: { stats: BaseStats; base: BaseStats | null }
           <dd>
             <strong>{stats[key]}</strong>
             <span className="stat-bar" aria-hidden="true">
-              <span style={{ width: `${(stats[key] / MAX_STAT) * 100}%` }} />
+              <span
+                className={statTierClass(stats[key])}
+                style={{ width: `${(stats[key] / MAX_STAT) * 100}%` }}
+              />
             </span>
             {change(stats[key], base?.[key] ?? stats[key])}
           </dd>

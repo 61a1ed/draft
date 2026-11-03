@@ -54,6 +54,7 @@ type ListDialog = { kind: 'create' } | { kind: 'rename' | 'delete'; list: Favori
 export function Catalog({
   catalog,
   snapshot,
+  userId,
   favorites,
   legacyWatchlist = [],
   busy = false,
@@ -63,6 +64,7 @@ export function Catalog({
 }: {
   catalog: Draftable[]
   snapshot: LeagueSnapshot | null
+  userId?: number
   favorites: FavoritesController
   legacyWatchlist?: number[]
   busy?: boolean
@@ -109,7 +111,12 @@ export function Catalog({
     [snapshot?.rosters],
   )
   const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
-  const remaining = snapshot?.state.max_spendable_points ?? activeTeam?.points_remaining
+  const myTeam =
+    userId !== undefined
+      ? snapshot?.teams.find((team) => team.manager_user_id === userId)
+      : undefined
+  const budgetTeam = myTeam ?? activeTeam
+  const remaining = budgetTeam?.points_remaining
   const allFilters = useMemo(() => buildAllFilters(catalog), [catalog])
   const suggestions = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -426,9 +433,13 @@ export function Catalog({
           </label>
           <button
             className={`filter-button ${affordable ? 'active' : ''}`}
-            title="Show picks within the current team's budget"
+            title={
+              myTeam
+                ? 'Show picks within your budget'
+                : "Show picks within the current team's budget"
+            }
             aria-pressed={affordable}
-            disabled={!activeTeam}
+            disabled={!budgetTeam}
             onClick={() => {
               setAffordable(!affordable)
             }}

@@ -61,7 +61,7 @@ const navItems = [
   { id: 'draft', label: 'Draft Pool', icon: LayoutGrid },
   { id: 'board', label: 'Draft board', icon: Table2 },
   { id: 'catalog', label: 'Pokedex & Favorites', icon: Bookmark },
-  { id: 'teams', label: 'Teams', icon: Users },
+  { id: 'teams', label: 'Rosters', icon: Users },
   { id: 'tournament', label: 'Tournament', icon: Trophy },
   { id: 'availability', label: 'Availability', icon: CalendarDays },
   { id: 'settings', label: 'League settings', icon: Settings2 },
@@ -790,6 +790,7 @@ export default function App() {
               key={session!.user.id}
               catalog={catalog}
               snapshot={snapshot}
+              userId={session!.user.id}
               favorites={favorites}
               legacyWatchlist={legacyWatchlist}
               busy={draft.busy}
@@ -802,6 +803,7 @@ export default function App() {
               key={session!.user.id}
               catalog={catalog}
               snapshot={null}
+              userId={session!.user.id}
               favorites={favorites}
               onSelect={openPick}
               filterState={filterState}
@@ -879,6 +881,7 @@ export default function App() {
                       key={session!.user.id}
                       catalog={catalog}
                       snapshot={snapshot}
+                      userId={session!.user.id}
                       favorites={favorites}
                       onSelect={openPick}
                       filterState={filterState}

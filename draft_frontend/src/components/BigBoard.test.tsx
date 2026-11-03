@@ -180,6 +180,33 @@ describe('BigBoard', () => {
     expect(props.onSelect).toHaveBeenCalledWith(catalog[2])
   })
 
+  it('highlights over-budget tiers based on the signed-in manager’s own points rather than the active picker’s points', async () => {
+    const snap = league()
+    snap.teams.push({
+      id: 9,
+      league_id: 20,
+      name: 'Beta',
+      color_rgb: 0,
+      metadata_complete: true,
+      can_set_metadata: false,
+      manager_user_id: 22,
+      draft_position: 2,
+      point_budget: 17,
+      points_spent: 0,
+      points_remaining: 17,
+    })
+    // Active picker is Team 8 (5 pts remaining), but signed-in user 22 manages Team 9 (17 pts remaining)
+    props.snapshot = snap
+    props.userId = 22
+    await render()
+
+    const overBudgetCols = renderer!.root.findAllByProps({
+      className: 'big-board-column  over-budget-tier',
+    })
+    expect(overBudgetCols).toHaveLength(0)
+    expect(control('View Raichu, 12 points')).toBeDefined()
+  })
+
   it('accepts controlled filter state and clears all filters', async () => {
     let state: CatalogFilterState = {
       ...INITIAL_CATALOG_FILTERS,

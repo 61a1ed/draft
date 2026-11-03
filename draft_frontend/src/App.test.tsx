@@ -465,16 +465,16 @@ describe('league navigation and team presentation', () => {
 
   it('preserves manual navigation through live updates, including draft start', async () => {
     await render()
-    await navigate('Teams')
-    expect(heading()).toBe('Teams')
+    await navigate('Rosters')
+    expect(heading()).toBe('Rosters')
 
     draft.snapshot = { ...league(), revision: 6, server_now: '2026-10-21T12:01:00Z' }
     await render()
-    expect(heading()).toBe('Teams')
+    expect(heading()).toBe('Rosters')
 
     draft.snapshot = { ...league('drafting'), revision: 7 }
     await render()
-    expect(heading()).toBe('Teams')
+    expect(heading()).toBe('Rosters')
   })
 
   it('chooses the appropriate initial screen after selecting another league', async () => {
@@ -483,7 +483,7 @@ describe('league navigation and team presentation', () => {
     expect(leagueSwitch.type).toBe('label')
     expect(text(leagueSwitch.findByProps({ className: 'league-switch-value' }))).toBe('League 7')
 
-    await navigate('Teams')
+    await navigate('Rosters')
     await selectLeague(league('drafting', 8))
     expect(heading()).toBe('Draft Pool')
     expect(text(leagueSwitch.findByProps({ className: 'league-switch-value' }))).toBe('League 8')
@@ -554,7 +554,7 @@ describe('league navigation and team presentation', () => {
     )
     expect(main.findAllByProps({ 'data-testid': 'league-setup' })).toHaveLength(0)
 
-    await navigate('Teams')
+    await navigate('Rosters')
     const rosters = renderer!.root
       .findAllByType('section')
       .filter((node) => node.props.className?.includes('roster-panel'))
@@ -576,7 +576,7 @@ describe('league navigation and team presentation', () => {
       'Draft Pool',
       'Draft board',
       'Pokedex & Favorites',
-      'Teams',
+      'Rosters',
       'Tournament',
       'Availability',
       'League settings',
@@ -858,9 +858,9 @@ describe('league navigation and team presentation', () => {
     const note = renderer!.root.findByProps({ role: 'note' })
     expect(text(note)).toBe('Remember: Some abilities change type effectiveness')
 
-    // Teams tab: Only the user's team has the pkmn.help link, not other managers' teams
-    await navigate('Teams')
-    expect(heading()).toBe('Teams')
+    // Rosters tab: Only the user's team has the pkmn.help link, not other managers' teams
+    await navigate('Rosters')
+    expect(heading()).toBe('Rosters')
     const rosters = renderer!.root
       .findAllByType('section')
       .filter((node) => node.props.className?.includes('roster-panel'))
@@ -985,8 +985,8 @@ describe('league navigation and team presentation', () => {
       }),
     ).toBeDefined()
 
-    // Navigate to Teams tab and click Blackbirds' "Summary" button
-    await navigate('Teams')
+    // Navigate to Rosters tab and click Blackbirds' "Summary" button
+    await navigate('Rosters')
     const teamSummaryBtns = renderer!.root
       .findAllByType('button')
       .filter((btn) => text(btn) === 'Summary')
@@ -999,6 +999,6 @@ describe('league navigation and team presentation', () => {
     })
     expect(text(summaryDialog)).toContain('Blackbirds')
     expect(text(summaryDialog)).toContain('Pikachu')
-    expect(text(summaryDialog)).toContain('Showdown Pokepaste')
+    expect(text(summaryDialog)).toContain('Export Team')
   })
 })
