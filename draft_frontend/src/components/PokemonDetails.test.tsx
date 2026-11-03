@@ -207,6 +207,80 @@ describe('Pokémon details', () => {
     expect(text(root())).toContain('Battle details have not been imported yet.')
   })
 
+  it('renders tabs for all Squawkabilly plumage forms with their abilities and stats', async () => {
+    await render({
+      id: 931,
+      name: 'Squawkabilly (Green, Blue, Yellow, White)',
+      point_cost: 4,
+      dex: 931,
+      species: 'Squawkabilly',
+      form: 'Green, Blue, Yellow, White',
+      types: ['Normal', 'Flying'],
+      abilities: ['Intimidate', 'Hustle'],
+      hidden_ability: 'Guts',
+      base_stats: stats(82, 96, 51, 45, 51, 92),
+      image_url: '/images/squawkabilly',
+      megas: [],
+      moves: charizard.moves,
+    })
+
+    expect(tabs().map(text)).toEqual(['Green', 'Blue', 'Yellow', 'White', 'Moves'])
+    expect(text(root().findByType('h2'))).toBe('Squawkabilly')
+    expect(abilities()).toEqual(['Intimidate', 'Hustle', 'Guts'])
+    expect(text(statRow('Attack'))).toBe('Attack96')
+    expect(text(statRow('Speed'))).toBe('Speed92')
+
+    await act(async () => tabs()[1].props.onClick())
+    expect(abilities()).toEqual(['Intimidate', 'Hustle', 'Guts'])
+
+    await act(async () => tabs()[2].props.onClick())
+    expect(abilities()).toEqual(['Intimidate', 'Hustle', 'Sheer Force'])
+    expect(text(statRow('Attack'))).toBe('Attack96')
+
+    await act(async () => tabs()[3].props.onClick())
+    expect(abilities()).toEqual(['Intimidate', 'Hustle', 'Sheer Force'])
+  })
+
+  it('renders tabs for all Gourgeist size forms with their respective base stats', async () => {
+    await render({
+      id: 711,
+      name: 'Gourgeist (Small, Average, Large, Jumbo)',
+      point_cost: 4,
+      dex: 711,
+      species: 'Gourgeist',
+      form: 'Small, Average, Large, Jumbo',
+      types: ['Ghost', 'Grass'],
+      abilities: ['Pickup', 'Frisk'],
+      hidden_ability: 'Insomnia',
+      base_stats: stats(85, 100, 122, 58, 75, 54),
+      image_url: '/images/gourgeist',
+      megas: [],
+      moves: [],
+    })
+
+    expect(tabs().map(text)).toEqual(['Small', 'Average', 'Large', 'Jumbo'])
+    expect(abilities()).toEqual(['Pickup', 'Frisk', 'Insomnia'])
+    expect(text(statRow('HP'))).toBe('HP55')
+    expect(text(statRow('Attack'))).toBe('Attack85')
+    expect(text(statRow('Speed'))).toBe('Speed99')
+    expect(text(statRow('Total'))).toBe('Total494')
+
+    await act(async () => tabs()[1].props.onClick())
+    expect(text(statRow('HP'))).toBe('HP65')
+    expect(text(statRow('Attack'))).toBe('Attack90')
+    expect(text(statRow('Speed'))).toBe('Speed84')
+
+    await act(async () => tabs()[2].props.onClick())
+    expect(text(statRow('HP'))).toBe('HP75')
+    expect(text(statRow('Attack'))).toBe('Attack95')
+    expect(text(statRow('Speed'))).toBe('Speed69')
+
+    await act(async () => tabs()[3].props.onClick())
+    expect(text(statRow('HP'))).toBe('HP85')
+    expect(text(statRow('Attack'))).toBe('Attack100')
+    expect(text(statRow('Speed'))).toBe('Speed54')
+  })
+
   it('picks readable text for every type color', () => {
     expect(readableTextColor('#C03028')).toBe('#ffffff')
     expect(readableTextColor('#7038F8')).toBe('#ffffff')

@@ -1,3 +1,4 @@
+import { getBundledForms } from './pokemonTypes'
 import type { Draftable } from './types'
 
 export type SearchFilter = {
@@ -27,8 +28,13 @@ export const filterKey = (filter: SearchFilter) => `${filter.kind}:${filter.valu
 
 export function matchesFilter(item: Draftable, filter: SearchFilter) {
   if (filter.kind === 'type') return !!item.types?.includes(filter.value)
-  if (filter.kind === 'ability')
-    return !!item.abilities?.includes(filter.value) || item.hidden_ability === filter.value
+  if (filter.kind === 'ability') {
+    if (item.abilities?.includes(filter.value) || item.hidden_ability === filter.value) return true
+    const bundled = getBundledForms(item)
+    return !!bundled?.some(
+      (form) => form.abilities.includes(filter.value) || form.hidden_ability === filter.value,
+    )
+  }
   if (filter.kind === 'move') return !!item.moves?.some((move) => move.name === filter.value)
   return item.megas.length > 0
 }
@@ -42,6 +48,10 @@ export function buildAllFilters(catalog: Draftable[]): SearchFilter[] {
     item.types?.forEach((type) => types.add(type))
     item.abilities?.forEach((ability) => abilities.add(ability))
     if (item.hidden_ability) abilities.add(item.hidden_ability)
+    for (const form of getBundledForms(item) ?? []) {
+      form.abilities.forEach((ability) => abilities.add(ability))
+      if (form.hidden_ability) abilities.add(form.hidden_ability)
+    }
     item.moves?.forEach((move) => moves.add(move.name))
     anyMega ||= item.megas.length > 0
   }

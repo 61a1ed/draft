@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { getBundledForms } from '../lib/pokemonTypes'
 import type { Draftable, LeagueSnapshot } from '../lib/types'
 import type { FavoritesListSnapshot } from '../lib/favoritesTypes'
 import type { FavoritesController } from '../lib/useFavorites'
@@ -155,6 +156,11 @@ export function Catalog({
               item.types?.some((type) => type.toLowerCase().includes(query)) ||
               item.abilities?.some((ability) => ability.toLowerCase().includes(query)) ||
               item.hidden_ability?.toLowerCase().includes(query) ||
+              getBundledForms(item)?.some(
+                (form) =>
+                  form.abilities.some((ability) => ability.toLowerCase().includes(query)) ||
+                  form.hidden_ability?.toLowerCase().includes(query),
+              ) ||
               item.moves?.some((move) => move.name.toLowerCase().includes(query)))
           )
         })

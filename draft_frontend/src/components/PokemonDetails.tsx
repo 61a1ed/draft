@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Search, X } from 'lucide-react'
+import { getBundledForms } from '../lib/pokemonTypes'
 import type { BaseStats, Draftable, MegaEvolution, Move } from '../lib/types'
 import { PokemonImage } from './Catalog'
 import { PointsRibbon, TypePills } from './PokemonParts'
@@ -282,15 +283,22 @@ function MovePanel({ moves, idPrefix }: { moves: Move[]; idPrefix: number }) {
 /** Sprite, types, abilities, base stats, and learned moves, with tabs for Megas and Moves. */
 export function PokemonDetails({ item }: { item: Draftable }) {
   const [selected, setSelected] = useState(0)
-  const forms: (Draftable | MegaEvolution)[] = [item, ...item.megas]
+  const bundledForms = getBundledForms(item)
+  const forms: (Draftable | MegaEvolution)[] = bundledForms
+    ? bundledForms.map((variant, index) => ({
+        id: index + 1,
+        ...variant,
+        image_url: item.image_url,
+      }))
+    : [item, ...item.megas]
   const moves = item.moves ?? []
   const hasMoves = moves.length > 0
-  const showTabs = item.megas.length > 0 || hasMoves
+  const showTabs = forms.length > 1 || hasMoves
   const movesTabIndex = forms.length
   const totalTabs = forms.length + (hasMoves ? 1 : 0)
   const isMovesTab = hasMoves && selected === movesTabIndex
-  const form = isMovesTab ? item : (forms[selected] ?? item)
-  const mega = !isMovesTab && selected > 0
+  const form = isMovesTab ? (forms[0] ?? item) : (forms[selected] ?? item)
+  const mega = !isMovesTab && !bundledForms && selected > 0
   // Champions treats hidden abilities like any other, so they share one list.
   const abilities = [...(form.abilities ?? []), form.hidden_ability].filter(
     (ability): ability is string => !!ability,
@@ -337,7 +345,7 @@ export function PokemonDetails({ item }: { item: Draftable }) {
               className={index === selected ? 'selected' : ''}
               onClick={() => setSelected(index)}
             >
-              {index ? entry.name : item.form || 'Base form'}
+              {bundledForms || index ? entry.name : item.form || 'Base form'}
             </button>
           ))}
           {hasMoves && (
