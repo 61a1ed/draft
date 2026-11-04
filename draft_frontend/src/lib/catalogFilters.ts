@@ -55,6 +55,12 @@ export function buildAllFilters(catalog: Draftable[]): SearchFilter[] {
     item.types?.forEach((type) => types.add(type))
     item.abilities?.forEach((ability) => abilities.add(ability))
     if (item.hidden_ability) abilities.add(item.hidden_ability)
+
+    item.megas?.forEach((mega) => {
+      mega.abilities?.forEach((ability) => abilities.add(ability));
+      if (mega.hidden_ability) abilities.add(mega.hidden_ability);
+    });
+
     for (const form of getBundledForms(item) ?? []) {
       form.abilities.forEach((ability) => abilities.add(ability))
       if (form.hidden_ability) abilities.add(form.hidden_ability)
