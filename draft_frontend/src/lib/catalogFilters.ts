@@ -29,7 +29,14 @@ export const filterKey = (filter: SearchFilter) => `${filter.kind}:${filter.valu
 export function matchesFilter(item: Draftable, filter: SearchFilter) {
   if (filter.kind === 'type') return !!item.types?.includes(filter.value)
   if (filter.kind === 'ability') {
-    if (item.abilities?.includes(filter.value) || item.hidden_ability === filter.value) return true
+
+    if (item.abilities?.includes(filter.value) || item.hidden_ability === filter.value)
+      return true
+
+    for (const mega of item.megas) {
+      if (mega.abilities?.includes(filter.value) || mega.hidden_ability === filter.value)
+        return true
+    }
     const bundled = getBundledForms(item)
     return !!bundled?.some(
       (form) => form.abilities.includes(filter.value) || form.hidden_ability === filter.value,
@@ -48,6 +55,12 @@ export function buildAllFilters(catalog: Draftable[]): SearchFilter[] {
     item.types?.forEach((type) => types.add(type))
     item.abilities?.forEach((ability) => abilities.add(ability))
     if (item.hidden_ability) abilities.add(item.hidden_ability)
+
+    item.megas?.forEach((mega) => {
+      mega.abilities?.forEach((ability) => abilities.add(ability));
+      if (mega.hidden_ability) abilities.add(mega.hidden_ability);
+    });
+
     for (const form of getBundledForms(item) ?? []) {
       form.abilities.forEach((ability) => abilities.add(ability))
       if (form.hidden_ability) abilities.add(form.hidden_ability)

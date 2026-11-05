@@ -155,6 +155,7 @@ export function Catalog({
               String(item.dex ?? '').includes(query) ||
               item.types?.some((type) => type.toLowerCase().includes(query)) ||
               item.abilities?.some((ability) => ability.toLowerCase().includes(query)) ||
+              item.megas?.some((mega) => mega.abilities?.some((ability) => ability.toLowerCase().includes(query))) ||
               item.hidden_ability?.toLowerCase().includes(query) ||
               getBundledForms(item)?.some(
                 (form) =>
