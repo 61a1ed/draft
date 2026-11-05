@@ -185,9 +185,9 @@ dex,species,form,points,image_path
 730,Primarina,,17,sprites/home-centered/primarina.png
 733,Toucannon,,3,sprites/home-centered/toucannon.png
 740,Crabominable,"Original, Mega",13,sprites/home-centered/crabominable.png
-745,Lycanroc,Dusk,5,sprites/home-centered/lycanroc-dusk.png
-745,Lycanroc,Midday,4,sprites/home-centered/lycanroc.png
-745,Lycanroc,Midnight,7,sprites/home-centered/lycanroc-midnight.png
+745,Lycanroc,Dusk,7,sprites/home-centered/lycanroc-dusk.png
+745,Lycanroc,Midday,5,sprites/home-centered/lycanroc.png
+745,Lycanroc,Midnight,4,sprites/home-centered/lycanroc-midnight.png
 748,Toxapex,,3,sprites/home-centered/toxapex.png
 750,Mudsdale,,7,sprites/home-centered/mudsdale.png
 752,Araquanid,,13,sprites/home-centered/araquanid.png
