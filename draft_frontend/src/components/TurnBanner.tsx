@@ -410,7 +410,7 @@ export function TurnBanner({
             Open tournament <ArrowRight size={15} />
           </button>
         )}
-        {status === 'setup' && (onStartDraft || onOpenSettings) && (
+        {status === 'setup' && (canStart ? onStartDraft : onOpenSettings) && (
           <button
             className="button banner-button"
             onClick={() => (canStart && onStartDraft ? onStartDraft() : onOpenSettings?.())}

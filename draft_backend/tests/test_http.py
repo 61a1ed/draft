@@ -235,13 +235,7 @@ def test_public_reads_use_optional_session_identity(application, path):
         if path == "/api/leagues":
             assert (
                 db.read.await_args.args[1]
-                == "SELECT * FROM dl.league l "
-                "WHERE l.commissioner_user_id = dl.user_id() "
-                "OR EXISTS ("
-                "SELECT 1 FROM dl.team t "
-                "WHERE t.league_id = l.id AND t.manager_user_id = dl.user_id()"
-                ") "
-                "ORDER BY l.id"
+                == "SELECT * FROM dl.league l ORDER BY l.id"
             )
         login = client.post(
             "/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"}

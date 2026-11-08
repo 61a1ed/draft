@@ -1131,4 +1131,82 @@ describe('league navigation and team presentation', () => {
       p_draftable: 1,
     })
   })
+
+  it('lets non-members spectate any league with Draft Pool, Draft board, Pokedex & Favorites, Rosters, and Tournament while disabling draft, favorite, and planner actions inside the league', async () => {
+    const snap = league('drafting')
+    snap.state.next_pick_number = 2
+    snap.state.next_team_id = 2 // Blackbirds on the clock
+    draft = {
+      ...draft,
+      session: {
+        user: { id: 99, display_name: 'Dave' },
+        csrf_token: 'csrf',
+        expires_at: 2_000_000_000,
+      },
+      snapshot: snap,
+    }
+    await render()
+
+    // Spectator opens in Draft Pool and sees Spectator badge
+    expect(heading()).toBe('Draft Pool')
+    const profile = renderer!.root.findByProps({ className: 'profile' })
+    expect(text(profile)).toContain('Dave')
+    expect(text(profile)).toContain('Spectator')
+
+    // Navigation shows Draft Pool, Draft board, Pokedex & Favorites, Rosters, and Tournament (hiding Availability and League settings)
+    const nav = renderer!.root.findByProps({ 'aria-label': 'Main navigation' })
+    const labels = nav.findAllByType('button').map((btn) => btn.props['aria-label'])
+    expect(labels).toEqual([
+      'Draft Pool',
+      'Draft board',
+      'Pokedex & Favorites',
+      'Rosters',
+      'Tournament',
+    ])
+
+    // Sidebar roster automatically follows the on-the-clock team (Blackbirds)
+    const roster = renderer!.root
+      .findAllByType('section')
+      .find((node) => node.props.className?.includes('roster-panel'))!
+    expect(text(roster.findByType('h3'))).toBe('Blackbirds')
+    expect(text(roster)).toContain('TEAM 2')
+
+    // BigBoard does not receive favorites or onTogglePlan when spectating
+    const bigBoardProps = vi.mocked(BigBoard).mock.lastCall![0]
+    expect(bigBoardProps.favorites).toBeUndefined()
+    expect(bigBoardProps.onTogglePlan).toBeUndefined()
+
+    // Clicking a Pokémon opens Pick details in read-only spectator mode (no Draft, Plan, or Favorite buttons)
+    await act(async () => bigBoardProps.onSelect(draft.catalog[0]))
+    const dialog = renderer!.root.findByProps({ role: 'dialog', 'aria-label': 'Pick details' })
+    expect(text(dialog)).toContain('You are spectating this league.')
+    const dialogButtons = dialog.findAllByType('button').map(text)
+    expect(dialogButtons.some((label) => label.includes('Draft Pikachu'))).toBe(false)
+    expect(dialogButtons.some((label) => label.includes('draft plan'))).toBe(false)
+    expect(dialogButtons.some((label) => label.includes('My shortlist'))).toBe(false)
+
+    // Close modal and check Draft board, Rosters, and global Pokedex & Favorites
+    await navigate('Draft board')
+    expect(heading()).toBe('Draft board')
+    expect(
+      renderer!.root.findByProps({ 'aria-label': 'Draft picks by round and team' }),
+    ).toBeDefined()
+
+    await navigate('Rosters')
+    expect(heading()).toBe('Rosters')
+    const rosters = renderer!.root
+      .findAllByType('section')
+      .filter((node) => node.props.className?.includes('roster-panel'))
+    expect(rosters.map((node) => text(node.findByType('h3')))).toEqual(['Team #1', 'Blackbirds'])
+
+    // Global Pokedex & Favorites still passes the user's favorites controller
+    await navigate('Pokedex & Favorites')
+    expect(heading()).toBe('Pokedex & Favorites')
+    expect(vi.mocked(Catalog).mock.lastCall?.[0].favorites).toBe(favorites)
+
+    // Setup league also opens in Draft Pool (not League settings) for spectators
+    await selectLeague(league('setup', 9))
+    expect(heading()).toBe('Draft Pool')
+    expect(LeagueSetup).not.toHaveBeenCalled()
+  })
 })

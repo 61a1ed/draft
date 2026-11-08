@@ -524,7 +524,7 @@ function TestSignIn({
             <option value="bob">Bob</option>
             <option value="carol">Carol</option>
             <option value="eve">Eve</option>
-            <option value="dave">Dave (no leagues)</option>
+            <option value="dave">Dave (spectator)</option>
           </select>
         </label>
         <button className="button secondary full-width" disabled={busy}>
@@ -565,6 +565,19 @@ export default function App() {
     setLegacySaved({ owner: legacyOwner, ids })
   }, [legacyOwner])
   const legacyWatchlist = legacySaved.owner === legacyOwner ? legacySaved.ids : []
+  const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
+  const myTeam = snapshot?.teams.find((team) => team.manager_user_id === session?.user.id)
+  const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
+  const commissioner = snapshot?.league.commissioner_user_id === session?.user.id
+  const isLeagueParticipant = Boolean(commissioner || myTeam)
+  const isSpectator = Boolean(snapshot && !isLeagueParticipant)
+  const visibleNavItems = useMemo(
+    () =>
+      isSpectator
+        ? navItems.filter((item) => item.id !== 'availability' && item.id !== 'settings')
+        : navItems,
+    [isSpectator],
+  )
   const [view, setView] = useState<View>('draft')
   const initialViewOwner = useRef('')
   useEffect(() => {
@@ -577,9 +590,18 @@ export default function App() {
     if (initialViewOwner.current === owner) return
     initialViewOwner.current = owner
     setView((current) =>
-      current === 'catalog' ? current : snapshot.state.status === 'setup' ? 'settings' : 'draft',
+      current === 'catalog'
+        ? current
+        : snapshot.state.status === 'setup' && !isSpectator
+          ? 'settings'
+          : 'draft',
     )
-  }, [snapshot, draft.leagueId, session])
+  }, [snapshot, draft.leagueId, session, isSpectator])
+  useEffect(() => {
+    if (isSpectator && (view === 'settings' || view === 'availability')) {
+      setView('draft')
+    }
+  }, [isSpectator, view])
   const [availabilityContext, setAvailabilityContext] = useState<AvailabilityContext | null>(null)
   const availabilityOwner = `${session?.user.id ?? 0}:${draft.leagueId ?? 0}`
   const availabilityNavigation =
@@ -628,9 +650,6 @@ export default function App() {
   useEffect(() => {
     setFilterState(INITIAL_CATALOG_FILTERS)
   }, [mode, session?.user.id])
-  const activeTeam = snapshot?.teams.find((team) => team.id === snapshot.state.next_team_id)
-  const myTeam = snapshot?.teams.find((team) => team.manager_user_id === session?.user.id)
-  const rosterTeam = myTeam ?? activeTeam ?? snapshot?.teams[0]
   const myDraftedIds = useMemo(
     () =>
       new Set(
@@ -809,7 +828,6 @@ export default function App() {
     snapshot?.league.name ??
     'Choose league'
   const can = (kind: string) => snapshot?.actions.some((action) => action.kind === kind) ?? false
-  const commissioner = snapshot?.league.commissioner_user_id === session?.user.id
   const pickingForOther = Boolean(
     snapshot?.state.status === 'drafting' &&
       commissioner &&
@@ -982,7 +1000,7 @@ export default function App() {
           </select>
         </label>
         <nav className="main-nav" aria-label="Main navigation">
-          {navItems.map(({ id, label, icon: Icon }) => (
+          {visibleNavItems.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               className={view === id ? 'active' : ''}
@@ -1018,7 +1036,9 @@ export default function App() {
             <span className="user-avatar">{initials(session?.user.display_name ?? 'Guest')}</span>
             <div>
               <strong>{session?.user.display_name ?? 'Guest'}</strong>
-              <small>{commissioner ? 'Commissioner' : 'League member'}</small>
+              <small>
+                {commissioner ? 'Commissioner' : isSpectator ? 'Spectator' : 'League member'}
+              </small>
             </div>
             <button
               className="icon-button"
@@ -1205,9 +1225,11 @@ export default function App() {
                     userId={session!.user.id}
                     busy={workspaceBusy}
                     onSelectPick={openPick}
-                    onOpenSettings={() => setView('settings')}
-                    onStartDraft={() =>
-                      setConfirmAction({ kind: 'start', revision: snapshot.revision })
+                    onOpenSettings={isSpectator ? undefined : () => setView('settings')}
+                    onStartDraft={
+                      isSpectator
+                        ? undefined
+                        : () => setConfirmAction({ kind: 'start', revision: snapshot.revision })
                     }
                     onOpenTournament={() => setView('tournament')}
                     onSetRosterLock={setTeamRosterLock}
@@ -1250,7 +1272,7 @@ export default function App() {
                       catalog={catalog}
                       snapshot={snapshot}
                       userId={session!.user.id}
-                      favorites={favorites}
+                      favorites={isSpectator ? undefined : favorites}
                       onSelect={openPick}
                       filterState={filterState}
                       onFilterStateChange={setFilterState}
@@ -1347,9 +1369,11 @@ export default function App() {
                   busy={workspaceBusy}
                   onSelect={openPick}
                   onSelectTeam={(team) => setSummaryTeamId(team.id)}
-                  onOpenSettings={() => setView('settings')}
-                  onStartDraft={() =>
-                    setConfirmAction({ kind: 'start', revision: snapshot.revision })
+                  onOpenSettings={isSpectator ? undefined : () => setView('settings')}
+                  onStartDraft={
+                    isSpectator
+                      ? undefined
+                      : () => setConfirmAction({ kind: 'start', revision: snapshot.revision })
                   }
                   onOpenTournament={() => setView('tournament')}
                   onSetRosterLock={setTeamRosterLock}
@@ -1382,10 +1406,16 @@ export default function App() {
                     <div className="card empty-state">
                       <Users size={28} />
                       <h3>No teams yet</h3>
-                      <p>Add teams in League settings.</p>
-                      <button className="button primary" onClick={() => setView('settings')}>
-                        Set up teams
-                      </button>
+                      <p>
+                        {isSpectator
+                          ? 'The commissioner has not added teams yet.'
+                          : 'Add teams in League settings.'}
+                      </p>
+                      {!isSpectator && (
+                        <button className="button primary" onClick={() => setView('settings')}>
+                          Set up teams
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1398,15 +1428,19 @@ export default function App() {
                   users={draft.users}
                   busy={draft.busy}
                   mutate={draft.mutate}
-                  onCompareAvailability={(teamId, compareTeamId, date) => {
-                    setAvailabilityContext({
-                      owner: availabilityOwner,
-                      teamId,
-                      compareTeamId,
-                      date,
-                    })
-                    setView('availability')
-                  }}
+                  onCompareAvailability={
+                    isSpectator
+                      ? undefined
+                      : (teamId, compareTeamId, date) => {
+                          setAvailabilityContext({
+                            owner: availabilityOwner,
+                            teamId,
+                            compareTeamId,
+                            date,
+                          })
+                          setView('availability')
+                        }
+                  }
                 />
               )}
               {view === 'availability' && (
@@ -1561,6 +1595,8 @@ export default function App() {
             <p className="selection-notice">Choose a league to draft this Pokémon.</p>
           ) : selectedTaken ? (
             <p className="selection-notice">This Pokémon has already been drafted.</p>
+          ) : isSpectator ? (
+            <p className="selection-notice">You are spectating this league.</p>
           ) : pickChanged ? (
             <p className="selection-notice">
               The draft has changed. Close this window and select again to review the new turn.
@@ -1586,7 +1622,7 @@ export default function App() {
               {snapshot.league.min_roster_size ?? snapshot.league.roster_size} Pokémon).
             </p>
           ) : null}
-          {snapshot && (
+          {snapshot && !isSpectator && (
             <button
               className={`button ${pickingForOther ? 'warning' : 'primary'} full-width`}
               disabled={!pickAllowed || draft.busy}
@@ -1642,44 +1678,52 @@ export default function App() {
               )}
             </button>
           )}
-          <button
-            className="button text-button full-width"
-            disabled={
-              draft.busy ||
-              favorites.busy ||
-              favorites.loading ||
-              !!favorites.readError ||
-              !favorites.state
-            }
-            onClick={() => {
-              const list = favorites.state
-              if (!list) return
-              const input = {
-                p_list: list.id,
-                p_revision: list.revision,
-                p_draftable: selected.item.id,
-              }
-              const saved = list.entries.some((entry) => entry.draftable_id === selected.item.id)
-              void favorites.run(() =>
-                saved ? api.removeFavoritesEntry(input) : api.addFavoritesEntry(input),
-              )
-            }}
-          >
-            {favorites.state?.entries.some((entry) => entry.draftable_id === selected.item.id) ? (
-              <>
-                <Check size={15} />
-                Remove from {favorites.state.name}
-              </>
-            ) : favorites.state ? (
-              `Save to ${favorites.state.name}`
-            ) : (
-              'Create a favorites list in the catalog to save this Pokémon'
-            )}
-          </button>
-          {favorites.error && (
-            <p className="inline-error" role="alert">
-              {favorites.error}
-            </p>
+          {!isSpectator && (
+            <>
+              <button
+                className="button text-button full-width"
+                disabled={
+                  draft.busy ||
+                  favorites.busy ||
+                  favorites.loading ||
+                  !!favorites.readError ||
+                  !favorites.state
+                }
+                onClick={() => {
+                  const list = favorites.state
+                  if (!list) return
+                  const input = {
+                    p_list: list.id,
+                    p_revision: list.revision,
+                    p_draftable: selected.item.id,
+                  }
+                  const saved = list.entries.some(
+                    (entry) => entry.draftable_id === selected.item.id,
+                  )
+                  void favorites.run(() =>
+                    saved ? api.removeFavoritesEntry(input) : api.addFavoritesEntry(input),
+                  )
+                }}
+              >
+                {favorites.state?.entries.some(
+                  (entry) => entry.draftable_id === selected.item.id,
+                ) ? (
+                  <>
+                    <Check size={15} />
+                    Remove from {favorites.state.name}
+                  </>
+                ) : favorites.state ? (
+                  `Save to ${favorites.state.name}`
+                ) : (
+                  'Create a favorites list in the catalog to save this Pokémon'
+                )}
+              </button>
+              {favorites.error && (
+                <p className="inline-error" role="alert">
+                  {favorites.error}
+                </p>
+              )}
+            </>
           )}
         </Modal>
       )}
