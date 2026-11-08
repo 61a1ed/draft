@@ -332,3 +332,12 @@ def test_availability_http_jsonb_dates_authorization_and_empty_state(client):
     assert read(client, path)["windows"] == []
     assert read(client, path)["availability"]["revision"] == 2
 
+    # Tombstoning the league hides its tournament, matches, and team availability.
+    match_id = read(client, f"/api/leagues/{league}/tournament")["matches"][0]["id"]
+    league_rev = read(client, f"/api/leagues/{league}")["revision"]
+    assert rpc(client, "delete_league", p_league=league, p_revision=league_rev) is None
+    assert client.get(f"/api/leagues/{league}/tournament").status_code == 404
+    assert client.get(f"/api/matches/{match_id}").status_code == 404
+    assert client.get(path).status_code == 404
+
+

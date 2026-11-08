@@ -191,6 +191,7 @@ argument names. Unknown fields are rejected. There is no arbitrary-SQL endpoint.
 |---|---|---|
 | `create_league` | `p_name`, `p_roster_size`, `p_pick_seconds` (default 60) | League ID |
 | `update_league` | `p_league`, `p_revision`, `p_name`, `p_roster_size`, `p_pick_seconds` | null |
+| `delete_league` | `p_league`, `p_revision` | null |
 | `add_team` | `p_league`, `p_revision`, `p_name` (default null), `p_manager`, `p_point_budget` | Team ID |
 | `update_team` | `p_league`, `p_revision`, `p_team`, `p_name` (nullable), `p_manager`, `p_point_budget` | null |
 | `set_team_metadata` | `p_league`, `p_revision`, `p_team`, `p_name`, `p_color_rgb` | null |

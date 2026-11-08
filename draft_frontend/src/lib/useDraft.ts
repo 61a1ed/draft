@@ -332,10 +332,19 @@ export function useDraft() {
       client.cancelQueries({ queryKey: queryKeys.draft(userId, id), exact: true }),
     ])
     if (!ownsAccount()) return
-    await Promise.all([
-      client.invalidateQueries({ queryKey: queryKeys.leagues(userId) }),
-      client.invalidateQueries({ queryKey: queryKeys.draft(userId, id), exact: true }),
-    ])
+    await client.invalidateQueries({ queryKey: queryKeys.leagues(userId) })
+    if (!ownsAccount()) return
+    const currentLeagues = client.getQueryData<League[]>(queryKeys.leagues(userId))
+    if (
+      id !== null &&
+      selected.current === id &&
+      currentLeagues !== undefined &&
+      !currentLeagues.some((item) => item.id === id)
+    ) {
+      client.removeQueries({ queryKey: queryKeys.draft(userId, id), exact: true })
+      return
+    }
+    await client.invalidateQueries({ queryKey: queryKeys.draft(userId, id), exact: true })
   }
   const mutate = async (operation: () => Promise<unknown>) => {
     if (lock.current || !ownsAccount()) return false

@@ -131,6 +131,28 @@ describe('backend API contract', () => {
     ])
   })
 
+  it('deletes a league with its revision and session CSRF token', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(json(session))
+      .mockResolvedValueOnce(json({ result: null }))
+    vi.stubGlobal('fetch', fetch)
+    const { api } = await import('./api')
+    const input = { p_league: 3, p_revision: 4 }
+
+    expect(await api.deleteLeague(input)).toEqual({ result: null })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch.mock.calls[1]).toEqual([
+      '/api/rpc/delete_league',
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrf_token },
+        body: JSON.stringify(input),
+      },
+    ])
+  })
+
   it.each([
     ['stale_revision', 409],
     ['invalid_team_metadata', 400],

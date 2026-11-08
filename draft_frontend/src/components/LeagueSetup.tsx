@@ -99,6 +99,58 @@ function LeagueSettings({ snapshot, busy, onMutation }: SettingsProps) {
   )
 }
 
+function DeleteLeagueControl({ snapshot, busy, onMutation }: SettingsProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const remove = () => {
+    if (busy) return
+    void onMutation(() =>
+      api.deleteLeague({
+        p_league: snapshot.league_id,
+        p_revision: snapshot.revision,
+      }),
+    )
+  }
+
+  return (
+    <div className="league-danger-zone">
+      {!confirmDelete ? (
+        <div className="form-actions">
+          <button
+            type="button"
+            className="button danger"
+            disabled={busy}
+            onClick={() => setConfirmDelete(true)}
+          >
+            <Trash2 size={16} aria-hidden="true" />
+            Delete league
+          </button>
+        </div>
+      ) : (
+        <div className="confirm-removal" role="alert">
+          <p>
+            Delete <strong>{snapshot.league.name}</strong>? This league will be removed for all
+            participants.
+          </p>
+          <div className="form-actions">
+            <button type="button" className="button danger" disabled={busy} onClick={remove}>
+              Delete league
+            </button>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy}
+              onClick={() => setConfirmDelete(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface TeamEditorProps {
   team?: Team
   snapshot: LeagueSnapshot
@@ -386,6 +438,7 @@ export function LeagueSetup({
 }: LeagueSetupProps) {
   const canConfigure = snapshot.actions.some((action) => action.kind === 'configure')
   const league = snapshot.league
+  const isCommissioner = league.commissioner_user_id === userId
   const orderKey = snapshot.teams.map((team) => `${team.id}:${team.draft_position}`).join(',')
   const userNames = new Map(users.map((user) => [user.id, user.display_name]))
   const ownTeam = snapshot.teams.find((team) => team.manager_user_id === userId)
@@ -450,6 +503,14 @@ export function LeagueSetup({
               <dd>{league.pick_seconds} seconds</dd>
             </div>
           </dl>
+          {isCommissioner && (
+            <DeleteLeagueControl
+              key={`delete:${league.id}`}
+              snapshot={snapshot}
+              busy={busy}
+              onMutation={onMutation}
+            />
+          )}
         </section>
         <section className="card" aria-labelledby="league-teams-heading">
           <div className="section-title">
@@ -513,6 +574,12 @@ export function LeagueSetup({
           <p className="muted">Settings can be changed until the draft begins.</p>
           <LeagueSettings
             key={`${league.id}:${league.name}:${league.min_roster_size ?? league.roster_size}:${league.roster_size}:${league.pick_seconds}`}
+            snapshot={snapshot}
+            busy={busy}
+            onMutation={onMutation}
+          />
+          <DeleteLeagueControl
+            key={`delete:${league.id}`}
             snapshot={snapshot}
             busy={busy}
             onMutation={onMutation}

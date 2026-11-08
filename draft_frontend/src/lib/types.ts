@@ -70,6 +70,7 @@ export interface League {
   created_at: string
   started_at: string | null
   turn_started_at: string | null
+  deleted_at?: string | null
 }
 
 export type DraftStatus = 'setup' | 'drafting' | 'completed'

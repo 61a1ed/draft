@@ -2049,6 +2049,11 @@ main {
   padding: 20px 0;
   border-top: 1px solid light-dark(#eee5f5, #392748);
 }
+.league-danger-zone {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid light-dark(#eee5f5, #392748);
+}
 .team-editor-title {
   display: flex;
   align-items: center;

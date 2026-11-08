@@ -146,7 +146,9 @@ class Database:
                 coalesce((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.match_id)
                     FROM dl.match_disposition d JOIN matches m ON m.id = d.match_id),
                     '[]'::jsonb) AS dispositions
-            FROM dl.tournament t WHERE t.league_id = %s
+            FROM dl.tournament t
+            JOIN dl.league l ON l.id = t.league_id
+            WHERE t.league_id = %s AND l.deleted_at IS NULL
             """,
             (league_id, league_id),
         )
@@ -168,9 +170,10 @@ class Database:
             FROM dl.match m
             JOIN dl.tournament_round r ON r.id = m.round_id
             JOIN dl.tournament_stage s ON s.id = r.stage_id
+            JOIN dl.league l ON l.id = s.tournament_id
             LEFT JOIN dl.match_official_result o ON o.match_id = m.id
             LEFT JOIN dl.match_disposition d ON d.match_id = m.id
-            WHERE m.id = %s
+            WHERE m.id = %s AND l.deleted_at IS NULL
             """,
             (match_id,),
         )
@@ -185,8 +188,10 @@ class Database:
                 coalesce((SELECT jsonb_agg(to_jsonb(w) ORDER BY w.starts_at, w.ends_at, w.id)
                     FROM dl.availability_window w WHERE w.team_id = t.id),
                     '[]'::jsonb) AS windows
-            FROM dl.team t LEFT JOIN dl.team_availability a ON a.team_id = t.id
-            WHERE t.id = %s
+            FROM dl.team t
+            JOIN dl.league l ON l.id = t.league_id
+            LEFT JOIN dl.team_availability a ON a.team_id = t.id
+            WHERE t.id = %s AND l.deleted_at IS NULL
             """,
             (team_id,),
         )

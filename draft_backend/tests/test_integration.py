@@ -640,3 +640,79 @@ def test_roster_bounds_formula_two_budget_protection_and_lock_unlock(client, tes
     counts = {t["id"]: t["pick_count"] for t in final_state["teams"]}
     assert counts == {team_a: 6, team_b: 8}
 
+
+def test_commissioner_can_tombstone_league_and_hides_it_from_reads_and_writes(
+    client, test_database
+):
+    alice = login(client, "alice")
+    bob = next(u for u in client.get("/api/users").json() if u["display_name"] == "Bob")
+    league, team_a, team_b = create_two_team_league(
+        client, test_database, name="Tombstone " + uuid4().hex, roster_size=1, budgets=(100, 100)
+    )
+    rev = snapshot(client, league)["revision"]
+
+    # Non-commissioner (Bob) cannot delete the league.
+    login(client, "bob")
+    assert (
+        rpc(
+            client,
+            "delete_league",
+            expected=409,
+            p_league=league,
+            p_revision=rev,
+        )["detail"]
+        == "action_not_permitted"
+    )
+
+    # Stale revision is rejected for the commissioner.
+    login(client, "alice")
+    assert (
+        rpc(
+            client,
+            "delete_league",
+            expected=409,
+            p_league=league,
+            p_revision=rev + 1,
+        )["detail"]
+        == "stale_revision"
+    )
+
+    # Commissioner deletes the league; row remains in dl.league with deleted_at set.
+    assert rpc(client, "delete_league", p_league=league, p_revision=rev) is None
+    with psycopg.connect(test_database.admin) as conn:
+        row = conn.execute(
+            "SELECT revision, deleted_at IS NOT NULL FROM dl.league WHERE id = %s",
+            (league,),
+        ).fetchone()
+        assert row == (rev + 1, True)
+
+    # Tombstoned league is excluded from list, snapshot, events, availability, and mutations.
+    assert all(row["id"] != league for row in client.get("/api/leagues").json())
+    assert client.get(f"/api/leagues/{league}").status_code == 404
+    assert client.get(f"/api/leagues/{league}/events").status_code == 404
+    assert client.get(f"/api/teams/{team_a}/availability").status_code == 404
+    assert (
+        rpc(
+            client,
+            "delete_league",
+            expected=404,
+            p_league=league,
+            p_revision=rev + 1,
+        )["detail"]
+        == "league_not_found"
+    )
+    assert (
+        rpc(
+            client,
+            "update_league",
+            expected=404,
+            p_league=league,
+            p_revision=rev + 1,
+            p_name="Ghost",
+            p_roster_size=1,
+            p_pick_seconds=60,
+        )["detail"]
+        == "league_not_found"
+    )
+
+

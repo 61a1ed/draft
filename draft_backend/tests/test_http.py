@@ -235,7 +235,7 @@ def test_public_reads_use_optional_session_identity(application, path):
         if path == "/api/leagues":
             assert (
                 db.read.await_args.args[1]
-                == "SELECT * FROM dl.league l ORDER BY l.id"
+                == "SELECT * FROM dl.league l WHERE l.deleted_at IS NULL ORDER BY l.id"
             )
         login = client.post(
             "/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"}
@@ -277,6 +277,26 @@ def test_csrf_and_origin_protect_writes_and_logout(application):
         assert client.get("/api/leagues").status_code == 200
 
 
+def test_delete_league_rpc_contract(application):
+    app, db = application
+    with TestClient(app) as client:
+        path = "/api/rpc/delete_league"
+        data = {"p_league": 2, "p_revision": 3}
+        assert client.post(path, json=data).status_code == 401
+        login = client.post(
+            "/auth/test", json={"username": "alice"}, headers={"X-Test-Login": "1"}
+        ).json()
+        headers = {"X-CSRF-Token": login["csrf_token"]}
+        assert client.post(path, json={**data, "extra": 1}, headers=headers).status_code == 422
+        db.write.assert_not_awaited()
+        response = client.post(path, json=data, headers=headers)
+        assert response.status_code == 200
+        assert response.json() == {"result": None}
+        db.write.assert_awaited_once_with(
+            1, "SELECT dl.delete_league(%s, %s) AS result", (2, 3)
+        )
+
+
 def test_startup_refuses_test_login_on_an_unmarked_database(application):
     app, db = application
     db.is_test_database.return_value = False
@@ -303,7 +323,9 @@ def test_draft_events_require_a_session_and_an_existing_league(application, monk
         assert response.status_code == 503
         assert response.json() == {"detail": "database_unavailable"}
         connect.assert_awaited_once()
-        db.read.assert_awaited_with(1, "SELECT id FROM dl.league WHERE id = %s", (8,))
+        db.read.assert_awaited_with(
+            1, "SELECT id FROM dl.league WHERE id = %s AND deleted_at IS NULL", (8,)
+        )
         assert client.get("/api/events").status_code == 404
         for invalid in ("0", "-1", "2147483648", "not-a-number"):
             assert client.get(f"/api/leagues/{invalid}/events").status_code == 422
@@ -320,7 +342,9 @@ def test_stream_capacity_returns_retryable_failure_after_league_validation(appli
         assert response.json() == {"detail": "event_stream_capacity"}
         assert response.headers["retry-after"] == "2"
         assert client.get("/ready").status_code == 200
-        db.read.assert_awaited_once_with(1, "SELECT id FROM dl.league WHERE id = %s", (8,))
+        db.read.assert_awaited_once_with(
+            1, "SELECT id FROM dl.league WHERE id = %s AND deleted_at IS NULL", (8,)
+        )
 
 
 def test_event_channel_comes_only_from_validated_league(application, monkeypatch):
@@ -341,7 +365,9 @@ def test_event_channel_comes_only_from_validated_league(application, monkeypatch
         assert response.text == "event: invalidate\ndata: null\n\n"
         assert conn.execute.await_args.args[0].as_string() == 'LISTEN "dl_draft_8"'
         conn.close.assert_awaited_once()
-        db.read.assert_awaited_once_with(1, "SELECT id FROM dl.league WHERE id = %s", (8,))
+        db.read.assert_awaited_once_with(
+            1, "SELECT id FROM dl.league WHERE id = %s AND deleted_at IS NULL", (8,)
+        )
 
 
 @pytest.mark.parametrize("function", ["add_team", "update_team"])

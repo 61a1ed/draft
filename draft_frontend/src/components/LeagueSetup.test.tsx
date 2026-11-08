@@ -16,6 +16,7 @@ vi.mock('../lib/api', async (importOriginal) => {
       setDraftOrder: vi.fn(),
       addTeam: vi.fn(),
       updateTeam: vi.fn(),
+      deleteLeague: vi.fn(),
     },
   }
 })
@@ -159,6 +160,7 @@ beforeEach(() => {
   vi.mocked(api.setDraftOrder).mockResolvedValue({ result: null })
   vi.mocked(api.addTeam).mockResolvedValue({ result: 3 })
   vi.mocked(api.updateTeam).mockResolvedValue({ result: null })
+  vi.mocked(api.deleteLeague).mockResolvedValue({ result: null })
 })
 
 afterEach(async () => {
@@ -326,6 +328,32 @@ describe('team setup in League settings', () => {
     await render()
     expect(own().findAllByType('form')).toHaveLength(0)
     expect(text(own())).toContain('locked once the draft begins')
+    expect(renderer!.root.findAllByType('button').map(text)).not.toContain('Delete league')
+  })
+
+  it('lets only the commissioner delete a league after confirmation in setup or active draft', async () => {
+    commissioner()
+    await render()
+    await click(button('Delete league'))
+    expect(text(renderer!.root)).toContain('Delete Test league?')
+    await click(button('Cancel'))
+    expect(api.deleteLeague).not.toHaveBeenCalled()
+
+    await click(button('Delete league'))
+    await click(button('Delete league'))
+    expect(api.deleteLeague).toHaveBeenCalledWith({ p_league: 7, p_revision: 5 })
+
+    // Commissioner can also delete once the draft has started (when canConfigure is false).
+    props.snapshot = {
+      ...props.snapshot,
+      revision: 8,
+      state: { ...props.snapshot.state, status: 'drafting' },
+      actions: [],
+    }
+    await render()
+    await click(button('Delete league'))
+    await click(button('Delete league'))
+    expect(api.deleteLeague).toHaveBeenLastCalledWith({ p_league: 7, p_revision: 8 })
   })
 })
 

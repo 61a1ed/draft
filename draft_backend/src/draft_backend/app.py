@@ -425,7 +425,7 @@ def create_app(settings: Settings | None = None):
     async def leagues(user: Reader):
         return await app.state.db.read(
             user,
-            "SELECT * FROM dl.league l ORDER BY l.id",
+            "SELECT * FROM dl.league l WHERE l.deleted_at IS NULL ORDER BY l.id",
         )
 
     async def snapshot(user, league_id):
@@ -474,7 +474,7 @@ def create_app(settings: Settings | None = None):
             user, f"SELECT dl.{function}({placeholders}) AS result", params
         )
         if function in {
-            "update_league", "update_team", "remove_team", "set_draft_order",
+            "update_league", "delete_league", "update_team", "remove_team", "set_draft_order",
             "set_team_metadata", "set_team_roster_lock",
             "rename_favorites_list", "delete_favorites_list", "add_favorites_entry",
             "remove_favorites_entry", "set_favorites_order",
@@ -491,6 +491,10 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/rpc/update_league", tags=["SQL functions"])
     async def update_league(body: UpdateLeague, user: User):
         return await rpc(user, "update_league", body)
+
+    @app.post("/api/rpc/delete_league", tags=["SQL functions"])
+    async def delete_league(body: LeagueRevision, user: User):
+        return await rpc(user, "delete_league", body)
 
     @app.post("/api/rpc/add_team", tags=["SQL functions"])
     async def add_team(body: AddTeam, user: User):
@@ -594,7 +598,9 @@ def create_app(settings: Settings | None = None):
     ):
         # League snapshots are public, but streams still require a valid session and
         # an existing league. Payloads carry no account-specific data or permissions.
-        rows = await app.state.db.read(user, "SELECT id FROM dl.league WHERE id = %s", (league_id,))
+        rows = await app.state.db.read(
+            user, "SELECT id FROM dl.league WHERE id = %s AND deleted_at IS NULL", (league_id,)
+        )
         if not rows:
             raise HTTPException(404, "league_not_found")
         return DraftEventResponse(
