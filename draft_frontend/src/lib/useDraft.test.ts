@@ -86,6 +86,7 @@ let client: ReturnType<typeof createQueryClient>
 let renderer: ReactTestRenderer | null
 let current: ReturnType<typeof useDraft>
 let streams: { leagueId: number; handlers: DraftEventHandlers; stop: ReturnType<typeof vi.fn> }[]
+let storage: Map<string, string>
 function Harness() {
   current = useDraft()
   return null
@@ -107,6 +108,19 @@ async function refreshMembership() {
 beforeEach(() => {
   vi.resetAllMocks()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  storage = new Map()
+  vi.stubGlobal('localStorage', {
+    getItem: vi.fn((key: string) => storage.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      storage.set(key, String(value))
+    }),
+    removeItem: vi.fn((key: string) => {
+      storage.delete(key)
+    }),
+    clear: vi.fn(() => {
+      storage.clear()
+    }),
+  })
   notifyManager.setScheduler(queueMicrotask)
   client = createQueryClient()
   client.setDefaultOptions({
@@ -464,5 +478,40 @@ describe('query-backed draft lifecycle', () => {
     expect(current.mode).toBe('disconnected')
     expect(current.error).toContain('Sign-out could not be confirmed')
     expect(current.snapshot).toBeNull()
+  })
+
+  it('restores the last viewed league from localStorage and updates it on selection or creation', async () => {
+    storage.set('draft-club:last-league:live:42', '8')
+    await mount()
+    expect(current.leagueId).toBe(8)
+    expect(current.snapshot?.league_id).toBe(8)
+    expect(localStorage.getItem).toHaveBeenCalledWith('draft-club:last-league:live:42')
+
+    await act(async () => current.selectLeague(7))
+    expect(current.leagueId).toBe(7)
+    expect(storage.get('draft-club:last-league:live:42')).toBe('7')
+
+    vi.mocked(api.createLeague).mockResolvedValue({ result: 9 })
+    vi.mocked(api.leagues).mockResolvedValue([room().league, room(8).league, room(9).league])
+    await act(async () => {
+      expect(await current.createLeague('Created', 6, 60)).toBe(true)
+    })
+    expect(current.leagueId).toBe(9)
+    expect(storage.get('draft-club:last-league:live:42')).toBe('9')
+  })
+
+  it('falls back to the first league when the saved league is missing or invalid and scopes by account', async () => {
+    storage.set('draft-club:last-league:live:42', '999')
+    storage.set('draft-club:last-league:live:43', '8')
+    await mount()
+    expect(current.leagueId).toBe(7)
+    expect(storage.get('draft-club:last-league:live:42')).toBe('7')
+
+    vi.mocked(api.leagues).mockResolvedValue([room(7).league, room(8).league])
+    await act(async () =>
+      current.connect({ ...session, user: { id: 43, display_name: 'Second manager' } }),
+    )
+    expect(current.leagueId).toBe(8)
+    expect(current.snapshot?.league_id).toBe(8)
   })
 })

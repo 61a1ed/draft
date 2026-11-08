@@ -4,6 +4,28 @@ import { api, ApiError, errorMessage, subscribeDraft } from './api'
 import { QUERY_POLL_INTERVAL, queryKeys } from './queryClient'
 import type { ConnectionStatus, League, LeagueSnapshot, Session } from './types'
 
+function readSavedLeagueId(userId: number | null): number | null {
+  if (userId === null) return null
+  try {
+    const raw = localStorage.getItem(`draft-club:last-league:live:${userId}`)
+    if (!raw) return null
+    const parsed = Number(raw)
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function writeSavedLeagueId(userId: number | null, leagueId: number | null) {
+  if (userId === null) return
+  try {
+    if (leagueId === null) localStorage.removeItem(`draft-club:last-league:live:${userId}`)
+    else localStorage.setItem(`draft-club:last-league:live:${userId}`, String(leagueId))
+  } catch {
+    /* Browser storage may be unavailable. */
+  }
+}
+
 export function useDraft() {
   const client = useQueryClient()
   const [authEnabled, setAuthEnabled] = useState(true)
@@ -182,6 +204,11 @@ export function useDraft() {
         client.removeQueries({ queryKey: queryKeys.account(oldUser) })
         client.getMutationCache().clear()
         knownLeagues.current = null
+        if (userId !== null) {
+          selectionGeneration.current++
+          selected.current = null
+          setSelectedId(null)
+        }
       }
     }
   }, [client, userId])
@@ -202,10 +229,16 @@ export function useDraft() {
     knownLeagues.current = list
     if (!list.some((item) => item.id === selected.current)) {
       selectionGeneration.current++
-      selected.current = list[0]?.id ?? null
-      setSelectedId(selected.current)
+      const savedId = readSavedLeagueId(userId)
+      const nextId =
+        savedId !== null && list.some((item) => item.id === savedId)
+          ? savedId
+          : (list[0]?.id ?? null)
+      selected.current = nextId
+      setSelectedId(nextId)
+      writeSavedLeagueId(userId, nextId)
     }
-  }, [enabled, leaguesQuery.data])
+  }, [enabled, leaguesQuery.data, userId])
 
   useEffect(() => {
     if (!snapshot) return
@@ -320,6 +353,7 @@ export function useDraft() {
     void client.cancelQueries({ queryKey: queryKeys.draft(userId, selected.current), exact: true })
     selected.current = id
     setSelectedId(id)
+    writeSavedLeagueId(userId, id)
     lock.current = null
     setBusy(false)
     setError('')
@@ -451,6 +485,7 @@ export function useDraft() {
       if (selectionGeneration.current === selection) {
         selected.current = result.result
         setSelectedId(result.result)
+        writeSavedLeagueId(userId, result.result)
       }
     })
     return created && success
